@@ -1,0 +1,11 @@
+vendor/
+*.exe
+*.DS_Store
+build/
+cmd/cmd
+*.log
+tmp/
+.env
+docs/client-typescript
+docs/
+.npm-temp

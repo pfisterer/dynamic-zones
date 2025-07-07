@@ -1,0 +1,41 @@
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Zones DNS API</title>
+    <meta name="color-scheme" content="light dark">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.red.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>
+            <h1>Dynamic Zones DNS API</h1>
+        </h1>
+
+        <h2>User access</h2>
+        <p>
+            The current simple web client is available <a href="admin.html">here</a>.
+        </p>
+
+
+        <h2>API Access</h2>
+        <p>
+            Please visit the <a href="swagger-index.html">Swagger UI</a> to view the API documentation.
+        </p>
+        <p>
+            Use can use <a href="../client/client.gen.js">this JS client</a> or the <a
+                href="../client/client.gen.mjs">module
+                variant</a> to access the API.
+        </p>
+        <p>
+            The API endpoint for version 1 of the API is available at <a id="endpoint" href="../v1/">v1/</a>.
+        </p>
+        <script>
+            document.getElementById("endpoint").innerText = window.location.protocol + "//" + window.location.host + "/v1/";
+        </script>
+    </div>
+</body>
+
+</html>
