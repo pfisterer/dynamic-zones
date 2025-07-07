@@ -50,7 +50,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 		// Verify that DNS record matches the expected address
 		if len(ips) > 0 && thisDnsAddress.Equal(ips[0]) {
-			log.Info("DNS address '%s' matches expected address. No update needed.", thisDnsAddress)
+			log.Infof("DNS address '%s' matches expected address. No update needed.", thisDnsAddress)
 		} else {
 			// If the DNS record does not match, delete the existing record and add the new one
 			log.Infof("DNS address does not match expected address (%s). Updating upstream DNS record...", thisDnsAddress)
