@@ -125,7 +125,7 @@ You’ll need to configure:
 
 ## License
 
-MIT License. See `LICENSE` file for details.
+ Apache License Version 2.0. See `LICENSE` file for details.
 
 ## Contributing
 
