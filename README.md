@@ -17,10 +17,10 @@ The API enables:
 
 Before you begin, ensure the following tools and services are installed and configured:
 
-- **Go (Golang)**: Required for compiling and running the application.
+- **[Go (Golang)](https://go.dev/)**: Required for compiling and running the application.
 - **[Air](https://github.com/cosmtrek/air)** (live reload for Go apps, optional but recommended): For hot-reloading during development.
 - **[PowerDNS](https://www.powerdns.com/)**: Either running locally or in a container, with the [API enabled](https://doc.powerdns.com/authoritative/http-api/).
-- [Node.js and npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) (for building the API documentation and JavaScript client)
+- **[Node.js and npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)**: For building the API documentation and JavaScript client
 
 ### Development Setup
 
