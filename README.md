@@ -11,7 +11,6 @@ The API enables:
 - **PowerDNS integration**: The service configures a [PowerDNS](https://doc.powerdns.com/) server through its API, enabling read and write access to managed zones.
 - **Upstream DNS updates**: To integrate the configured PowerDNS server into the global DNS infrastructure, an upstream DNS server must be configured to delegate the managed zones. Alternatively, this project can itself update an A record in the upstream DNS via RFC2136.
 
-## Usage
 
 ### Prerequisites
 
@@ -83,10 +82,29 @@ Before you begin, ensure the following tools and services are installed and conf
     make
     ./build/dynamic-zones-api
     ```
+## Usage
 
 ### Docker-based Setup
 
-#### Build and Run using Docker
+#### Run using Docker
+
+There are pre-built Docker images [available on GitHub Container Registry](https://github.com/pfisterer/dynamic-zones/pkgs/container/dynamic-zones). Check there for available tags or use the `latest` tag. Replace `KEY=VALUE` with the necessary environment variables as described in the [Configuration](#configuration) section.
+
+You can then run it with:
+
+```bash
+docker run -d -p 8082:8082 -e KEY=VALUE \
+    ghcr.io/pfisterer/dynamic-zones:latest
+```
+
+ or put the variables in a `.env` file and use `--env-file .env`.
+
+```bash
+docker run -d -p 8082:8082 --env-file .env \
+    ghcr.io/pfisterer/dynamic-zones:latest
+```
+
+#### Build Local Docker Image
 
 To build and run the API using Docker, you can use the provided `Makefile`:
 
@@ -94,24 +112,9 @@ To build and run the API using Docker, you can use the provided `Makefile`:
 make docker-build
 ```
 
-This will create a Docker image for the API service. You can then run it with:
+This will create a Docker image for the API service. 
 
-```bash
-docker run -d \
-    -p 8082:8082 \
-    -e KEY=VALUE \
-```
-
-Replace `KEY=VALUE` with the necessary environment variables as described in the [Configuration](#configuration) section or put the variables in a `.env` file and use `--env-file .env`.
-
-```bash
-docker run -d \
-    -p 8082:8082 \
-    --env-file .env \
-    dynamic-zones-api:latest
-```
-
-#### Build and push multi-architecture Docker image
+#### Build and Push multi-architecture Docker image
 
 To build and push a multi-architecture Docker image, you can use the `Makefile`:
 
@@ -119,7 +122,7 @@ To build and push a multi-architecture Docker image, you can use the `Makefile`:
 make multi-arch-build
 ```
 
-### Configuration
+## Configuration Settings
 
 Configuration is done through environment variables. For a full list of available configuration options, refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
 
