@@ -178,6 +178,11 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Set CORS configuration
 	router.Use(cors.Default())
 
+	if app.Config.DevMode {
+		app.Log.Debugf("Completely disabling caching in development mode.")
+		router.Use(disableCachingMiddleware())
+	}
+
 	// Direct Gin's standard and error output streams to our custom Zap writer
 	ginLogWriter := &helper.ZapWriter{SugarLogger: app.Log, Level: app.Log.Level()}
 	gin.DefaultWriter = ginLogWriter
@@ -190,7 +195,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	})
 
 	router.Static("/ui", "./web-ui")
-	router.Static("/client", "./docs/client-dist")
+	router.Static("/client/dist", "./docs/client-dist")
+	router.Static("/client/typescript", "./docs/client-typescript")
 
 	// Swagger UI
 	router.StaticFile("/swagger.json", "./docs/swagger.json")
@@ -274,4 +280,17 @@ func LogAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	}
 
 	log.Infof("app.LogAppConfig: Application configuration: %s", appConfigJson)
+}
+
+func disableCachingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Apply the Cache-Control header to the static files
+		//if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		//}
+		// Continue to the next middleware or handler
+		c.Next()
+	}
 }

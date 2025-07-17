@@ -1,6 +1,6 @@
 
 import { UserManager } from 'oidc';
-import { deleteV1ZonesByZone, getV1Zones, getV1ZonesByZone, postV1ZonesByZone } from '../client/sdk.gen.mjs';
+import { deleteV1ZonesByZone, getV1Zones, getV1ZonesByZone, postV1ZonesByZone } from 'dynamic-zones';
 import { render, createContext } from 'preact';
 import { html } from 'htm/preact';
 import { useState, useEffect, useContext } from 'preact/hooks';
@@ -350,7 +350,7 @@ function ListZones() {
     }, [reloadTrigger, user])
 
     if (loading)
-        return html`<p>Loading posts...</p> `;
+        return html`<p>Loading zones...</p> `;
 
     if (error)
         return html`<a onClick=${handleReloadClick}>Retry Load</a>`;

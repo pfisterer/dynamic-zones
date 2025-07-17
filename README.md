@@ -84,6 +84,41 @@ Before you begin, ensure the following tools and services are installed and conf
     ./build/dynamic-zones-api
     ```
 
+### Docker-based Setup
+
+#### Build and Run using Docker
+
+To build and run the API using Docker, you can use the provided `Makefile`:
+
+```bash
+make docker-build
+```
+
+This will create a Docker image for the API service. You can then run it with:
+
+```bash
+docker run -d \
+    -p 8082:8082 \
+    -e KEY=VALUE \
+```
+
+Replace `KEY=VALUE` with the necessary environment variables as described in the [Configuration](#configuration) section or put the variables in a `.env` file and use `--env-file .env`.
+
+```bash
+docker run -d \
+    -p 8082:8082 \
+    --env-file .env \
+    dynamic-zones-api:latest
+```
+
+#### Build and push multi-architecture Docker image
+
+To build and push a multi-architecture Docker image, you can use the `Makefile`:
+
+```bash
+make multi-arch-build
+```
+
 ### Configuration
 
 Configuration is done through environment variables. For a full list of available configuration options, refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
