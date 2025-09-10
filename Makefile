@@ -11,31 +11,22 @@ CLIENT_DIR := $(DOC_DIR)/client-typescript
 CLIENT_TS := $(CLIENT_DIR)/client.gen.ts
 CLIENT_SDK := $(CLIENT_DIR)/sdk.gen.ts
 DIST_DIR := $(DOC_DIR)/client-dist
-NPM_TEMP := $(PWD)/.npm-temp
 
 # Docker Image details
 DOCKER_REPO ?= farberg/$(PROJECT_NAME)
 DOCKER_TAG ?= latest
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7
 
-# Macro to install npm packages temporarily
-define npm_install_temp
-	@echo "⬇️ Installing npm packages temporarily: $(1)..."; \
-	mkdir -p "$(NPM_TEMP)"; \
-	npm install --no-save --prefix "$(NPM_TEMP)" $(1) >/dev/null
-endef
-
-# Shortcut to run local temporary npm tools
-NPM_RUN = npx --no-install --prefix $(NPM_TEMP)
-
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help
+.PHONY: all build clean doc convert client bundle check swag run help install-npm
 
 all: bundle build
 
-check-npm-tools:
-	$(call npm_install_temp,swagger2openapi @hey-api/openapi-ts esbuild typescript)
+install-npm:
+	@echo "⬇️ Installing npm dependencies..."
+	@npm install --silent
+	@echo "✅ npm dependencies installed"
 
 check-swag:
 	@command -v swag >/dev/null 2>&1 || go install github.com/swaggo/swag/cmd/swag@latest
@@ -45,26 +36,27 @@ doc: check-swag
 	@set -e; swag init -g $(SRC_DIR)/main.go -o $(DOC_DIR)
 	@echo "✅ swagger.json generated"
 
-convert: doc check-npm-tools
+convert: doc install-npm
 	@echo "🔁 Converting Swagger 2 → OpenAPI 3..."
 	@set -e; \
-	$(NPM_RUN) swagger2openapi $(SWAGGER_JSON) \
+	npx swagger2openapi $(SWAGGER_JSON) \
 		--outfile $(OPENAPI_YAML) --yaml=false --patch --warnOnly
 	@echo "✅ OpenAPI v3 spec: $(OPENAPI_YAML)"
 
-client: convert check-npm-tools
+client: convert install-npm
 	@echo "📦 Generating TypeScript client..."
 	@mkdir -p $(CLIENT_DIR)
 	@set -e; \
-	$(NPM_RUN) openapi-ts -i "$(OPENAPI_YAML)" -o "$(CLIENT_DIR)" -c @hey-api/client-fetch
-	@echo "✅ TS client at $(CLIENT_TS)"
+	npx openapi-ts -i "file://$(abspath $(OPENAPI_YAML))" -o "$(CLIENT_DIR)" -c @hey-api/client-fetch
+	@echo "✅ TS client generated in $(CLIENT_DIR)"
 
-bundle: client check-npm-tools
+
+bundle: client install-npm
 	@echo "📦 Bundling into a single JS file with esbuild..."
 	@mkdir -p $(DIST_DIR)
 	set -e; \
-	$(NPM_RUN) esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=esm --out-extension:.js=".mjs" --sourcemap
-	$(NPM_RUN) esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=cjs --sourcemap
+	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=esm --out-extension:.js=".mjs" --sourcemap
+	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=cjs --sourcemap
 	@echo "✅ Bundled JS in $(DIST_DIR)/"
 
 build: check-modules
@@ -78,7 +70,7 @@ check-modules:
 
 clean:
 	@echo "🧹 Cleaning directories..."
-	@rm -rf $(BUILD_DIR) $(DOC_DIR) $(CLIENT_DIR) $(NPM_TEMP)
+	@rm -rf $(BUILD_DIR) $(DOC_DIR)
 	@echo "✅ Cleanup complete"
 
 run: build
@@ -105,10 +97,10 @@ multi-arch-build: docker-login
 	@echo "✅ Multi-architecture image $(DOCKER_REPO):$(DOCKER_TAG) built and pushed."
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"
 
-
 help:
 	@echo "Usage: make <target>"
 	@echo "  all       → Build and generate everything"
+	@echo "  install-npm → Install npm dependencies from package.json"
 	@echo "  doc       → Generate swagger.json"
 	@echo "  convert   → Convert swagger.json → openapi.json"
 	@echo "  client    → Generate TypeScript client"

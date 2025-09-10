@@ -1,0 +1,27 @@
+{
+  "name": "dynamic-zones",
+  "version": "1.0.0",
+  "description": "This project provides an API service that allows users to dynamically create and manage DNS zones. It is particularly useful in automated environments such as Kubernetes.",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.82.5",
+    "esbuild": "^0.25.9",
+    "swagger2openapi": "^7.0.8",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.3.1",
+    "htm": "^3.1.1",
+    "oidc-client-ts": "^3.3.0",
+    "preact": "^10.27.1"
+  }
+}
