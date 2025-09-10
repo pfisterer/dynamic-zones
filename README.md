@@ -159,7 +159,12 @@ You’ll need to configure:
 | `DYNAMIC_ZONES_UPSTREAM_DNS_TTL`             | `900`                        | TTL (Time To Live) in seconds for upstream DNS records          |
 | `DYNAMIC_ZONES_UPSTREAM_DNS_UPDATE_INTERVAL` | `3600`                       | How often (in seconds) the upstream record is updated           |
 
+## Releasing a New Version
 
+To release a new version of the API, follow these steps:
+- Update the file `VERSION` with the new version number.
+- Commit and push the changes to Github.
+- Github Actions will automatically build the new version and create a release.
 
 ## License
 

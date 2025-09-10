@@ -76,9 +76,9 @@ func Rfc2136DeleteARecord(tsigName, tsigAlg, tsigSecret, serverAddr, zoneName, r
 	rr := &dns.A{
 		Hdr: dns.RR_Header{
 			Name:   dns.Fqdn(recordName),
-			Rrtype: dns.TypeANY,  // TypeANY indicates "delete all records of this type"
-			Class:  dns.ClassANY, // ClassANY indicates "delete all records of this type"
-			Ttl:    0,            // TTL 0 is for deletion
+			Rrtype: dns.TypeANY, // TypeANY indicates "delete all records of this type"
+			Class:  dns.ClassINET,
+			Ttl:    0, // TTL 0 is for deletion
 		},
 	}
 	m.RemoveRRset([]dns.RR{rr})
