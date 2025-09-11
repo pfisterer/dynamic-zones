@@ -4,6 +4,7 @@ SRC_DIR := ./cmd
 DOC_DIR := docs
 BUILD_DIR := build
 GO_MOD := go.mod
+WEB_UI_DIR := web-ui
 
 SWAGGER_JSON := $(DOC_DIR)/swagger.json
 OPENAPI_YAML := $(DOC_DIR)/openapi3.json
@@ -19,9 +20,9 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm
+.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps
 
-all: bundle build
+all: bundle build bundle-deps
 
 install-npm:
 	@echo "⬇️ Installing npm dependencies..."
@@ -50,7 +51,6 @@ client: convert install-npm
 	npx openapi-ts -i "file://$(abspath $(OPENAPI_YAML))" -o "$(CLIENT_DIR)" -c @hey-api/client-fetch
 	@echo "✅ TS client generated in $(CLIENT_DIR)"
 
-
 bundle: client install-npm
 	@echo "📦 Bundling into a single JS file with esbuild..."
 	@mkdir -p $(DIST_DIR)
@@ -58,6 +58,12 @@ bundle: client install-npm
 	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=esm --out-extension:.js=".mjs" --sourcemap
 	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=cjs --sourcemap
 	@echo "✅ Bundled JS in $(DIST_DIR)/"
+
+bundle-deps: install-npm
+	@echo "📦 Bundling web UI dependencies with esbuild..."
+	@mkdir -p $(WEB_UI_DIR)/dist
+	@node esbuild-config.js
+	@echo "✅ Dependencies bundled into $(WEB_UI_DIR)/dist/deps.mjs"
 
 build: check-modules
 	@echo "🔨 Building Go binary..."
@@ -83,7 +89,7 @@ docker-login:
 
 docker-build:
 	@echo "🏗️ Building Docker image $(DOCKER_REPO):$(DOCKER_TAG)..."
-	docker build -t "$(DOCKER_REPO):$(DOCKER_TAG)" .
+	docker build --progress=plain -t "$(DOCKER_REPO):$(DOCKER_TAG)" .
 	@echo "✅ Docker image $(DOCKER_REPO):$(DOCKER_TAG) built."
 	@echo "You can push it with: docker push $(DOCKER_REPO):$(DOCKER_TAG)"
 
@@ -105,6 +111,7 @@ help:
 	@echo "  convert   → Convert swagger.json → openapi.json"
 	@echo "  client    → Generate TypeScript client"
 	@echo "  bundle    → Bundle client into JS"
+	@echo "  bundle-deps → Bundle web UI dependencies"
 	@echo "  build     → Compile Go binary"
 	@echo "  clean     → Remove build artifacts"
 	@echo "  run       → Run Go app"

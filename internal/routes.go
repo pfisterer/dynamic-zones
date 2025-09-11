@@ -18,7 +18,12 @@ func CreateApiV1Group(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 
 // AvailableZonesResponse defines the structure of the response for the /v1/zones/ endpoint.
 type AvailableZonesResponse struct {
-	Zones []string `json:"zones"`
+	Zones []ZoneStatus `json:"zones"`
+}
+
+type ZoneStatus struct {
+	Name   string `json:"name"`
+	Exists bool   `json:"exists"`
 }
 
 // getZones returns a list of available DNS zones for the authenticated user.
@@ -36,7 +41,15 @@ func getZones(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("routes.getZones: Called with user: ", user.PreferredUsername)
-		zones := AvailableZonesResponse{Zones: app.Uzp.GetUserZones(user)}
+		userZones := app.Uzp.GetUserZones(user)
+		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
+
+		for _, zone := range userZones {
+			_, _, err := app.GetZone(c.Request.Context(), user.PreferredUsername, zone)
+			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone, Exists: err == nil})
+		}
+
+		zones := AvailableZonesResponse{Zones: zonesWithStatus}
 
 		c.JSON(http.StatusOK, zones)
 	}
