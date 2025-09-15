@@ -124,9 +124,8 @@ function Header(props) {
                 <${Navbar.Item}>
                     ${props.title}
                 <//>
-                <${Navbar.Burger} />
             <//>
-
+                
             <${Navbar.Container} align="right">
                 <${Navbar.Item}>
                     <${LoginLogoutButton} />
@@ -415,12 +414,18 @@ function Main() {
     const { user, login } = useAuth()
 
     if (!user) {
-        return html`<p>Please <a onClick="${login}">log in</a> to access your data.</p>`;
+        return html`
+            <${Section}>
+                <${Container}>
+                    <div class="box">Please <a onClick="${login}">log in</a> to access your data.</div>
+                <//>
+            <//>
+        `
     }
 
     return html`
         <${Container}>
-            <${ListZones} />
+            <${ListZones}}
         <//>`
 }
 
