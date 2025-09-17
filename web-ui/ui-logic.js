@@ -344,7 +344,8 @@ function ActiveDomain(props) {
 
         ${activeTab === "Manage" && html`
                 <div class="panel-block">
-                    <${Button} onClick=${() => { deleteZone(user, zone.zone); props.onChange(); }}> Delete<//>
+                    <${Button} onClick=${async () => { await deleteZone(user, zone.zone); props.onChange(); }}> 
+                        Delete<//>
                 </div>`} 
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone} />`}
