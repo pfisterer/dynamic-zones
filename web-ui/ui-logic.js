@@ -299,12 +299,14 @@ function ActiveDomain(props) {
     const { user } = useAuth()
     const tabs = ["Manage", "Keys", "DNS Update Command", "External DNS Config"]
     const [activeTab, setActiveTab] = useState(tabs[0])
-    const [loading, setLoading] = useState(true)
+    const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+    const [message, setMessage] = useState(null)
     const [zone, setZone] = useState(null)
 
     useEffect(async () => {
         setLoading(true)
+        setMessage("Loading zone details...")
         setError(null)
         try {
             const res = await getV1ZonesByZone({ path: { zone: props.zone }, headers: authHeaders(user) })
@@ -325,15 +327,26 @@ function ActiveDomain(props) {
     }, [user, props.zone])
 
     if (loading)
-        return html`<p>Loading zone details...</p> `;
+        return html`<p>${message}</p> `;
 
     if (error)
-        return html`<p>Error loading zone details: ${error.message}</p>`;
+        return html`<p>An error occured: ${error.message}</p>`;
 
-    async function deleteZone(user, zone) {
-        const res = await deleteV1ZonesByZone({ path: { zone }, headers: authHeaders(user) })
-        if (res.response.status !== 204) {
-            throw new Error(`Failed to delete zone ${zone}: ${res.response.statusText}`);
+    async function handleDeleteClick() {
+        try {
+            setMessage("Deleting zone...")
+            setLoading(true)
+
+            const res = await deleteV1ZonesByZone({ path: { zone: zone.zone }, headers: authHeaders(user) })
+            if (res.response.status !== 204) {
+                throw new Error(`Failed to delete zone ${zone.zone}: ${res.response.statusText}`);
+            }
+
+            props.onChange();
+        } catch (e) {
+            setError(e)
+        } finally {
+            setLoading(false)
         }
     }
 
@@ -344,8 +357,7 @@ function ActiveDomain(props) {
 
         ${activeTab === "Manage" && html`
                 <div class="panel-block">
-                    <${Button} onClick=${async () => { await deleteZone(user, zone.zone); props.onChange(); }}> 
-                        Delete<//>
+                    <${Button} onClick=${handleDeleteClick} color="danger"> Delete<//>
                 </div>`} 
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone} />`}
