@@ -11,9 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # Needed for pushing to GitHub Packages (GHCR) or other registries
+      packages: write
 
     steps:
+      - uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          older-than: 1 year
+          keep-n-tagged: 5
+          delete-untagged: true
+          delete-ghost-images: true
+          delete-orphaned-images: true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
