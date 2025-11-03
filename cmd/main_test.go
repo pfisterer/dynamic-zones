@@ -23,10 +23,10 @@ func TestRoundtrip(t *testing.T) {
 	// Run the tests
 	testGetIndexPage(t)
 	available_zones := testGetAvailableZones(t)
-	testCreateZone(t, available_zones[0])
-	zoneResponse := testGetZone(t, available_zones[0])
+	testCreateZone(t, available_zones[0].Name)
+	zoneResponse := testGetZone(t, available_zones[0].Name)
 	testDnsUpdate(t, zoneResponse, pdns_docker.GetExternalDnsPort())
-	testDeleteZone(t, available_zones[0])
+	testDeleteZone(t, available_zones[0].Name)
 }
 
 func testGetIndexPage(t *testing.T) {
@@ -43,7 +43,7 @@ func testGetIndexPage(t *testing.T) {
 }
 
 // Get the available zones
-func testGetAvailableZones(t *testing.T) []string {
+func testGetAvailableZones(t *testing.T) []app.ZoneStatus {
 	// Send a GET request to the available zones endpoint
 	resp, err := http.Get(app.GetBaseURLForTests() + "/v1/zones/")
 	if err != nil {
