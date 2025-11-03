@@ -1,6 +1,5 @@
 import { deleteV1ZonesByZone, getV1Zones, getV1ZonesByZone, postV1ZonesByZone } from 'dynamic-zones';
-// Import from the bundled dependencies file
-import { render, createContext, html, useState, useEffect, useContext, UserManager, Button, Navbar, Container, Panel, Section, Heading, Block } from './dist/deps.mjs';
+import { render, createContext, html, useState, useEffect, useContext, UserManager } from './dist/deps.mjs';
 
 // DNS Server Configuration
 const DnsConfigContext = createContext(null);
@@ -108,30 +107,31 @@ function LoginLogoutButton() {
     const { user, login, logout } = useAuth()
 
     if (user) {
-        return html`Welcome ${user.profile.name}! <${Button} onClick=${logout}>Logout<//>`
+        return html`Welcome ${user.profile.name}! <button class="button" onClick=${logout}>Logout</button>`
     } else {
-        return html`<${Button} onClick=${login}>Login<//>`
+        return html`<button class="button" onClick=${login}>Login</button>`
     }
 }
 
 function Header(props) {
     return html`
-        <${Navbar} class="has-background-white-bis has-text-primary-invert " hoverable="false">    
-            <${Navbar.Brand}>
+        <nav class="navbar is-fixed-top" role="navigation" class="has-background-white-bis has-text-primary-invert" hoverable="false">
+                <div class="navbar-brand">
                 <a class="navbar-item" href="#">
-                    <img src="img/DHBW-Logo.svg" style="height: 160px;" />
+                    <img src="img/DHBW-Logo.svg" style="height: 2em;" />
                 </a>
-                <${Navbar.Item}>
+
+                <div class="navbar-item">
                     ${props.title}
-                <//>
-            <//>
+                </div>
                 
-            <${Navbar.Container} align="right">
-                <${Navbar.Item}>
-                    <${LoginLogoutButton} />
-                <//>
-            <//>
-        <//>
+                <div class="navbar-end">
+                    <div class="navbar-item">
+                        <${LoginLogoutButton} />
+                    </div>
+                </div>
+            </div>
+        </nav>
   `
 }
 
@@ -146,14 +146,14 @@ function ActivateZone(props) {
 
     if (error)
         return html`
-            <${Block}>
+            <div class="block">
             Sorry, there was an error activating the zone: 
             <pre>${error.message}</pre>
-            <//>
+            </div>
 
-            <${Block}>
-                <${Button} onClick=${() => window.location.reload()}>Please refresh the page<//>.
-            <//>
+            <div class="block">
+                <button class="button" onClick=${() => window.location.reload()}>Please refresh the page</button>.
+            </div>
         `;
 
     async function activate() {
@@ -177,7 +177,7 @@ function ActivateZone(props) {
         }
     }
 
-    return html`<${Button} onClick=${activate}>Activate<//>`;
+    return html`<button class="button" onClick=${activate}>Activate</button>`;
 }
 
 function ExternalDnsConfig(props) {
@@ -357,7 +357,7 @@ function ActiveDomain(props) {
 
         ${activeTab === "Manage" && html`
                 <div class="panel-block">
-                    <${Button} onClick=${handleDeleteClick} color="danger"> Delete<//>
+                    <button class="button is-danger" onClick=${handleDeleteClick}> Delete</button>
                 </div>`} 
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone} />`}
@@ -382,12 +382,13 @@ function AvailableDomain(props) {
 
 function AvailableDomainsList(props) {
     return html`
-        <${Section}>
-            <${Container}>
-                <${Heading}>Domains<//>
+        <section class="mt-3">
+
+            <div class="container">
+                <h1 class="title">Domains</h1>
                 ${props.zones.map(zone => html`<${AvailableDomain} zone=${zone} onChange=${props.onChange} />`)}
-            <//>
-        <//>
+            </div>
+        </section>
     `
 }
 function ListZones() {
@@ -423,23 +424,54 @@ function ListZones() {
     return html`<${AvailableDomainsList} zones=${zones} dnsConfig=${dnsConfig} onChange=${() => setReloadTrigger(!reloadTrigger)}/>`
 }
 
+function Documentation() {
+    const [endpoint, setEndpoint] = useState(null)
+    useEffect(() => setEndpoint(window.location.protocol + "//" + window.location.host + "/v1/"), []);
+
+    return html`
+        <section class="mt-5">
+            <div class="container">
+                <h1 class="title">Documentation</h1>
+                <div class="card">
+                    <header class="card-header">
+                        <p class="card-header-title">API Access</p>
+                    </header>
+                    <div class="card-content">
+                        <div class="content">
+                            The API endpoint for version 1 of the API is available at <a href="${endpoint}">${endpoint}</a>. Please visit the <a href="swagger-index.html">Swagger UI</a> to view the API documentation.
+                
+                        </div>
+                        <div class="content">
+                            Use can use <a href="../client/dist/sdk.gen.js">this JS client</a> or the <a href="../client/dist/sdk.gen.mjs">module variant</a> to access the API.
+            
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    `
+}
+
+
 function Main() {
     const { user, login } = useAuth()
 
     if (!user) {
         return html`
-            <${Section}>
-                <${Container}>
+            <section class="mt-3">
+                <div class="container">
                     <div class="box">Please <a onClick="${login}">log in</a> to access your data.</div>
-                <//>
-            <//>
+                </div>
+            <section>
         `
     }
 
     return html`
-        <${Container}>
-            <${ListZones}}
-        <//>`
+        <div class="container">
+            <${ListZones} />
+            <${Documentation} />
+        </div>`
 }
 
 // App

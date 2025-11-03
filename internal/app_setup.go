@@ -233,8 +233,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 			"auth_provider": "oidc",
 			"issuer_url":    oidcConfig.IssuerURL,
 			"client_id":     oidcConfig.ClientID,
-			"redirect_uri":  fmt.Sprintf("%s/ui/admin.html", app.Config.WebserverBaseUrl),
-			"logout_uri":    fmt.Sprintf("%s/ui/admin.html", app.Config.WebserverBaseUrl),
+			"redirect_uri":  fmt.Sprintf("%s/ui/index.html", app.Config.WebserverBaseUrl),
+			"logout_uri":    fmt.Sprintf("%s/ui/index.html", app.Config.WebserverBaseUrl),
 		}
 
 	default:

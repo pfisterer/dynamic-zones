@@ -20,7 +20,7 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps
+.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build
 
 all: bundle build bundle-deps
 
@@ -82,6 +82,8 @@ clean:
 run: build
 	@echo "🚀 Running the Go app..."
 	@./$(BUILD_DIR)/$(BINARY_NAME)
+
+docker: docker-build docker-login multi-arch-build 
 
 docker-login:
 	@echo "🔑 Logging into Docker Hub (or configured registry)..."

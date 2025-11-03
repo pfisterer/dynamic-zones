@@ -28,6 +28,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 	if c.Server == "" || c.Tsig_Name == "" || c.Tsig_Alg == "" ||
 		c.Tsig_Secret == "" || c.Zone == "" || c.Name == "" || c.Ttl <= 0 {
 		log.Warn("Invalid upstream DNS configuration. Please check your environment variables. Exiting upstream DNS updater.")
+		return
 	}
 
 	// Run periodic DNS update checks
