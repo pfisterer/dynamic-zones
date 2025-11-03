@@ -459,11 +459,9 @@ function Main() {
 
     if (!user) {
         return html`
-            <section class="mt-3">
-                <div class="container">
-                    <div class="box">Please <a onClick="${login}">log in</a> to access your data.</div>
-                </div>
-            <section>
+            <div class="container">
+                <div class="box">Please <a onClick="${login}">log in</a> to access your data.</div>
+            </div>
         `
     }
 

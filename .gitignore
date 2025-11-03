@@ -9,5 +9,5 @@ tmp/
 docs/client-typescript
 docs/
 .npm-temp
-__TODO__.txt
 node_modules/
+__TODO.md
