@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"text/template"
 	"time"
 
+	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/farberg/dynamic-zones/internal/zones"
 	"github.com/gin-gonic/gin"
 )
@@ -24,13 +27,13 @@ func (app *AppData) GetZone(ctx context.Context, username string, zone string) (
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to get zone from storage"},
-			fmt.Errorf("app.getZone: Failed to get zone from storage: %v", err)
+			fmt.Errorf("💥 app.getZone: Failed to get zone from storage: %v", err)
 	}
 
 	if stored_zone == nil {
 		return http.StatusNotFound,
 			gin.H{"error": "Zone does not exist"},
-			fmt.Errorf("app.getZone: Zone %s does not exist", zone)
+			fmt.Errorf("💥 app.getZone: Zone %s does not exist", zone)
 	}
 
 	// Get zone from PowerDNS
@@ -38,11 +41,25 @@ func (app *AppData) GetZone(ctx context.Context, username string, zone string) (
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to get zone from DNS server"},
-			fmt.Errorf("app.getZone: Failed to get zone from PowerDNS: %v", err)
+			fmt.Errorf("💥 app.getZone: Failed to get zone from PowerDNS: %v", err)
+	}
+
+	// Get the external-dns config for the zone
+	externalDNSConfig, err := toExternalDNSConfig(app, pnds_zone)
+	if err != nil {
+		return http.StatusInternalServerError,
+			gin.H{"error": "Failed to get external-dns config"},
+			fmt.Errorf("💥 app.getZone: Failed to get external-dns config: %v", err)
+	}
+
+	// Return the data to the client
+	returnValue := map[string]any{
+		"zoneData":          pnds_zone,
+		"externalDnsConfig": externalDNSConfig,
 	}
 
 	app.Log.Info("app.getZone: returning response: ", pnds_zone)
-	return http.StatusOK, pnds_zone, nil
+	return http.StatusOK, returnValue, nil
 }
 
 func (app *AppData) CreateZone(ctx context.Context, username string, zone string) (statusCode int, message any, err error) {
@@ -52,12 +69,12 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone string
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to check if zone exists"},
-			fmt.Errorf("app.CreateZone zone: Failed to check if zone exists: %v", zone)
+			fmt.Errorf("💥 app.CreateZone zone: Failed to check if zone exists: %v", zone)
 
 	} else if zone_exists {
 		return http.StatusConflict,
 			gin.H{"error": "Zone already exists"},
-			fmt.Errorf("app.CreateZone zone: Zone %s already exists", zone)
+			fmt.Errorf("💥 app.CreateZone zone: Zone %s already exists", zone)
 	}
 
 	// Create the zone in PowerDNS
@@ -65,7 +82,7 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone string
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to create zone in DNS server"},
-			fmt.Errorf("app.CreateZone zone: Failed to create zone in PowerDNS: %v", err)
+			fmt.Errorf("💥 app.CreateZone zone: Failed to create zone in PowerDNS: %v", err)
 	}
 
 	// Create the new zone in storage
@@ -75,7 +92,7 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone string
 		return http.StatusInternalServerError,
 
 			gin.H{"error": "Failed to create zone"},
-			fmt.Errorf("app.CreateZone zone: Failed to create zone: %v", err)
+			fmt.Errorf("💥 app.CreateZone zone: Failed to create zone: %v", err)
 	}
 
 	return http.StatusCreated,
@@ -89,7 +106,7 @@ func (app *AppData) DeleteZone(ctx context.Context, username string, zone string
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to delete zone from DNS server"},
-			fmt.Errorf("app.Delete zone: Failed to delete zone from PowerDNS: %v", err)
+			fmt.Errorf("💥 app.Delete zone: Failed to delete zone from PowerDNS: %v", err)
 	}
 
 	// Delete the zone
@@ -97,11 +114,42 @@ func (app *AppData) DeleteZone(ctx context.Context, username string, zone string
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to delete zone from storage"},
-			fmt.Errorf("app.Delete zone: Failed to delete zone from storage: %v", err)
+			fmt.Errorf("💥 app.Delete zone: Failed to delete zone from storage: %v", err)
 	}
 
 	app.Log.Info("app.Delete zone: Deleted zone: ", zone, " for user: ", username)
 	return http.StatusNoContent,
 		nil,
 		nil
+}
+
+func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse) (message any, err error) {
+	txtPrefix := "dynamic-zones-dns-"
+	txtOwnerId := "dynamic-zones-dns"
+
+	templateData := map[string]any{
+		"txtPrefix":        txtPrefix,
+		"txtOwnerId":       txtOwnerId,
+		"dnsServerAddress": app.Config.DnsServerAddress,
+		"dnsServerPort":    app.Config.DnsServerPort,
+		"zone":             pnds_zone.Zone,
+		"tsigKey":          pnds_zone.ZoneKeys[0].Key,
+		"tsigAlgorithm":    pnds_zone.ZoneKeys[0].Algorithm,
+		"tsigKeyname":      pnds_zone.ZoneKeys[0].Keyname,
+	}
+
+	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSYamlTemplate)
+
+	if err != nil {
+		app.Log.Panicf("toExternalDNSConfig: Unable to parse the external-dns template: ", err)
+		return nil, fmt.Errorf("toExternalDNSConfig: Unable to parse the external-dns template: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, templateData); err != nil {
+		app.Log.Panicf("toExternalDNSConfig: Unable to execute the external-dns template: ", err)
+		return "", fmt.Errorf("toExternalDNSConfig: Unable to execute the external-dns template: %v", err)
+	}
+
+	return buf.String(), nil
 }

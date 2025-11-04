@@ -181,65 +181,14 @@ function ActivateZone(props) {
 }
 
 function ExternalDnsConfig(props) {
-    const dnsConfig = useContext(DnsConfigContext)
-    const keys = props.zone.zone_keys
-    const txtPrefix = "dynamic-zones-dns-"
-    const txtOwnerId = "dynamic-zones-dns"
-
-    function generateConfig(key) {
-        return [
-            `apiVersion: v1`,
-            `kind: Namespace`,
-            `metadata:`,
-            `  name: external-dns`,
-            `  labels:`,
-            `    name: external-dns`,
-            `---`,
-            `apiVersion: apps/v1`,
-            `kind: Deployment`,
-            `metadata:`,
-            `  name: external-dns`,
-            `  namespace: external-dns`,
-            `spec:`,
-            `  selector:`,
-            `    matchLabels:`,
-            `      app: external-dns`,
-            `  template:`,
-            `    metadata:`,
-            `      labels:`,
-            `        app: external-dns`,
-            `    spec:`,
-            `      containers:`,
-            `      - name: external-dns`,
-            `        image: registry.k8s.io/external-dns/external-dns:v0.18.0`,
-            `        args:`,
-            `        - --registry=txt`,
-            `        - --txt-prefix=${txtPrefix}`,
-            `        - --txt-owner-id=${txtOwnerId}`,
-            `        - --provider=rfc2136`,
-            `        - --rfc2136-host=${dnsConfig.server_address}`,
-            `        - --rfc2136-port=${dnsConfig.server_port}`,
-            `        - --rfc2136-zone=${props.zone.zone}.`,
-            `        - --rfc2136-tsig-secret=${key.key}`,
-            `        - --rfc2136-tsig-secret-alg=${key.algorithm}`,
-            `        - --rfc2136-tsig-keyname=${key.keyname}`,
-            `        - --rfc2136-tsig-axfr`,
-            `        - --source=ingress`,
-            `        - --domain-filter=${props.zone.zone}.`,
-        ].join('\n')
-    }
 
     return html`
-        ${keys.map(key => html`
             <div class="panel-block">
                 <div class="box" style="max-width: 90%; overflow: auto;">
-                    <h2 class="subtitle">Keyname: ${key.keyname}</h2>
-                        <pre><code>${generateConfig(key)}</code></pre>
+                        <pre><code>${props.externalDnsConfig}</code></pre>
                 </div>
             </div>
-
-        `)}
-    `
+        `
 }
 
 function DnsUpdateCommand(props) {
@@ -249,16 +198,16 @@ function DnsUpdateCommand(props) {
     function generateNsUpdate(key) {
         const tmp = "<<"
         return [
-            `# This command creates a new entry in DNS:`,
-            `nsupdate -y "${key.algorithm}:${key.keyname}:${key.key}" -v ${tmp}EOF`,
-            `server ${dnsConfig.server_address} ${dnsConfig.server_port}`,
-            `zone ${props.zone.zone}`,
-            `update add your-zone-name.${props.zone.zone}. 300 IN A 192.0.2.1`,
+            `# This command creates a new entry in DNS: `,
+            `nsupdate - y "${key.algorithm}:${key.keyname}:${key.key}" - v ${tmp} EOF`,
+            `server ${dnsConfig.server_address} ${dnsConfig.server_port} `,
+            `zone ${props.zone.zone} `,
+            `update add your - zone - name.${props.zone.zone} .300 IN A 192.0.2.1`,
             `send`,
             `EOF`,
             ``,
-            `# This command verifies the update:`,
-            `dig @${dnsConfig.server_address} -p ${dnsConfig.server_port} your-zone-name.${props.zone.zone} A +short`
+            `# This command verifies the update: `,
+            `dig @${dnsConfig.server_address} -p ${dnsConfig.server_port} your - zone - name.${props.zone.zone} A + short`
         ].join('\n')
     }
 
@@ -270,18 +219,19 @@ function DnsUpdateCommand(props) {
                           <pre><code>${generateNsUpdate(key)}</code></pre>
                     </div>
                 </div>
-            `)}
-    `
+            `)
+        }
+`
 }
 
 function ShowKeys(props) {
     const keys = props.zone.zone_keys
 
     return html`
-        <div class="panel-block">
+    <div class="panel-block">
         This zone has ${keys.length} key${keys.length !== 1 ? 's' : ''} configured.
-        </div>
-        ${keys.map((key, index) => html`
+    </div>
+    ${keys.map((key, index) => html`
             <div class="panel-block">
             <div class="box">
                     <h2 class="subtitle">Key #${index + 1}</h2>
@@ -290,7 +240,8 @@ function ShowKeys(props) {
                     <strong>Key:</strong> ${key.key}
                 </div>
             </div>
-        `)}
+        `)
+        }
     `
 }
 
@@ -327,7 +278,7 @@ function ActiveDomain(props) {
     }, [user, props.zone])
 
     if (loading)
-        return html`<p>${message}</p> `;
+        return html`<p>${message}</p>`;
 
     if (error)
         return html`<p>An error occured: ${error.message}</p>`;
@@ -337,9 +288,9 @@ function ActiveDomain(props) {
             setMessage("Deleting zone...")
             setLoading(true)
 
-            const res = await deleteV1ZonesByZone({ path: { zone: zone.zone }, headers: authHeaders(user) })
+            const res = await deleteV1ZonesByZone({ path: { zone: zone.zoneData.zone }, headers: authHeaders(user) })
             if (res.response.status !== 204) {
-                throw new Error(`Failed to delete zone ${zone.zone}: ${res.response.statusText}`);
+                throw new Error(`Failed to delete zone ${zone.zoneData.zone}: ${res.response.statusText} `);
             }
 
             props.onChange();
@@ -351,18 +302,18 @@ function ActiveDomain(props) {
     }
 
     return html`
-        <p class="panel-tabs">
-            ${tabs.map(tab => html`<a class=${tab === activeTab ? "is-active" : ""} onClick=${() => setActiveTab(tab)}>${tab}</a>`)}
+    <p class="panel-tabs">
+        ${tabs.map(tab => html`<a class=${tab === activeTab ? "is-active" : ""} onClick=${() => setActiveTab(tab)}>${tab}</a>`)}
         </p>
 
-        ${activeTab === "Manage" && html`
+    ${activeTab === "Manage" && html`
                 <div class="panel-block">
                     <button class="button is-danger" onClick=${handleDeleteClick}> Delete</button>
-                </div>`} 
-        ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone} />`}
-        ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone} />`}
-        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} zone=${zone} />`}
-    `
+                </div>`}
+        ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone.zoneData} />`}
+        ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone.zoneData} />`}
+        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsConfig=${zone.externalDnsConfig} />`}
+`
 }
 
 function AvailableDomain(props) {
@@ -372,23 +323,22 @@ function AvailableDomain(props) {
                 Zone: ${props.zone.name}
             </div>
             
-                ${props.zone.exists ?
+            ${props.zone.exists ?
             html`<${ActiveDomain} zone=${props.zone.name} onChange=${props.onChange} />` :
-            html`<div class="panel-block"><${ActivateZone} zone=${props.zone.name} onChange=${props.onChange} /></div`
+            html`<div class="panel-block"><${ActivateZone} zone=${props.zone.name} onChange=${props.onChange} /></div>`
         }
         </nav>
-        `
+    `
 }
 
 function AvailableDomainsList(props) {
     return html`
-        <section class="mt-3">
-
-            <div class="container">
-                <h1 class="title">Domains</h1>
-                ${props.zones.map(zone => html`<${AvailableDomain} zone=${zone} onChange=${props.onChange} />`)}
-            </div>
-        </section>
+    <section class="mt-3">
+        <div class="container">
+            <h1 class="title">Domains</h1>
+            ${props.zones.map(zone => html`<${AvailableDomain} zone=${zone} onChange=${props.onChange} />`)}
+        </div>
+    </section>
     `
 }
 function ListZones() {
@@ -419,7 +369,7 @@ function ListZones() {
         return html`<p>Loading zones...</p>`;
 
     if (error)
-        return html`<a onClick=${handleReloadClick}>Retry Load</a> `;
+        return html`<a onClick=${handleReloadClick}>Retry Load</a>`;
 
     return html`<${AvailableDomainsList} zones=${zones} dnsConfig=${dnsConfig} onChange=${() => setReloadTrigger(!reloadTrigger)}/>`
 }
