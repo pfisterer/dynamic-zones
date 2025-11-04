@@ -1,34 +1,45 @@
-import { createContext, html, useState, useEffect } from './dist/deps.mjs';
+import { createContext, html, useState, useEffect, useContext } from './dist/deps.mjs';
 
-// Centralized App Configuration Context
 export const AppConfigContext = createContext(null);
+export const useAppConfig = () => useContext(AppConfigContext);
 
-export function useAppConfig(apiUrl) {
-    const dnsConfigUrl = apiUrl + '../dns_config.json';
-    const [appConfig, setAppConfig] = useState({ dnsConfig: null, apiUrl });
+export function AppConfigProvider({ children }) {
+    const [config, setConfig] = useState(null);
     const [error, setError] = useState(null);
 
+    // Set API URL based on current location
+    useEffect(() => {
+        const currentUrl = new URL(window.location.href);
+        const normalizedApiUrl = new URL('../', currentUrl).toString();
+        setConfig(prev => ({ ...prev, apiUrl: normalizedApiUrl }));
+    }, []);
+
+    // Load DNS config from dns_config.json
     useEffect(() => {
         (async () => {
             try {
-                const response = await fetch(dnsConfigUrl);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const apiUrl = config?.apiUrl;
+                if (!apiUrl) return;
+
+                // Load DNS config relative to API
+                const dnsUrl = new URL('../dns_config.json', apiUrl).toString();
+                const response = await fetch(dnsUrl);
+                if (!response.ok) throw new Error(`Failed to load dns_config.json`);
                 const dnsConfig = await response.json();
-                setAppConfig(prev => ({ ...prev, dnsConfig }));
+
+                setConfig({ apiUrl, dnsConfig });
             } catch (e) {
                 setError(e);
             }
         })();
-    }, [apiUrl]);
+    }, [config?.apiUrl]);
 
-    return { appConfig, error };
-}
+    if (error) return html`<div>Error loading config: ${error.message}</div>`;
+    if (!config) return html`<p>Loading configuration...</p>`;
 
-export function AppConfigProvider({ apiUrl, children }) {
-    const { appConfig, error } = useAppConfig(apiUrl);
-
-    if (error) return html`<div>Error loading app configuration: ${error.message}</div>`;
-    if (!appConfig) return html`<p>Loading app configuration...</p>`;
-
-    return html`<${AppConfigContext.Provider} value=${appConfig}>${children}<//>`;
+    return html`
+        <${AppConfigContext.Provider} value=${config}>
+            ${children}
+        <//>
+    `;
 }

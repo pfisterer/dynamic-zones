@@ -1,10 +1,12 @@
 import { getV1Tokens, postV1Tokens, deleteV1TokensById } from 'dynamic-zones';
 import { useAuth, authHeaders } from './ui-context-auth.js';
+import { useAppConfig } from './ui-context-appconfig.js';
 import { html, useState, useEffect } from './dist/deps.mjs';
 import { FetchModal } from './ui-modal-fetch.js';
 
 export function ListTokens() {
     const { user } = useAuth();
+    const { apiUrl } = useAppConfig();
     const [tokens, setTokens] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -90,7 +92,7 @@ export function ListTokens() {
                                     Expires: ${t.expires_at}<br/>
                                     Mode: ${t.read_only ? "🔒 read-only" : "✏️ read-write"}
                                 </div>
-                                <${FetchModal} endpoint=${window.location + "../v1/tokens/"} token=${t.token_string} />
+                                <${FetchModal} endpoint=${apiUrl + "v1/zones/"} token=${t.token_string} />
                                 <button class="button is-danger is-small" onClick=${() => deleteToken(t.id)}>Delete</button>
                             </div>
                         </div>

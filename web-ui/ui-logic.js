@@ -1,8 +1,9 @@
 import { render, html, useState, useEffect } from './dist/deps.mjs';
+import { useAuth, AuthProvider } from './ui-context-auth.js';
+import { AppConfigProvider } from './ui-context-appconfig.js';
 import { ListTokens } from './ui-component-tokens.js';
 import { ListZones } from './ui-component-zones.js';
-import { useUserManager, useAuth, AuthProvider } from './ui-context-auth.js';
-import { AppConfigProvider } from './ui-context-appconfig.js';
+import { Documentation } from './ui-component-documentation.js';
 
 function LoginLogoutButton() {
     const { user, login, logout } = useAuth()
@@ -36,34 +37,6 @@ function Header(props) {
   `
 }
 
-function Documentation() {
-    const [endpoint, setEndpoint] = useState(null)
-    useEffect(() => setEndpoint(window.location.protocol + "//" + window.location.host + "/v1/"), []);
-
-    return html`
-        <section class="mt-5">
-            <div class="container">
-                <h1 class="title">Documentation</h1>
-                <div class="card">
-                    <header class="card-header">
-                        <p class="card-header-title">API Access</p>
-                    </header>
-                    <div class="card-content">
-                        <div class="content">
-                            The API endpoint for version 1 of the API is available at <a href="${endpoint}">${endpoint}</a>. Please visit the <a href="swagger-index.html">Swagger UI</a> to view the API documentation.
-                
-                        </div>
-                        <div class="content">
-                            Use can use <a href="../client/dist/sdk.gen.js">this JS client</a> or the <a href="../client/dist/sdk.gen.mjs">module variant</a> to access the API.
-            
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </section>
-    `
-}
 
 function Main() {
     const { user, login } = useAuth()
@@ -86,21 +59,9 @@ function Main() {
 }
 
 function App() {
-    const { userManager, loading } = useUserManager()
-    const [apiUrl, setApiUrl] = useState(null)
-
-    useEffect(() => {
-        const currentUrl = new URL(window.location.href);
-        const normalizedApiUrl = new URL('../api/', currentUrl).toString();
-        setApiUrl(normalizedApiUrl);
-    }, []);
-
-    if (loading || !apiUrl)
-        return html`<p>Initializing app, please wait...</p>`;
-
     return html`
-        <${AuthProvider} userManager=${userManager} loading=${loading}>
-            <${AppConfigProvider} apiUrl=${apiUrl}>
+       <${AuthProvider}>
+            <${AppConfigProvider}>
                 <${Header} title="Dynamic Zones DNS API" />
                 <${Main} />
             <//>

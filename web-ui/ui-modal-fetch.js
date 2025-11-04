@@ -30,7 +30,7 @@ export function FetchModal({ endpoint, token, method = "GET" }) {
   };
 
   const copyCurlToClipboard = () => {
-    const curlCommand = `curl -H "Authorization: Bearer ${token}" ${window.location.origin}${endpoint}`;
+    const curlCommand = `curl -H "Authorization: Bearer ${token}" ${endpoint}`;
     navigator.clipboard.writeText(curlCommand)
       .then(() => {
         setCopied(true);
