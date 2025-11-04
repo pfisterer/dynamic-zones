@@ -16,7 +16,7 @@ DIST_DIR := $(DOC_DIR)/client-dist
 # Docker Image details
 DOCKER_REPO ?= farberg/$(PROJECT_NAME)
 DOCKER_TAG ?= latest
-DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
@@ -98,6 +98,7 @@ docker-build:
 multi-arch-build: docker-login
 	@echo "🏗️ Building multi-architecture Docker image for $(DOCKER_PLATFORMS)..."
 	docker buildx build \
+		--progress plain \
 		--platform $(DOCKER_PLATFORMS) \
 		--tag "$(DOCKER_REPO):$(DOCKER_TAG)" \
 		--push \
