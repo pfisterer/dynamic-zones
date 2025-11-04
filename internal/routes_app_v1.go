@@ -97,7 +97,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 			returnValue = returnValue.(map[string]any)["externalDnsConfig"]
 		}
 
-		app.Log.Debug("🟢 routes.getZone: Returning zone: ", returnValue)
+		app.Log.Debug("🟢 routes.getZone: Returning zone with status", statusCode)
 		c.JSON(statusCode, returnValue)
 	}
 }

@@ -48,6 +48,7 @@ type AppConfig struct {
 	WebserverBaseUrl   string                  `json:"webserver_base_url"`
 	DnsServerAddress   string                  `json:"dns_server_address"`
 	DnsServerPort      int32                   `json:"dns_server_port_string"`
+	ApiTokenTTLHours   int                     `json:"api_token_ttl_hours"`
 }
 
 type AppData struct {
@@ -136,6 +137,7 @@ func GetAppConfigFromEnvironment() AppConfig {
 		WebserverBaseUrl:   helper.GetEnvString("DYNAMIC_ZONES_API_BASE_URL", "http://localhost:8082"),
 		DnsServerAddress:   helper.GetEnvString("DYNAMIC_ZONES_SERVER_ADDRESS", "localhost"),
 		DnsServerPort:      int32(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_PORT", 15353)),
+		ApiTokenTTLHours:   helper.GetEnvInt("DYNAMIC_ZONES_API_TOKEN_TTL_HOURS", 24),
 	}
 
 }
@@ -227,7 +229,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 			app.Log.Fatalf("Failed to initialize OIDCAuthVerifier: %v", err)
 		}
 
-		apiV1Group.Use(oidcAuthVerifier.BearerTokenAuthMiddleware())
+		//apiV1Group.Use(oidcAuthVerifier.BearerTokenAuthMiddleware())
+		apiV1Group.Use(auth.CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
 
 		auth_config = gin.H{
 			"auth_provider": "oidc",
@@ -256,6 +259,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 
 	// Create the API routes for v1
 	CreateApiV1Group(apiV1Group, app)
+	CreateTokensApiGroup(apiV1Group, app)
 
 	return router
 }
