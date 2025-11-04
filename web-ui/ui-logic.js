@@ -1,9 +1,8 @@
 import { render, html, useState, useEffect } from './dist/deps.mjs';
 import { ListTokens } from './ui-component-tokens.js';
 import { ListZones } from './ui-component-zones.js';
-import { useUserManager, useAuth, AuthProvider } from './ui-auth-context.js';
-import { DnsConfigProvider } from './ui-dns-context.js';
-
+import { useUserManager, useAuth, AuthProvider } from './ui-context-auth.js';
+import { AppConfigProvider } from './ui-context-appconfig.js';
 
 function LoginLogoutButton() {
     const { user, login, logout } = useAuth()
@@ -66,8 +65,6 @@ function Documentation() {
     `
 }
 
-
-
 function Main() {
     const { user, login } = useAuth()
 
@@ -84,18 +81,26 @@ function Main() {
             <${ListZones} />
             <${ListTokens} />
             <${Documentation} />
+            <br/>
         </div>`
 }
 
 function App() {
     const { userManager, loading } = useUserManager()
+    const [apiUrl, setApiUrl] = useState(null)
 
-    if (loading)
-        return html`<p>Loading configuration...</p>`;
+    useEffect(() => {
+        const currentUrl = new URL(window.location.href);
+        const normalizedApiUrl = new URL('../api/', currentUrl).toString();
+        setApiUrl(normalizedApiUrl);
+    }, []);
+
+    if (loading || !apiUrl)
+        return html`<p>Initializing app, please wait...</p>`;
 
     return html`
         <${AuthProvider} userManager=${userManager} loading=${loading}>
-            <${DnsConfigProvider} url="../dns_config.json">
+            <${AppConfigProvider} apiUrl=${apiUrl}>
                 <${Header} title="Dynamic Zones DNS API" />
                 <${Main} />
             <//>

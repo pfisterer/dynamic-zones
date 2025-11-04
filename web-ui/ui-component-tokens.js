@@ -1,5 +1,5 @@
 import { getV1Tokens, postV1Tokens, deleteV1TokensById } from 'dynamic-zones';
-import { useAuth, authHeaders } from './ui-auth-context.js';
+import { useAuth, authHeaders } from './ui-context-auth.js';
 import { html, useState, useEffect } from './dist/deps.mjs';
 import { FetchModal } from './ui-modal-fetch.js';
 

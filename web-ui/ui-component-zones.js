@@ -1,7 +1,7 @@
 import { deleteV1ZonesByZone, getV1Zones, getV1ZonesByZone, postV1ZonesByZone } from 'dynamic-zones';
 import { html, useState, useEffect, useContext } from './dist/deps.mjs';
-import { useAuth, authHeaders } from './ui-auth-context.js';
-import { DnsConfigContext } from './ui-dns-context.js';
+import { useAuth, authHeaders } from './ui-context-auth.js';
+import { AppConfigContext } from './ui-context-appconfig.js';
 
 
 function ActivateZone(props) {
@@ -50,18 +50,17 @@ function ActivateZone(props) {
 }
 
 function ExternalDnsConfig(props) {
-
     return html`
             <div class="panel-block">
                 <div class="box" style="max-width: 90%; overflow: auto;">
-                        <pre><code>${props.externalDnsConfig}</code></pre>
+                    <pre><code>${props.externalDnsConfig}</code></pre>
                 </div>
             </div>
         `
 }
 
 function DnsUpdateCommand(props) {
-    const dnsConfig = useContext(DnsConfigContext)
+    const { dnsConfig } = useContext(AppConfigContext)
     const keys = props.zone.zone_keys
 
     function generateNsUpdate(key) {
@@ -217,7 +216,7 @@ export function ListZones() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [reloadTrigger, setReloadTrigger] = useState(true)
-    const dnsConfig = useContext(DnsConfigContext)
+    const appConfig = useContext(AppConfigContext)
 
     useEffect(async () => {
         try {
@@ -241,5 +240,5 @@ export function ListZones() {
     if (error)
         return html`<a onClick=${handleReloadClick}>Retry Load</a>`;
 
-    return html`<${AvailableDomainsList} zones=${zones} dnsConfig=${dnsConfig} onChange=${() => setReloadTrigger(!reloadTrigger)}/>`
+    return html`<${AvailableDomainsList} zones=${zones} dnsConfig=${appConfig.dnsConfig} onChange=${() => setReloadTrigger(!reloadTrigger)}/>`
 }
