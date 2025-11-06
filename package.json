@@ -22,9 +22,10 @@
   "dependencies": {
     "@preact/compat": "^18.3.1",
     "@preact/signals": "^2.3.1",
+    "bulma": "^1.0.4",
     "htm": "^3.1.1",
     "oidc-client-ts": "^3.3.0",
     "preact": "^10.27.1",
-    "react-bulma-components": "^4.1.0"
+    "wouter-preact": "^3.7.1"
   }
 }

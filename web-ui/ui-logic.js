@@ -1,9 +1,10 @@
-import { render, html, useState, useEffect } from './dist/deps.mjs';
+import { render, html, Router, Route, Switch, Link, useHashLocation } from './dist/deps.mjs';
 import { useAuth, AuthProvider } from './ui-context-auth.js';
 import { AppConfigProvider } from './ui-context-appconfig.js';
 import { ListTokens } from './ui-component-tokens.js';
 import { ListZones } from './ui-component-zones.js';
 import { Documentation } from './ui-component-documentation.js';
+
 
 function LoginLogoutButton() {
     const { user, login, logout } = useAuth()
@@ -26,6 +27,17 @@ function Header(props) {
                 <div class="navbar-item">
                     ${props.title}
                 </div>
+
+                <div class="navbar-item">
+                    <${Link}  className=${(active) => (active ? "has-text-danger" : "")} href="/">Home</$Link>
+                </div>
+                <div class="navbar-item">
+                    <${Link} className=${(active) => (active ? "has-text-danger" : "")} href="/tokens">API Tokens</$Link>
+                </div>
+
+                <div class="navbar-item">
+                    <${Link} className=${(active) => (active ? "has-text-danger" : "")} href="/documentation">Documentation</$Link>
+                </div>
                 
                 <div class="navbar-end">
                     <div class="navbar-item">
@@ -37,12 +49,13 @@ function Header(props) {
   `
 }
 
-
 function Main() {
     const { user, login } = useAuth()
+    const header = html`<${Header} title="Dynamic Zones DNS Management UI" />`
 
     if (!user) {
         return html`
+            ${header}
             <div class="container">
                 <div class="box">Please <a onClick="${login}">log in</a> to access your data.</div>
             </div>
@@ -50,19 +63,30 @@ function Main() {
     }
 
     return html`
+        <${Router} hook=${useHashLocation}>
+            ${header}   
+            <${Switch}>
+                <${Route} path="/" component=${ListZones} />
+                <${Route} path="/tokens" component=${ListTokens} />
+                <${Route} path="/documentation" component=${Documentation} />
+                <${Route} component=${NotFound} />
+            <//>
+        <//>
+        `
+}
+
+function NotFound() {
+    return html`
         <div class="container">
-            <${ListZones} />
-            <${ListTokens} />
-            <${Documentation} />
-            <br/>
-        </div>`
+            <div class="box">404: Page not found</div>
+        </div>
+    `
 }
 
 function App() {
     return html`
-       <${AuthProvider}>
-            <${AppConfigProvider}>
-                <${Header} title="Dynamic Zones DNS API" />
+        <${AppConfigProvider}>
+            <${AuthProvider}>
                 <${Main} />
             <//>
         <//>
