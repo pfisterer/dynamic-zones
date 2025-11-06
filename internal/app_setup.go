@@ -61,16 +61,7 @@ type AppData struct {
 	Log         *zap.SugaredLogger
 }
 
-func RunApplication() {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		fmt.Printf("app.SetupComponents: Failed to load the env vars: %v", err)
-	}
-
-	// Get application configuration from environment variables
-	appConfig := GetAppConfigFromEnvironment()
-
-	// Initialize logger
+func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
 	logger, log := helper.InitLogger(appConfig.DevMode)
 	if appConfig.DevMode {
 		log.Warn("app.SetupComponents: Running in development mode. This is not secure for production!")
@@ -80,6 +71,22 @@ func RunApplication() {
 
 	// Print application configuration
 	LogAppConfig(appConfig, log)
+
+	return logger, log
+}
+
+func RunApplication() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		fmt.Printf("app.SetupComponents: Failed to load the env vars: %v", err)
+	}
+
+	// Get application configuration from environment variables
+	appConfig := GetAppConfigFromEnvironment()
+
+	// Load application configuration and create logger
+	logger, log := CreateAppLogger(appConfig)
+	defer logger.Sync()
 
 	// Create componentes
 	pdns := setupPowerDns(log, &appConfig)

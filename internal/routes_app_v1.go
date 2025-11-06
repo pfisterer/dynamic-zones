@@ -41,7 +41,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 getZones: Called with user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		userZones := app.Uzp.GetUserZones(user)
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
@@ -50,13 +50,13 @@ func getZones(app *AppData) gin.HandlerFunc {
 			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone)
 			app.Log.Debugf("Checked zone '%s', status code: %d", zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
-			app.Log.Debugf("routes.getZones: Zone '%s' exists: %t", zone, zoneExists)
+			app.Log.Debugf("Zone '%s' exists: %t", zone, zoneExists)
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone, Exists: zoneExists})
 		}
 
 		zones := AvailableZonesResponse{Zones: zonesWithStatus}
 
-		app.Log.Debug("🟢 routes.getZones: Returning zones: ", zones)
+		app.Log.Debug("🟢 Returning zones: ", zones)
 		c.JSON(http.StatusOK, zones)
 	}
 }
@@ -123,23 +123,23 @@ func postZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 postZone: Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Ensure the user is allowed to create the zone
 		if !app.Uzp.IsAllowedZone(user, zone) {
-			app.Log.Error("postZone: User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
+			app.Log.Error("User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to create this zone"})
 			return
 		}
-		app.Log.Infof("postZone: User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
+		app.Log.Infof("User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
 
 		statusCode, returnValue, err := app.CreateZone(ctx, user.PreferredUsername, zone)
 		if err != nil {
-			app.Log.Error("postZone: failed: ", err)
+			app.Log.Error("Failed: ", err)
 		}
 
-		app.Log.Debugf("✳️ postZone: Created zone '%s', returning %s", zone, returnValue)
+		app.Log.Debugf("🟢 Created zone '%s', returning %s", zone, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }
@@ -162,22 +162,22 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 deleteZone: Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Check if the user is allowed to delete the zone
 		if !app.Uzp.IsAllowedZone(user, zone) {
-			app.Log.Error("deleteZone: User is not allowed to delete zone: ", zone, " for user: ", user.PreferredUsername)
+			app.Log.Error("User is not allowed to delete zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to delete this zone"})
 			return
 		}
 
 		statusCode, returnValue, err := app.DeleteZone(ctx, user.PreferredUsername, zone)
 		if err != nil {
-			app.Log.Error("deleteZone: deleteZone failed: ", err)
+			app.Log.Error("deleteZone failed: ", err)
 		}
 
-		app.Log.Debugf("🗑️ deleteZone: Deleted zone '%s', returning %s", zone, returnValue)
+		app.Log.Debugf("🟢 Deleted zone '%s', returning %s", zone, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }

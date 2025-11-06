@@ -148,13 +148,13 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 		zoneFQDN := dns.Fqdn(zone)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 listDNSRecords: List DNS records called for zone: %s by user: %s", zoneFQDN, user.PreferredUsername)
+		app.Log.Infof("🚀 List DNS records called for zone: %s by user: %s", zoneFQDN, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Get TSIG credentials from headers
 		keyNameFQDN, keyAlgoFQDN, key, tsigErr := GetTSIGCredentials(c)
 		if tsigErr != nil {
-			app.Log.Error("listDNSRecords: TSIG headers missing")
+			app.Log.Error("TSIG headers missing")
 			c.JSON(http.StatusBadRequest, tsigErr)
 			return
 		}
@@ -172,7 +172,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 
 		envChan, err := tr.In(msg, dnsServer)
 		if err != nil {
-			app.Log.Errorf("routes.listDNSRecords: Error performing AXFR for zone '%s': %v", zoneFQDN, err)
+			app.Log.Errorf("Error performing AXFR for zone '%s': %v", zoneFQDN, err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
@@ -181,7 +181,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 
 		for env := range envChan {
 			if env.Error != nil {
-				app.Log.Errorf("routes.listDNSRecords: AXFR environment error for zone '%s': %v", zoneFQDN, env.Error)
+				app.Log.Errorf("AXFR environment error for zone '%s': %v", zoneFQDN, env.Error)
 				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: env.Error.Error()})
 				return
 			}
@@ -272,7 +272,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 createDNSRecord: called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
+		app.Log.Infof("🚀 Create record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		if tsigErr := CheckTSIGRequestData(&req); tsigErr != nil {
@@ -350,7 +350,7 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 deleteDNSRecord: called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
+		app.Log.Infof("🚀 Delete record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		zone := dns.Fqdn(req.Zone)

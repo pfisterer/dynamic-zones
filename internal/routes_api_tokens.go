@@ -43,12 +43,12 @@ func getTokens(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.getTokens: Called with user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		tokens, err := app.Storage.GetTokens(ctx, user.PreferredUsername)
 		if err != nil {
-			app.Log.Errorf("routes.getTokens: Error retrieving tokens for user %s: %v", user.PreferredUsername, err)
+			app.Log.Errorf("Error retrieving tokens for user %s: %v", user.PreferredUsername, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tokens"})
 			return
 		}
@@ -57,7 +57,7 @@ func getTokens(app *AppData) gin.HandlerFunc {
 		var tokenResponse TokensResponse
 		tokenResponse.Tokens = tokens
 
-		app.Log.Debug("🟢 routes.getTokens: Returning tokens: ", tokens)
+		app.Log.Debug("Returning tokens: ", tokens)
 		c.JSON(http.StatusOK, tokenResponse)
 	}
 }
@@ -78,7 +78,7 @@ func createToken(app *AppData) gin.HandlerFunc {
 		ttl := time.Duration(app.Config.ApiTokenTTLHours) * time.Hour
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.createToken: Create token called for user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Create token called for user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		var input CreateTokenRequest
@@ -90,12 +90,12 @@ func createToken(app *AppData) gin.HandlerFunc {
 
 		token, err := app.Storage.CreateToken(ctx, user.PreferredUsername, ttl, input.ReadOnly)
 		if err != nil {
-			app.Log.Errorf("routes.createToken: Error creating token for user %s: %v", user.PreferredUsername, err)
+			app.Log.Errorf("Error creating token for user %s: %v", user.PreferredUsername, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create token"})
 			return
 		}
 
-		app.Log.Debugf("✳️ routes.createToken: Created token for user: %s", user.PreferredUsername)
+		app.Log.Debugf("Created token for user: %s", user.PreferredUsername)
 		c.JSON(http.StatusCreated, gin.H{"status": "success", "token": token})
 	}
 }
@@ -123,17 +123,17 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.deleteToken: Delete token called for token: ", tokenId, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Delete token called for token: ", tokenId, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		statusCode, returnValue, err := app.Storage.DeleteToken(ctx, user.PreferredUsername, tokenId)
 		if err != nil {
-			app.Log.Errorf("routes.deleteToken: Error deleting token '%s' for user %s: %v", tokenId, user.PreferredUsername, err)
+			app.Log.Errorf("Error deleting token '%s' for user %s: %v", tokenId, user.PreferredUsername, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete token"})
 			return
 		}
 
-		app.Log.Debugf("🗑️ routes.deleteToken: Deleted token '%s', returning %s", tokenId, returnValue)
+		app.Log.Debugf("Deleted token '%s', returning %s", tokenId, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }
