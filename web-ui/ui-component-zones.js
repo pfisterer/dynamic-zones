@@ -1,6 +1,6 @@
 import { html, useState, useEffect, useContext } from './dist/deps.mjs';
 import { useAuth, authHeaders } from './ui-context-auth.js';
-import { AppConfigContext } from './ui-context-appconfig.js';
+import { useAppConfig } from './ui-context-appconfig.js';
 import { getV1Zones, getV1ZonesByZone, postV1ZonesByZone, deleteV1ZonesByZone, getV1DnsRecords, postV1DnsRecordsCreate, postV1DnsRecordsDelete } from 'dynamic-zones';
 
 function normalizeRecordName(name, zone) {
@@ -114,10 +114,35 @@ function ActivateZone({ zone, onChange }) {
 // ----------------------------------------
 // External DNS config display
 // ----------------------------------------
-function ExternalDnsConfig({ externalDnsConfig }) {
+function ExternalDnsConfig({ externalDnsConfig, zone }) {
+    const { apiUrl } = useAppConfig();
+    const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns`;
     return html`
         <div class="panel-block">
-            <div class="box" style="max-width:90%; overflow:auto;">
+            <h2 class="subtitle">Kubernetes External DNS support</h2>
+        </div>
+        <div class="panel-block">
+            <p>
+                You can curl the config below directly using something like:
+                <pre style="white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">
+                    curl -H "Authorization: Bearer your_token" ${url}
+                </pre>
+            </p>
+        </div>
+        <div class="panel-block">
+            <h2 class="subtitle">Kubernetes External DNS Deployment</h2>
+        </div>
+
+        <div class="panel-block">
+            <p>
+                Use the following configuration to set up your Kubernetes cluster to automatically perform updates on this DNS server. 
+                Please refer to the <a href="https://github.com/kubernetes-sigs/external-dns">External DNS documentation</a> for more information.
+            </p>
+        </div>
+
+
+        <div class="panel-block">
+            <div class="box" style="max-width:100%; overflow:auto; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">
                 <pre><code>${externalDnsConfig}</code></pre>
             </div>
         </div>
@@ -304,7 +329,7 @@ function AddDnsRecordRow({ zone, tsigKey, onAdd }) {
 
 
 function DnsRecordsList({ zone, tsigKey }) {
-    const { dnsConfig } = useContext(AppConfigContext);
+    const { dnsConfig } = useAppConfig();
     const { user } = useAuth();
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -363,7 +388,7 @@ function DnsRecordsList({ zone, tsigKey }) {
 // DNS Update Command Component
 // ----------------------------------------
 function DnsUpdateCommand({ zone }) {
-    const { dnsConfig } = useContext(AppConfigContext);
+    const { dnsConfig } = useAppConfig();
     return html`
         ${zone.zone_keys.map(key => html`
             <div class="panel-block">
@@ -445,7 +470,7 @@ function ActiveDomain({ zone: zoneName, onChange }) {
         `}
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone.zoneData} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone.zoneData} />`}
-        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsConfig=${zone.externalDnsConfig} />`}
+        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsConfig=${zone.externalDnsConfig} zone=${zone.zoneData} />`}
     `;
 }
 
