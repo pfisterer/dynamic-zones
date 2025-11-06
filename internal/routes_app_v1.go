@@ -41,15 +41,14 @@ func getZones(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.getZones: Called with user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 getZones: Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		userZones := app.Uzp.GetUserZones(user)
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
-			statusCode, msg, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone)
-			app.Log.Debugf("routes.getZones: Zone '%s' status code: %d, message: %v", zone, statusCode, msg)
-
+			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone)
+			app.Log.Debugf("Checked zone '%s', status code: %d", zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
 			app.Log.Debugf("routes.getZones: Zone '%s' exists: %t", zone, zoneExists)
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone, Exists: zoneExists})
@@ -84,20 +83,20 @@ func getZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		statusCode, returnValue, err := app.GetZone(ctx, user.PreferredUsername, zone)
 		if err != nil {
-			app.Log.Warnf("routes.getZone: zone '%s' does not exist: %w", zone, err)
+			app.Log.Warnf("getZone: zone '%s' does not exist: %w", zone, err)
 		}
 
 		if format == "external-dns" && statusCode == http.StatusOK {
-			app.Log.Debug("routes.getZone: format=external-dns requested, transforming response")
+			app.Log.Debug("getZone: format=external-dns requested, transforming response")
 			returnValue = returnValue.(map[string]any)["externalDnsConfig"]
 		}
 
-		app.Log.Debug("🟢 routes.getZone: Returning zone with status", statusCode)
+		app.Log.Debug("🟢 getZoneReturning zone with status ", statusCode)
 		c.JSON(statusCode, returnValue)
 	}
 }
@@ -124,23 +123,23 @@ func postZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.postZone: Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 postZone: Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Ensure the user is allowed to create the zone
 		if !app.Uzp.IsAllowedZone(user, zone) {
-			app.Log.Error("routes.postZone: User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
+			app.Log.Error("postZone: User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to create this zone"})
 			return
 		}
-		app.Log.Infof("routes.postZone: User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
+		app.Log.Infof("postZone: User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
 
 		statusCode, returnValue, err := app.CreateZone(ctx, user.PreferredUsername, zone)
 		if err != nil {
-			app.Log.Error("routes.postZone: failed: ", err)
+			app.Log.Error("postZone: failed: ", err)
 		}
 
-		app.Log.Debugf("✳️ routes.postZone: Created zone '%s', returning %s", zone, returnValue)
+		app.Log.Debugf("✳️ postZone: Created zone '%s', returning %s", zone, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }
@@ -163,22 +162,22 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 routes.deleteZone: Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 deleteZone: Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Check if the user is allowed to delete the zone
 		if !app.Uzp.IsAllowedZone(user, zone) {
-			app.Log.Error("routes.deleteZone: User is not allowed to delete zone: ", zone, " for user: ", user.PreferredUsername)
+			app.Log.Error("deleteZone: User is not allowed to delete zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to delete this zone"})
 			return
 		}
 
 		statusCode, returnValue, err := app.DeleteZone(ctx, user.PreferredUsername, zone)
 		if err != nil {
-			app.Log.Error("routes.deleteZone: deleteZone failed: ", err)
+			app.Log.Error("deleteZone: deleteZone failed: ", err)
 		}
 
-		app.Log.Debugf("🗑️ routes.deleteZone: Deleted zone '%s', returning %s", zone, returnValue)
+		app.Log.Debugf("🗑️ deleteZone: Deleted zone '%s', returning %s", zone, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }

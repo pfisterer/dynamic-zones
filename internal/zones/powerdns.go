@@ -3,6 +3,7 @@ package zones
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
@@ -59,9 +60,13 @@ func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneData
 }
 
 func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone string, force bool) (*ZoneDataResponse, error) {
-	keyname := "user-" + user + "-zone-" + zone + "-key"
+	sanitizedUser := strings.ReplaceAll(user, "@", "-")
+	sanitizedUser = strings.ReplaceAll(sanitizedUser, ".", "-")
 
-	//Delete a potentially existing zone and key
+	// Construct the new, compliant key name
+	keyname := "user-" + sanitizedUser + "-zone-" + zone + "-key"
+
+	// Delete potentially existing zone and key if forcing
 	if force {
 		_ = pdns.Zones.Delete(ctx, zone)
 		_ = pdns.TSIGKeys.Delete(ctx, keyname)
@@ -75,14 +80,16 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 		SOAEdit:     powerdns.String(""),
 		SOAEditAPI:  powerdns.String(""),
 		APIRectify:  powerdns.Bool(true),
-		Nameservers: []string{"localhost."}, // TODO...
+		Nameservers: []string{"localhost."}, // TODO: Adjust for production
 	})
+
 	fmt.Println("powerdns.CreateZone: XXXXXXXXXXXXXXXX TODO: Use some sensible nameservers for the zone")
+
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v", err)
 	}
 
-	// Generate a random TSIG key
+	// Generate a TSIG key
 	algorithm := "hmac-sha512"
 	key, err := helper.GenerateTSIGKeyHMACSHA512()
 	if err != nil {
@@ -95,16 +102,22 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 		return nil, fmt.Errorf("powerdns.CreateZone: Error creating TSIG key: %v", err)
 	}
 
-	// Set the TSIG key in the zone metadata
-	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
+	// Allow the TSIG key to perform AXFR
+	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowAXFR, []string{*tsigkey.Name})
 	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error setting metadata: %v", err)
+		return nil, fmt.Errorf("powerdns.CreateZone: Error setting ALLOW-AXFR-TSIG metadata: %v", err)
 	}
 
-	// Allow DNS updates from everywhere now that the key is set
+	// Allow the TSIG key to perform dynamic updates
+	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
+	if err != nil {
+		return nil, fmt.Errorf("powerdns.CreateZone: Error setting TSIG dynamic update metadata: %v", err)
+	}
+
+	// Allow dynamic updates from any IP (for testing)
 	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
 	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error setting metadata: %v", err)
+		return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
 	}
 
 	return GetZone(ctx, pdns, zone)

@@ -101,7 +101,6 @@ multi-arch-build: docker-login
 		--progress plain \
 		--platform $(DOCKER_PLATFORMS) \
 		--tag "$(DOCKER_REPO):$(DOCKER_TAG)" \
-		--push \
 		.
 	@echo "✅ Multi-architecture image $(DOCKER_REPO):$(DOCKER_TAG) built and pushed."
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"

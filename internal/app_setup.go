@@ -260,6 +260,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Create the API routes for v1
 	CreateApiV1Group(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
+	CreateRfc2136ClientApiGroup(apiV1Group, app)
 
 	return router
 }

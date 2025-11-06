@@ -1,244 +1,500 @@
-import { deleteV1ZonesByZone, getV1Zones, getV1ZonesByZone, postV1ZonesByZone } from 'dynamic-zones';
 import { html, useState, useEffect, useContext } from './dist/deps.mjs';
 import { useAuth, authHeaders } from './ui-context-auth.js';
 import { AppConfigContext } from './ui-context-appconfig.js';
+import { getV1Zones, getV1ZonesByZone, postV1ZonesByZone, deleteV1ZonesByZone, getV1DnsRecords, postV1DnsRecordsCreate, postV1DnsRecordsDelete } from 'dynamic-zones';
 
+function normalizeRecordName(name, zone) {
+    if (!name) return '';
+    let trimmedName = name.trim();
 
-function ActivateZone(props) {
-    const { user } = useAuth()
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState(null)
-    const zone = props.zone
+    // 1. Handle Zone Apex (Crucial for user input)
+    // Send '@' if the input is '@' or the escaped '\@'.
+    if (trimmedName === '@' || trimmedName === '\\@') {
+        return '@';
+    }
 
-    if (loading)
-        return html`<p>Activating zone ${zone}</p>`;
+    // 2. Remove any trailing dot (CRITICAL FIX for server-side double-dot issue)
+    // Prevents sending 'karls.' which leads to 'karls..zone.com.' on the server.
+    // Use a loop/regex for robust removal in case of multiple trailing dots, though simple replace is usually enough.
+    trimmedName = trimmedName.replace(/\.+$/, '');
 
-    if (error)
-        return html`
-            <div class="block">
-            Sorry, there was an error activating the zone: 
-            <pre>${error.message}</pre>
-            </div>
+    // 3. Fallback check for the zone name itself (often treated as apex)
+    // If the stripped name is now equivalent to the zone name (minus the final dot), 
+    // it's safest to treat it as the apex.
+    if (trimmedName === zone.replace(/\.$/, '')) {
+        return '@';
+    }
 
-            <div class="block">
-                <button class="button" onClick=${() => window.location.reload()}>Please refresh the page</button>.
-            </div>
-        `;
+    // 4. Pass the clean relative name to the backend.
+    return trimmedName;
+}
+
+/**
+ * Strips the zone name from the fully qualified record name for display.
+ * Handles the special case of the zone apex ('@') record.
+ * @param {string} recordName - The fully qualified record name (e.g., 'www.example.com.')
+ * @param {string} zoneName - The zone name (e.g., 'example.com.')
+ * @returns {string} The relative name (e.g., 'www' or '@')
+ */
+function stripZone(recordName, zoneName) {
+    // Ensure both names end with a dot for consistent comparison
+    const fqdnRecord = recordName.endsWith('.') ? recordName : recordName + '.';
+    const fqdnZone = zoneName.endsWith('.') ? zoneName : zoneName + '.';
+
+    // Check for the apex record case (Name is exactly the Zone)
+    if (fqdnRecord === fqdnZone) {
+        return '@'; // Conventionally represents the zone apex
+    }
+
+    // Strip the zone name from the end
+    if (fqdnRecord.endsWith(fqdnZone)) {
+        // Remove the zone name and the dot preceding it (e.g., remove '.example.com.')
+        const relativeName = fqdnRecord.slice(0, -(fqdnZone.length + 1));
+
+        // Final trim for safety, though slice should handle it
+        return relativeName.replace(/\.$/, '');
+    }
+
+    // Fallback: Return the original name if stripping failed (e.g., if it was already relative)
+    return recordName;
+}
+
+// ----------------------------------------
+// Shared NSUPDATE command generator
+// ----------------------------------------
+export function generateNsUpdate(record, zone, tsigKey, dnsConfig) {
+    return [
+        `# Create/Update record in DNS`,
+        `nsupdate -y "${tsigKey.algorithm}:${tsigKey.keyname}:${tsigKey.key}" <<EOF`,
+        `server ${dnsConfig.server_address} ${dnsConfig.server_port}`,
+        `zone ${zone}`,
+        `update add ${record.name}.${zone}. ${record.ttl} IN ${record.type} ${record.value}`,
+        `send`,
+        `EOF`,
+        ``,
+        `# Verify`,
+        `dig @${dnsConfig.server_address} -p ${dnsConfig.server_port} ${record.name}.${zone}. ${record.type} +short`
+    ].join('\n');
+}
+
+// ----------------------------------------
+// Activate Zone
+// ----------------------------------------
+function ActivateZone({ zone, onChange }) {
+    const { user } = useAuth();
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     async function activate() {
         setLoading(true);
         setError(null);
-
         try {
-            const res = await postV1ZonesByZone({ path: { zone }, headers: authHeaders(user) })
-
-            if (res.response.status === 201) {
-                console.log(`Zone ${zone} activated successfully`);
-                props?.onChange(zone)
-            } else {
-                throw new Error(`Failed to activate zone ${zone}: ${res.response.statusText}`);
-            }
+            const res = await postV1ZonesByZone({ path: { zone }, headers: authHeaders(user) });
+            if (res.response.status !== 201) throw new Error(res.response.statusText);
+            onChange(zone);
         } catch (err) {
-            console.error("Error activating zone:", err);
             setError(err);
         } finally {
             setLoading(false);
         }
     }
 
+    if (loading) return html`<p>Activating zone ${zone}...</p>`;
+    if (error)
+        return html`
+            <div class="block">
+                <pre>${error.message}</pre>
+                <button class="button" onClick=${() => window.location.reload()}>Refresh</button>
+            </div>
+        `;
+
     return html`<button class="button" onClick=${activate}>Activate</button>`;
 }
 
-function ExternalDnsConfig(props) {
+// ----------------------------------------
+// External DNS config display
+// ----------------------------------------
+function ExternalDnsConfig({ externalDnsConfig }) {
     return html`
-            <div class="panel-block">
-                <div class="box" style="max-width: 90%; overflow: auto;">
-                    <pre><code>${props.externalDnsConfig}</code></pre>
-                </div>
+        <div class="panel-block">
+            <div class="box" style="max-width:90%; overflow:auto;">
+                <pre><code>${externalDnsConfig}</code></pre>
             </div>
-        `
+        </div>
+    `;
 }
 
-function DnsUpdateCommand(props) {
-    const { dnsConfig } = useContext(AppConfigContext)
-    const keys = props.zone.zone_keys
+// ----------------------------------------
+// DNS Records Management
+// ----------------------------------------
+const SUPPORTED_TYPES = ["A", "AAAA"];
 
-    function generateNsUpdate(key) {
-        const tmp = "<<"
-        return [
-            `# This command creates a new entry in DNS: `,
-            `nsupdate - y "${key.algorithm}:${key.keyname}:${key.key}" - v ${tmp} EOF`,
-            `server ${dnsConfig.server_address} ${dnsConfig.server_port} `,
-            `zone ${props.zone.zone} `,
-            `update add your - zone - name.${props.zone.zone} .300 IN A 192.0.2.1`,
-            `send`,
-            `EOF`,
-            ``,
-            `# This command verifies the update: `,
-            `dig @${dnsConfig.server_address} -p ${dnsConfig.server_port} your - zone - name.${props.zone.zone} A + short`
-        ].join('\n')
+
+function DnsRecordRow({ zone, tsigKey, record, dnsConfig, onChange }) {
+    const { user } = useAuth();
+    const [editing, setEditing] = useState(false);
+    const [fields, setFields] = useState({ ...record });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    const isEditable = SUPPORTED_TYPES.includes(record.type.toUpperCase());
+
+    async function handleUpdate() {
+        setLoading(true);
+        setError(null);
+        try {
+            const normalizedName = normalizeRecordName(fields.name, zone);
+
+            const createRes = await postV1DnsRecordsCreate({
+                body: {
+                    ...fields,
+                    name: normalizedName,
+                    zone,
+                    key_name: tsigKey.keyname,
+                    key_algorithm: tsigKey.algorithm,
+                    key: tsigKey.key
+                },
+                headers: authHeaders(user)
+            });
+
+            if (!createRes.response.ok) throw new Error(createRes.response.statusText);
+
+            setEditing(false);
+            onChange();
+        } catch (e) {
+            setError(e);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+
+    async function handleDelete() {
+        if (!confirm(`Delete DNS record ${fields.name}?`)) return;
+        setLoading(true);
+        setError(null);
+        try {
+            const normalizedName = normalizeRecordName(fields.name, zone);
+
+            const res = await postV1DnsRecordsDelete({
+                body: {
+                    ...fields,
+                    name: normalizedName,
+                    zone,
+                    key_name: tsigKey.keyname,
+                    key_algorithm: tsigKey.algorithm,
+                    key: tsigKey.key
+                },
+                headers: authHeaders(user)
+            });
+            if (!res.response.ok) throw new Error(res.response.statusText);
+            onChange();
+        } catch (e) {
+            setError(e);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleCopy() {
+        const nsupdate = generateNsUpdate(fields, zone, tsigKey, dnsConfig);
+        try {
+            await navigator.clipboard.writeText(nsupdate);
+            alert('nsupdate command copied!');
+        } catch {
+            alert('Failed to copy.');
+        }
     }
 
     return html`
-            ${keys.map(key => html`
-                <div class="panel-block">
-                    <div class="box" style="max-width: 90%; overflow: auto;">
-                        <h2 class="subtitle">Keyname: ${key.keyname}</h2>
-                          <pre><code>${generateNsUpdate(key)}</code></pre>
-                    </div>
-                </div>
-            `)
-        }
-`
+        <tr>
+        <td>
+            <input class="input" value=${fields.name} onInput=${e => setFields({ ...fields, name: e.target.value })} disabled=${loading || !editing || !isEditable} /> </td>
+
+        <td>
+            ${editing && isEditable ? html`
+            <div class="select">
+                <select value=${fields.type} onChange=${e => setFields({ ...fields, type: e.target.value })} > ${SUPPORTED_TYPES.map(t => html`<option value=${t}>${t}</option>`)}
+                </select>
+            </div>
+            ` : html`
+            <input class="input" value=${fields.type} disabled=${true}
+            />
+            `}
+        </td>
+
+        <td>
+            <input class="input" type="number" value=${fields.ttl} onInput=${e => setFields({ ...fields, ttl: e.target.value })} disabled=${loading || !editing || !isEditable} />
+        </td>
+
+        <td>
+            <input class="input" value=${fields.value} onInput=${e => setFields({ ...fields, value: e.target.value })} disabled=${loading || !editing || !isEditable} />
+        </td>
+
+        <td>
+            ${editing && isEditable ? html`
+            <button class="button is-success" onClick=${handleUpdate} disabled=${loading}>
+                ${loading ? "Saving..." : "Save"}
+            </button>
+            ` : html`
+            <button class="button" onClick=${() => isEditable && setEditing(true)} disabled=${loading || !isEditable}> Edit </button> `}
+
+            <button class="button is-danger ml-1" onClick=${handleDelete} disabled=${loading || !isEditable} >
+            ${loading ? "Deleting..." : "Delete"}
+            </button>
+
+            <button class="button ml-1" onClick=${handleCopy}>Copy nsupdate</button>
+
+            ${error && html`<div class="has-text-danger">${error.message}</div>`}
+        </td>
+        </tr>
+    `;
 }
 
-function ShowKeys(props) {
-    const keys = props.zone.zone_keys
+function AddDnsRecordRow({ zone, tsigKey, onAdd }) {
+    const { user } = useAuth();
+    const [fields, setFields] = useState({ name: '', type: 'A', ttl: 300, value: '' });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    async function handleAdd() {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await postV1DnsRecordsCreate({
+                body: {
+                    ...fields,
+                    zone,
+                    name: normalizeRecordName(fields.name, zone),
+                    key_name: tsigKey.keyname,
+                    key_algorithm: tsigKey.algorithm,
+                    key: tsigKey.key
+                },
+                headers: authHeaders(user)
+            });
+            if (!res.response.ok) throw new Error(res.response.statusText);
+            setFields({ name: '', type: 'A', ttl: 300, value: '' });
+            onAdd();
+        } catch (e) {
+            setError(e);
+        } finally {
+            setLoading(false);
+        }
+    }
 
     return html`
-    <div class="panel-block">
-        This zone has ${keys.length} key${keys.length !== 1 ? 's' : ''} configured.
-    </div>
-    ${keys.map((key, index) => html`
+        <tr>
+            <td><input class="input" placeholder="Name" value=${fields.name} onInput=${e => setFields({ ...fields, name: e.target.value })} /></td>
+            <td>
+            <div class="select">
+                <select value=${fields.type} onChange=${e => setFields({ ...fields, type: e.target.value })} >
+                ${SUPPORTED_TYPES.map(t => html`<option value=${t}>${t}</option>`)}
+                </select>
+            </div>
+            </td>            
+            <td><input class="input" type="number" value=${fields.ttl} onInput=${e => setFields({ ...fields, ttl: e.target.value })} /></td>
+            <td><input class="input" value=${fields.value} onInput=${e => setFields({ ...fields, value: e.target.value })} /></td>
+            <td>
+                <button class="button is-primary" onClick=${handleAdd} disabled=${loading}>${loading ? 'Adding...' : 'Add'}</button>
+                ${error && html`<div class="has-text-danger">${error.message}</div>`}
+            </td>
+        </tr>
+    `;
+}
+
+
+function DnsRecordsList({ zone, tsigKey }) {
+    const { dnsConfig } = useContext(AppConfigContext);
+    const { user } = useAuth();
+    const [records, setRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    async function fetchRecords() {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await getV1DnsRecords({
+                query: { zone },
+                headers: {
+                    ...authHeaders(user),
+                    "X-DNS-Key-Name": tsigKey.keyname,
+                    "X-DNS-Key-Algorithm": tsigKey.algorithm,
+                    "X-DNS-Key": tsigKey.key,
+                }
+            });
+            if (!res.data) throw new Error('No records found');
+
+            const strippedRecords = res.data.records.map(record => ({
+                ...record,
+                name: stripZone(record.name, zone)
+            }));
+
+            setRecords(strippedRecords);
+        } catch (e) {
+            setError(e);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+
+    useEffect(() => { fetchRecords(); }, []);
+
+    if (loading) return html`<p>Loading DNS records...</p>`;
+    if (error) return html`<div class="has-text-danger">Error loading DNS records: ${error.message}</div>`;
+
+    return html`
+        <table class="table is-fullwidth is-striped">
+            <thead>
+                <tr>
+                    <th>Name</th><th>Type</th><th>TTL</th><th>Value</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${records.map(record => html`<${DnsRecordRow} zone=${zone} tsigKey=${tsigKey} record=${record} dnsConfig=${dnsConfig} onChange=${fetchRecords} />`)}
+                <${AddDnsRecordRow} zone=${zone} tsigKey=${tsigKey} dnsConfig=${dnsConfig} onAdd=${fetchRecords} />
+            </tbody>
+        </table>
+    `;
+}
+
+// ----------------------------------------
+// DNS Update Command Component
+// ----------------------------------------
+function DnsUpdateCommand({ zone }) {
+    const { dnsConfig } = useContext(AppConfigContext);
+    return html`
+        ${zone.zone_keys.map(key => html`
             <div class="panel-block">
-            <div class="box">
+                <div class="box" style="max-width:90%; overflow:auto;">
+                    <h2 class="subtitle">Keyname: ${key.keyname}</h2>
+                    <pre><code>${generateNsUpdate({ name: 'your-zone-name', type: 'A', ttl: 300, value: '192.0.2.1' }, zone.zone, key, dnsConfig)}</code></pre>
+                </div>
+            </div>
+        `)}
+    `;
+}
+
+// ----------------------------------------
+// Show Keys
+// ----------------------------------------
+function ShowKeys({ zone }) {
+    return html`
+        <div class="panel-block">
+            This zone has ${zone.zone_keys.length} key${zone.zone_keys.length !== 1 ? 's' : ''} configured.
+        </div>
+        ${zone.zone_keys.map((key, index) => html`
+            <div class="panel-block">
+                <div class="box">
                     <h2 class="subtitle">Key #${index + 1}</h2>
                     <strong>Keyname:</strong> ${key.keyname}<br/>
                     <strong>Algorithm:</strong> ${key.algorithm}<br/>
                     <strong>Key:</strong> ${key.key}
                 </div>
             </div>
-        `)
-        }
-    `
+        `)}
+    `;
 }
 
-
-function ActiveDomain(props) {
-    const { user } = useAuth()
-    const tabs = ["Manage", "Keys", "DNS Update Command", "External DNS Config"]
-    const [activeTab, setActiveTab] = useState(tabs[0])
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState(null)
-    const [message, setMessage] = useState(null)
-    const [zone, setZone] = useState(null)
+// ----------------------------------------
+// Active Domain Tabs
+// ----------------------------------------
+function ActiveDomain({ zone: zoneName, onChange }) {
+    const { user } = useAuth();
+    const tabs = ["Manage", "Keys", "DNS Update Command", "External DNS Config"];
+    const [activeTab, setActiveTab] = useState(tabs[0]);
+    const [zone, setZone] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [message, setMessage] = useState("Loading zone details...");
 
     useEffect(async () => {
-        setLoading(true)
-        setMessage("Loading zone details...")
-        setError(null)
+        setLoading(true); setError(null);
         try {
-            const res = await getV1ZonesByZone({ path: { zone: props.zone }, headers: authHeaders(user) })
-            const zoneData = res?.data
-
-            if (!zoneData) {
-                setError(new Error(`Zone ${props.zone} not found or not active.`))
-            } else {
-                setZone(zoneData)
-            }
-
-        } catch (err) {
-            setError(err)
-        } finally {
-            setLoading(false)
-        }
-
-    }, [user, props.zone])
-
-    if (loading)
-        return html`<p>${message}</p>`;
-
-    if (error)
-        return html`<p>An error occured: ${error.message}</p>`;
+            const res = await getV1ZonesByZone({ path: { zone: zoneName }, headers: authHeaders(user) });
+            if (!res.data) throw new Error(`Zone ${zoneName} not found`);
+            setZone(res.data);
+        } catch (e) { setError(e); } finally { setLoading(false); }
+    }, [user, zoneName]);
 
     async function handleDeleteClick() {
         try {
-            setMessage("Deleting zone...")
-            setLoading(true)
-
-            const res = await deleteV1ZonesByZone({ path: { zone: zone.zoneData.zone }, headers: authHeaders(user) })
-            if (res.response.status !== 204) {
-                throw new Error(`Failed to delete zone ${zone.zoneData.zone}: ${res.response.statusText} `);
-            }
-
-            props.onChange();
-        } catch (e) {
-            setError(e)
-        } finally {
-            setLoading(false)
-        }
+            setLoading(true); setMessage("Deleting zone...");
+            const res = await deleteV1ZonesByZone({ path: { zone: zone.zoneData.zone }, headers: authHeaders(user) });
+            if (res.response.status !== 204) throw new Error(res.response.statusText);
+            onChange();
+        } catch (e) { setError(e); } finally { setLoading(false); }
     }
 
+    if (loading) return html`<p>${message}</p>`;
+    if (error) return html`<p class="has-text-danger">${error.message}</p>`;
+
     return html`
-    <p class="panel-tabs">
-        ${tabs.map(tab => html`<a class=${tab === activeTab ? "is-active" : ""} onClick=${() => setActiveTab(tab)}>${tab}</a>`)}
+        <p class="panel-tabs">
+            ${tabs.map(tab => html`<a class=${tab === activeTab ? "is-active" : ""} onClick=${() => setActiveTab(tab)}>${tab}</a>`)}
         </p>
 
-    ${activeTab === "Manage" && html`
-                <div class="panel-block">
-                    <button class="button is-danger" onClick=${handleDeleteClick}> Delete</button>
-                </div>`}
+        ${activeTab === "Manage" && html`
+            <div class="panel-block">
+                <button class="button is-danger" onClick=${handleDeleteClick}>Delete Zone</button>
+            </div>
+            <div class="panel-block">
+                <${DnsRecordsList} zone=${zone.zoneData.zone} tsigKey=${zone.zoneData.zone_keys[0]} />
+            </div>
+        `}
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone.zoneData} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone.zoneData} />`}
         ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsConfig=${zone.externalDnsConfig} />`}
-`
+    `;
 }
 
-function AvailableDomain(props) {
+// ----------------------------------------
+// Available Domain List
+// ----------------------------------------
+function AvailableDomain({ zone, onChange }) {
     return html`
         <nav class="panel">
-            <div class="panel-heading">
-                Zone: ${props.zone.name}
-            </div>
-            
-            ${props.zone.exists ?
-            html`<${ActiveDomain} zone=${props.zone.name} onChange=${props.onChange} />` :
-            html`<div class="panel-block"><${ActivateZone} zone=${props.zone.name} onChange=${props.onChange} /></div>`
-        }
+            <div class="panel-heading">Zone: ${zone.name}</div>
+            ${zone.exists
+            ? html`<${ActiveDomain} zone=${zone.name} onChange=${onChange} />`
+            : html`<div class="panel-block"><${ActivateZone} zone=${zone.name} onChange=${onChange} /></div>`}
         </nav>
-    `
+    `;
 }
 
-function AvailableDomainsList(props) {
+function AvailableDomainsList({ zones, onChange }) {
     return html`
-    <section class="mt-3">
-        <div class="container">
-            <h1 class="title">Domains</h1>
-            ${props.zones.map(zone => html`<${AvailableDomain} zone=${zone} onChange=${props.onChange} />`)}
-        </div>
-    </section>
-    `
+        <section class="mt-3">
+            <div class="container">
+                <h1 class="title">Domains</h1>
+                ${zones.map(z => html`<${AvailableDomain} zone=${z} onChange=${onChange} />`)}
+            </div>
+        </section>
+    `;
 }
 
+// ----------------------------------------
+// List Zones
+// ----------------------------------------
 export function ListZones() {
-    const { user } = useAuth()
-    const [zones, setZones] = useState([])
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState(null)
-    const [reloadTrigger, setReloadTrigger] = useState(true)
-    const appConfig = useContext(AppConfigContext)
+    const { user } = useAuth();
+    const [zones, setZones] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [reloadTrigger, setReloadTrigger] = useState(true);
 
     useEffect(async () => {
+        setLoading(true); setError(null);
         try {
-            const response = await getV1Zones({ headers: authHeaders(user) })
-            const zones = response?.data?.zones
-            if (!zones)
-                throw new Error(`Unable to load available zones, message: ${response.statusText}, HTTP status: ${response.status} `)
+            const res = await getV1Zones({ headers: authHeaders(user) });
+            if (!res.data?.zones) throw new Error("Unable to load zones");
+            setZones(res.data.zones);
+        } catch (e) { setError(e); } finally { setLoading(false); }
+    }, [user, reloadTrigger]);
 
-            setZones(zones)
-        } catch (error) {
-            setError(error)
-        } finally {
-            setLoading(false)
-        }
-        return () => { }
-    }, [reloadTrigger, user])
+    if (loading) return html`<p>Loading zones...</p>`;
+    if (error) return html`<a onClick=${() => setReloadTrigger(!reloadTrigger)}>Retry Load</a>`;
 
-    if (loading)
-        return html`<p>Loading zones...</p>`;
-
-    if (error)
-        return html`<a onClick=${handleReloadClick}>Retry Load</a>`;
-
-    return html`<${AvailableDomainsList} zones=${zones} dnsConfig=${appConfig.dnsConfig} onChange=${() => setReloadTrigger(!reloadTrigger)}/>`
+    return html`<${AvailableDomainsList} zones=${zones} onChange=${() => setReloadTrigger(!reloadTrigger)} />`;
 }
