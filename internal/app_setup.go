@@ -257,10 +257,11 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	})
 
 	// Expose DNS server configuration
-	router.GET(("/dns_config.json"), func(c *gin.Context) {
+	router.GET(("/app_config.json"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"server_address": app.Config.DnsServerAddress,
-			"server_port":    app.Config.DnsServerPort,
+			"dns_server_address": app.Config.DnsServerAddress,
+			"dns_server_port":    app.Config.DnsServerPort,
+			"version":            helper.AppVersion,
 		})
 	})
 

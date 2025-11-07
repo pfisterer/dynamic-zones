@@ -162,7 +162,7 @@ You’ll need to configure:
 ## Releasing a New Version
 
 To release a new version of the API, follow these steps:
-- Update the file `VERSION` with the new version number.
+- Update the file `internal/helper/VERSION` with the new version number.
 - Commit and push the changes to Github.
 - Github Actions will automatically build the new version and create a release.
 
