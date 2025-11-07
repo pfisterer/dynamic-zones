@@ -62,18 +62,18 @@ function stripZone(recordName, zoneName) {
 // ----------------------------------------
 // Shared NSUPDATE command generator
 // ----------------------------------------
-export function generateNsUpdate(record, zone, tsigKey, dnsConfig) {
+export function generateNsUpdate(record, zone, tsigKey, appConfig) {
     return [
         `# Create/Update record in DNS`,
         `nsupdate -y "${tsigKey.algorithm}:${tsigKey.keyname}:${tsigKey.key}" <<EOF`,
-        `server ${dnsConfig.server_address} ${dnsConfig.server_port}`,
+        `server ${appConfig.dns_server_address} ${appConfig.dns_server_port}`,
         `zone ${zone}`,
         `update add ${record.name}.${zone}. ${record.ttl} IN ${record.type} ${record.value}`,
         `send`,
         `EOF`,
         ``,
         `# Verify`,
-        `dig @${dnsConfig.server_address} -p ${dnsConfig.server_port} ${record.name}.${zone}. ${record.type} +short`
+        `dig @${appConfig.dns_server_address} -p ${appConfig.dns_server_port} ${record.name}.${zone}. ${record.type} +short`
     ].join('\n');
 }
 
@@ -155,8 +155,10 @@ function ExternalDnsConfig({ externalDnsConfig, zone }) {
 const SUPPORTED_TYPES = ["A", "AAAA"];
 
 
-function DnsRecordRow({ zone, tsigKey, record, dnsConfig, onChange }) {
+function DnsRecordRow({ zone, tsigKey, record, onChange }) {
     const { user } = useAuth();
+    const { appConfig } = useAppConfig()
+
     const [editing, setEditing] = useState(false);
     const [fields, setFields] = useState({ ...record });
     const [loading, setLoading] = useState(false);
@@ -222,7 +224,7 @@ function DnsRecordRow({ zone, tsigKey, record, dnsConfig, onChange }) {
     }
 
     async function handleCopy() {
-        const nsupdate = generateNsUpdate(fields, zone, tsigKey, dnsConfig);
+        const nsupdate = generateNsUpdate(fields, zone, tsigKey, appConfig);
         try {
             await navigator.clipboard.writeText(nsupdate);
             alert('nsupdate command copied!');
@@ -329,7 +331,6 @@ function AddDnsRecordRow({ zone, tsigKey, onAdd }) {
 
 
 function DnsRecordsList({ zone, tsigKey }) {
-    const { dnsConfig } = useAppConfig();
     const { user } = useAuth();
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -377,8 +378,8 @@ function DnsRecordsList({ zone, tsigKey }) {
                 </tr>
             </thead>
             <tbody>
-                ${records.map(record => html`<${DnsRecordRow} zone=${zone} tsigKey=${tsigKey} record=${record} dnsConfig=${dnsConfig} onChange=${fetchRecords} />`)}
-                <${AddDnsRecordRow} zone=${zone} tsigKey=${tsigKey} dnsConfig=${dnsConfig} onAdd=${fetchRecords} />
+                ${records.map(record => html`<${DnsRecordRow} zone=${zone} tsigKey=${tsigKey} record=${record} onChange=${fetchRecords} />`)}
+                <${AddDnsRecordRow} zone=${zone} tsigKey=${tsigKey} onAdd=${fetchRecords} />
             </tbody>
         </table>
     `;
@@ -388,13 +389,13 @@ function DnsRecordsList({ zone, tsigKey }) {
 // DNS Update Command Component
 // ----------------------------------------
 function DnsUpdateCommand({ zone }) {
-    const { dnsConfig } = useAppConfig();
+    const { appConfig } = useAppConfig();
     return html`
         ${zone.zone_keys.map(key => html`
             <div class="panel-block">
                 <div class="box" style="max-width:90%; overflow:auto;">
                     <h2 class="subtitle">Keyname: ${key.keyname}</h2>
-                    <pre><code>${generateNsUpdate({ name: 'your-zone-name', type: 'A', ttl: 300, value: '192.0.2.1' }, zone.zone, key, dnsConfig)}</code></pre>
+                    <pre><code>${generateNsUpdate({ name: 'your-zone-name', type: 'A', ttl: 300, value: '192.0.2.1' }, zone.zone, key, appConfig)}</code></pre>
                 </div>
             </div>
         `)}

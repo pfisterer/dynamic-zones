@@ -1,6 +1,6 @@
 import { render, html, Router, Route, Switch, Link, useHashLocation } from './dist/deps.mjs';
 import { useAuth, AuthProvider } from './ui-context-auth.js';
-import { AppConfigProvider } from './ui-context-appconfig.js';
+import { AppConfigProvider, useAppConfig } from './ui-context-appconfig.js';
 import { ListTokens } from './ui-component-tokens.js';
 import { ListZones } from './ui-component-zones.js';
 import { Documentation } from './ui-component-documentation.js';
@@ -51,7 +51,14 @@ function Header(props) {
 
 function Main() {
     const { user, login } = useAuth()
-    const header = html`<${Header} title="Dynamic Zones DNS Management UI" />`
+    const { appConfig } = useAppConfig()
+
+    const appVersion = appConfig?.version || "unknown"
+    const title = appConfig ? html`<b>Dynamic Zones</b> (${appVersion})` : "Loading application..."
+    const header = html`<${Header} title=${title} version=${appVersion} />`
+
+    if (!appConfig)
+        return header
 
     if (!user) {
         return html`

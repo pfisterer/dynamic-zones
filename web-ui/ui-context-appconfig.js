@@ -21,13 +21,15 @@ export function AppConfigProvider({ children }) {
                 const apiUrl = config?.apiUrl;
                 if (!apiUrl) return;
 
-                // Load DNS config relative to API
-                const dnsUrl = new URL('../dns_config.json', apiUrl).toString();
-                const response = await fetch(dnsUrl);
-                if (!response.ok) throw new Error(`Failed to load dns_config.json`);
-                const dnsConfig = await response.json();
+                // Load app config relative to API
+                const appConfigUrl = new URL('../app_config.json', apiUrl).toString();
+                const response = await fetch(appConfigUrl);
+                if (!response.ok) throw new Error(`Failed to load app_config.json`);
+                const appConfig = await response.json();
 
-                setConfig({ apiUrl, dnsConfig });
+                console.log("Got app config:", appConfig);
+
+                setConfig({ apiUrl, appConfig });
             } catch (e) {
                 setError(e);
             }
