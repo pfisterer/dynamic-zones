@@ -42,7 +42,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 	// Run periodic DNS update checks
 	for {
-		err := PerformSingleUpstreamDnsUpdateCheck(&app.Config.UpstreamDns, dynamicZonesDnsIPAddress, log)
+		err := PerformSingleUpstreamDnsUpdateCheck(&app.Config.UpstreamDns, dynamicZonesDnsIPAddress, log, false)
 		if err != nil {
 			log.Errorf("Error during upstream DNS update check: %v", err)
 		}
@@ -54,7 +54,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 }
 
-func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger) error {
+func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger, forceUpdate bool) error {
 	log.Debug("Performing upstream DNS update check")
 
 	// Make sure FQDNs are properly formatted
@@ -78,7 +78,7 @@ func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZone
 	}
 
 	// Verify that DNS record matches the expected address
-	if len(ips) > 0 && dynamicZonesDnsIPAddress.Equal(ips[0]) {
+	if len(ips) > 0 && dynamicZonesDnsIPAddress.Equal(ips[0]) && !forceUpdate {
 		log.Infof("DNS address '%s' matches expected address. No update needed.", dynamicZonesDnsIPAddress)
 	} else {
 		// If the DNS record does not match, delete the existing record and add the new one

@@ -24,7 +24,7 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	log.Info("Starting upstream DNS update test")
 	dynamicZonesDnsIPAddress := net.ParseIP(appConfig.DnsServerAddress)
 
-	err := PerformSingleUpstreamDnsUpdateCheck(&appConfig.UpstreamDns, dynamicZonesDnsIPAddress, log)
+	err := PerformSingleUpstreamDnsUpdateCheck(&appConfig.UpstreamDns, dynamicZonesDnsIPAddress, log, true)
 	if err != nil {
 		log.Errorf("Upstream DNS update test failed: %v", err)
 		t.Fatalf("Upstream DNS update test failed: %v", err)
