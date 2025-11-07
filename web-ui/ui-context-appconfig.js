@@ -26,9 +26,6 @@ export function AppConfigProvider({ children }) {
                 const response = await fetch(appConfigUrl);
                 if (!response.ok) throw new Error(`Failed to load app_config.json`);
                 const appConfig = await response.json();
-
-                console.log("Got app config:", appConfig);
-
                 setConfig({ apiUrl, appConfig });
             } catch (e) {
                 setError(e);

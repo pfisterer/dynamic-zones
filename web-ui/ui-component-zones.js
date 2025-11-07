@@ -1,7 +1,8 @@
-import { html, useState, useEffect, useContext } from './dist/deps.mjs';
+import { html, useState, useEffect } from './dist/deps.mjs';
 import { useAuth, authHeaders } from './ui-context-auth.js';
 import { useAppConfig } from './ui-context-appconfig.js';
-import { getV1Zones, getV1ZonesByZone, postV1ZonesByZone, deleteV1ZonesByZone, getV1DnsRecords, postV1DnsRecordsCreate, postV1DnsRecordsDelete } from 'dynamic-zones';
+import { CodeBlock } from './ui-component-codeblock.js';
+import { getV1Zones, getV1ZonesByZone, postV1ZonesByZone, deleteV1ZonesByZone, getV1DnsRecords, postV1DnsRecordsCreate, postV1DnsRecordsDelete, getV1Tokens } from 'dynamic-zones';
 
 function normalizeRecordName(name, zone) {
     if (!name) return '';
@@ -116,19 +117,43 @@ function ActivateZone({ zone, onChange }) {
 // ----------------------------------------
 function ExternalDnsConfig({ externalDnsConfig, zone }) {
     const { apiUrl } = useAppConfig();
+    const { user } = useAuth();
+    const [token, setToken] = useState(null);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await getV1Tokens({ headers: authHeaders(user) });
+                const tokens = res?.data?.tokens
+                if (tokens && tokens.length > 0) {
+                    const readOnlyToken = tokens.find(t => t.read_only === true);
+                    console.log("Found tokens:", tokens, "Using token:", readOnlyToken || tokens[0]);
+                    setToken(readOnlyToken.token_string || tokens[0].token_string);
+                }
+            } catch (e) {
+                console.error("Failed to fetch tokens:", e);
+            }
+        })();
+    }, [user]);
+
     const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns`;
+    const curlCommand = `curl -H "Authorization: Bearer ${token || "insert_your_token"}" ${url}`;
+
     return html`
         <div class="panel-block">
             <h2 class="subtitle">Kubernetes External DNS support</h2>
         </div>
+
         <div class="panel-block">
             <p>
                 You can curl the config below directly using something like:
-                <pre style="white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">
-                    curl -H "Authorization: Bearer your_token" ${url}
-                </pre>
             </p>
         </div>
+
+        <div class="panel-block">
+            <${CodeBlock} code=${curlCommand} />
+        </div>
+        
         <div class="panel-block">
             <h2 class="subtitle">Kubernetes External DNS Deployment</h2>
         </div>
@@ -139,12 +164,9 @@ function ExternalDnsConfig({ externalDnsConfig, zone }) {
                 Please refer to the <a href="https://github.com/kubernetes-sigs/external-dns">External DNS documentation</a> for more information.
             </p>
         </div>
-
-
+        
         <div class="panel-block">
-            <div class="box" style="max-width:100%; overflow:auto; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">
-                <pre><code>${externalDnsConfig}</code></pre>
-            </div>
+            <${CodeBlock} code=${externalDnsConfig} />
         </div>
     `;
 }
@@ -395,7 +417,7 @@ function DnsUpdateCommand({ zone }) {
             <div class="panel-block">
                 <div class="box" style="max-width:90%; overflow:auto;">
                     <h2 class="subtitle">Keyname: ${key.keyname}</h2>
-                    <pre><code>${generateNsUpdate({ name: 'your-zone-name', type: 'A', ttl: 300, value: '192.0.2.1' }, zone.zone, key, appConfig)}</code></pre>
+                    <${CodeBlock} code=${generateNsUpdate({ name: 'your-zone-name', type: 'A', ttl: 300, value: '192.0.2.1' }, zone.zone, key, appConfig)} />
                 </div>
             </div>
         `)}
