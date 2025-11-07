@@ -92,8 +92,17 @@ func getZone(app *AppData) gin.HandlerFunc {
 		}
 
 		if format == "external-dns" && statusCode == http.StatusOK {
-			app.Log.Debug("getZone: format=external-dns requested, transforming response")
-			returnValue = returnValue.(map[string]any)["externalDnsConfig"]
+			app.Log.Debug("getZone: format=external-dns requested, transforming response to plain YAML")
+
+			yamlString, ok := returnValue.(map[string]any)["externalDnsConfig"].(string)
+			if !ok {
+				app.Log.Errorf("getZone: Failed to cast externalDnsConfig to string")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error"})
+				return
+			}
+
+			c.String(http.StatusOK, yamlString)
+			return
 		}
 
 		app.Log.Debug("🟢 getZoneReturning zone with status ", statusCode)
