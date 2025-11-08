@@ -20,7 +20,7 @@ const ApiTokenPrefix = "dynz_token_"
 type Zone struct {
 	gorm.Model
 	Zone              string    `gorm:"primaryKey" json:"domain"`
-	User              string    `gorm:"index" json:"user"`
+	Username          string    `gorm:"index" json:"user"`
 	RequiresRefreshAt time.Time `json:"requires_refresh_at"`
 }
 
@@ -30,7 +30,7 @@ type Token struct {
 	UpdatedAt time.Time  `json:"updated_at" example:"2025-11-04T12:00:00Z" swagger:"desc(Last update timestamp)"`
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty" example:"2025-12-31T23:59:59Z" swagger:"desc(Deletion timestamp, if soft-deleted)"`
 
-	User        string    `gorm:"index" json:"user" example:"alice" swagger:"desc(User that owns the token)"`
+	Username    string    `gorm:"index" json:"user" example:"alice" swagger:"desc(User that owns the token)"`
 	TokenString string    `gorm:"uniqueIndex" json:"token_string" example:"dynz_abcdef123456" swagger:"desc(The API token string)"`
 	ExpiresAt   time.Time `json:"expires_at" example:"2025-12-31T23:59:59Z" swagger:"desc(Token expiration date and time)"`
 	ReadOnly    bool      `json:"read_only" gorm:"default:false" example:"false"`
@@ -93,7 +93,7 @@ func (storage *Storage) GetAllZones(ctx context.Context, ch chan<- Zone) error {
 
 func (storage *Storage) ListUserZones(user string) ([]Zone, error) {
 	var zone []Zone
-	if err := storage.db.Where("user = ?", user).Find(&zone).Error; err != nil {
+	if err := storage.db.Where("username = ?", user).Find(&zone).Error; err != nil {
 		return nil, fmt.Errorf("storage.ListUserZones: Failed to list user ('%s') zones: %w", user, err)
 	}
 	return zone, nil
@@ -125,7 +125,7 @@ func (storage *Storage) GetZone(user string, zone string) (*Zone, error) {
 	}
 
 	// Get the zone from the database
-	if err := storage.db.Where("user = ? AND zone = ?", user, zone).First(&d).Error; err != nil {
+	if err := storage.db.Where("username = ? AND zone = ?", user, zone).First(&d).Error; err != nil {
 		return nil, fmt.Errorf("storage.GetZone: Failed to get zone ('%s') for user ('%s'): %w", zone, user, err)
 	}
 	return &d, nil
@@ -133,8 +133,8 @@ func (storage *Storage) GetZone(user string, zone string) (*Zone, error) {
 
 func (storage *Storage) CreateZone(user string, zone string, requiresRefreshAt time.Time) (*Zone, error) {
 	d := &Zone{
-		User: user,
-		Zone: zone,
+		Username: user,
+		Zone:     zone,
 	}
 	if err := storage.db.Create(d).Error; err != nil {
 		return nil, fmt.Errorf("storage.CreateZone: Failed to create zone ('%s') for user ('%s'): %w", zone, user, err)
@@ -143,7 +143,7 @@ func (storage *Storage) CreateZone(user string, zone string, requiresRefreshAt t
 }
 
 func (storage *Storage) DeleteZone(user string, zone string) error {
-	if err := storage.db.Where("user = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
+	if err := storage.db.Where("username = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
 		return fmt.Errorf("storage.CreateZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
 	}
 	return nil
@@ -169,7 +169,7 @@ func (storage *Storage) GetTokens(ctx context.Context, username string) ([]Token
 	var tokens []Token
 
 	err := storage.db.WithContext(ctx).
-		Where("user = ?", username).
+		Where("username = ?", username).
 		Find(&tokens).Error
 
 	if err != nil {
@@ -206,7 +206,7 @@ func (storage *Storage) CreateToken(ctx context.Context, username string, ttl ti
 	tokenString := ApiTokenPrefix + hex.EncodeToString(b)
 
 	token := &Token{
-		User:        username,
+		Username:    username,
 		TokenString: tokenString,
 		ExpiresAt:   time.Now().Add(ttl),
 		ReadOnly:    readOnly,
@@ -221,7 +221,7 @@ func (storage *Storage) CreateToken(ctx context.Context, username string, ttl ti
 
 func (storage *Storage) DeleteToken(ctx context.Context, username string, id int) (int, gin.H, error) {
 	result := storage.db.WithContext(ctx).
-		Where("user = ? AND id = ?", username, id).
+		Where("username = ? AND id = ?", username, id).
 		Delete(&Token{})
 
 	if result.Error != nil {

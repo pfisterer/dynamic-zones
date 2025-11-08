@@ -50,7 +50,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *storage.Stora
 
 			// Set user info in context
 			c.Set(UserDataKey, &UserClaims{
-				PreferredUsername: token.User,
+				PreferredUsername: token.Username,
 			})
 
 			c.Next()

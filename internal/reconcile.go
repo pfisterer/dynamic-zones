@@ -40,7 +40,7 @@ func Reconcile(ctx context.Context, db *storage.Storage, pdns *powerdns.Client, 
 				}
 
 				// Create Zone in PowerDNS as it is missing or invalid and has been deleted above
-				_, err := zones.CreateZone(ctx, pdns, todo.Zone.User, todo.Zone.Zone, true)
+				_, err := zones.CreateZone(ctx, pdns, todo.Zone.Username, todo.Zone.Zone, true)
 				if err != nil {
 					log.Warnf("Reconcile: Failed to re-create zone '%s' invalid in PowerDNS: %v", todo.Zone, err)
 					continue
