@@ -1,10 +1,13 @@
-import { html } from './dist/deps.mjs';
+import { html, useState } from './dist/deps.mjs';
 
 export function CodeBlock({ code }) {
+    const [buttonText, setButtonText] = useState('Copy');
 
     const copyToClipboard = async (text) => {
         try {
             await navigator.clipboard.writeText(text);
+            setButtonText('Copied to Clipboard');
+            setTimeout(() => setButtonText('Copy'), 2000);
         } catch (err) {
             console.error('Could not copy text: ', err);
         }
@@ -25,7 +28,7 @@ export function CodeBlock({ code }) {
             right: 5px; 
             z-index: 10;
             opacity: 0; /* START: Unsichtbar */
-            transition: opacity 0.2s ease-in-out; /* Sanfter Übergang */
+            transition: opacity 0.3s ease-in-out; /* Sanfter Übergang */
         }
 
         /* 2. Bei Hover über den Container wird der Button sichtbar */
@@ -40,7 +43,7 @@ export function CodeBlock({ code }) {
             word-wrap: break-word; 
             overflow-wrap: break-word;
             font-size: 0.85em; 
-            line-height: 1.2;
+            line-height: 1.3;
             width: 100%;
         }
     `;
@@ -54,7 +57,7 @@ export function CodeBlock({ code }) {
             <button class="button is-small is-light copy-button has-background-danger" 
                     onClick=${() => copyToClipboard(code)} 
                     title="Copy code">
-                Copy
+                ${buttonText}
             </button>
         </div>
     `;
