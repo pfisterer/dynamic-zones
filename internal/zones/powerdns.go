@@ -107,19 +107,21 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 		return nil, fmt.Errorf("powerdns.CreateZone: Error setting ALLOW-AXFR-TSIG metadata: %v", err)
 	}
 
+	// Allow dynamic updates from any IP, required for TSIG updates
+	// From the documentation (https://doc.powerdns.com/authoritative/dnsupdate.html): The semantics are
+	// that first a dynamic update has to be allowed either by the global allow-dnsupdate-from setting,
+	// or by a per-zone ALLOW-DNSUPDATE-FROM metadata setting.
+	// Secondly, if a zone has a TSIG-ALLOW-DNSUPDATE metadata setting, that must match too.
+	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
+	if err != nil {
+		return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
+	}
+
 	// Allow the TSIG key to perform dynamic updates
 	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error setting TSIG dynamic update metadata: %v", err)
 	}
-
-	// Allow dynamic updates from any IP (for testing)
-	/*
-		_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
-		if err != nil {
-			return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
-		}
-	*/
 
 	return GetZone(ctx, pdns, zone)
 }
