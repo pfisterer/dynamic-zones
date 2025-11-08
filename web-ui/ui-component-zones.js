@@ -69,6 +69,7 @@ export function generateNsUpdate(record, zone, tsigKey, appConfig) {
         `nsupdate -y "${tsigKey.algorithm}:${tsigKey.keyname}:${tsigKey.key}" <<EOF`,
         `server ${appConfig.dns_server_address} ${appConfig.dns_server_port}`,
         `zone ${zone}`,
+        `update delete ${record.name}.${zone}. IN ${record.type}`,
         `update add ${record.name}.${zone}. ${record.ttl} IN ${record.type} ${record.value}`,
         `send`,
         `EOF`,
