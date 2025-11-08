@@ -59,7 +59,7 @@ func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneData
 	return &response, nil
 }
 
-func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone string, force bool) (*ZoneDataResponse, error) {
+func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone string, force bool, nameservers []string) (*ZoneDataResponse, error) {
 	sanitizedUser := strings.ReplaceAll(user, "@", "-")
 	sanitizedUser = strings.ReplaceAll(sanitizedUser, ".", "-")
 
@@ -73,20 +73,19 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	}
 
 	// Create the zone in PowerDNS
-	_, err := pdns.Zones.Add(ctx, &powerdns.Zone{
+	zondeDef := powerdns.Zone{
 		Name:        powerdns.String(zone),
 		Kind:        powerdns.ZoneKindPtr(powerdns.NativeZoneKind),
 		DNSsec:      powerdns.Bool(false),
 		SOAEdit:     powerdns.String(""),
 		SOAEditAPI:  powerdns.String(""),
 		APIRectify:  powerdns.Bool(true),
-		Nameservers: []string{"localhost."}, // TODO: Adjust for production
-	})
-
-	fmt.Println("powerdns.CreateZone: XXXXXXXXXXXXXXXX TODO: Use some sensible nameservers for the zone")
+		Nameservers: nameservers,
+	}
+	_, err := pdns.Zones.Add(ctx, &zondeDef)
 
 	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v", err)
+		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v with zone definition: %+v", err, zondeDef)
 	}
 
 	// Generate a TSIG key
@@ -115,10 +114,12 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	}
 
 	// Allow dynamic updates from any IP (for testing)
-	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
-	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
-	}
+	/*
+		_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
+		if err != nil {
+			return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
+		}
+	*/
 
 	return GetZone(ctx, pdns, zone)
 }

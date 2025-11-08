@@ -78,7 +78,14 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone string
 	}
 
 	// Create the zone in PowerDNS
-	zoneResponse, err := zones.CreateZone(ctx, app.Pdns, username, zone, true)
+	if (app.Config.UpstreamDns.Name == "") || (app.Config.UpstreamDns.Zone == "") {
+		return http.StatusInternalServerError,
+			gin.H{"error": "Upstream DNS configuration is incomplete, unable to create zone"},
+			fmt.Errorf("💥 app.CreateZone zone: Upstream DNS configuration is incomplete (Name: '%s', Zone: '%s')", app.Config.UpstreamDns.Name, app.Config.UpstreamDns.Zone)
+	}
+
+	thisNsServer := fmt.Sprintf("%s.%s", app.Config.UpstreamDns.Name, app.Config.UpstreamDns.Zone)
+	zoneResponse, err := zones.CreateZone(ctx, app.Pdns, username, zone, true, []string{thisNsServer})
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to create zone in DNS server"},
