@@ -3,7 +3,6 @@ package zones
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
@@ -60,11 +59,9 @@ func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneData
 }
 
 func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone string, force bool, nameservers []string) (*ZoneDataResponse, error) {
-	sanitizedUser := strings.ReplaceAll(user, "@", "-")
-	sanitizedUser = strings.ReplaceAll(sanitizedUser, ".", "-")
-
 	// Construct the new, compliant key name
-	keyname := "user-" + sanitizedUser + "-zone-" + zone + "-key"
+	// Replace all dots with dashes to comply with PowerDNS key name requirements
+	keyname := "key-" + helper.Sha1Hash("user-"+user+"-zone-"+zone+"-key")
 
 	// Delete potentially existing zone and key if forcing
 	if force {
