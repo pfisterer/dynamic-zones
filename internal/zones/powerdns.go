@@ -3,6 +3,7 @@ package zones
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
@@ -69,20 +70,37 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 		_ = pdns.TSIGKeys.Delete(ctx, keyname)
 	}
 
+	// Construct a valid SOA record (serial in YYYYMMDDnn format)
+	serial := time.Now().Format("20060102") + "01"
+	soaNameserver := nameservers[0]
+
+	// make sure that soaNameserver ends with .
+	if soaNameserver[len(soaNameserver)-1] != '.' {
+		soaNameserver += "."
+	}
+
+	// Create SOA record
+	// <primary-ns> <hostmaster-email> <serial> <refresh> <retry> <expire> <minimum>
+	refresh := 10800 // 3 hours; Tells secondary/slave servers how often they should check with the master for updates.
+	retry := 3600    // 1 hour; If a secondary fails to contact the master, retry after this interval.
+	expire := 604800 // 1 week; How long a secondary will continue serving old data if it cannot reach the master.
+	minimum := 60    // 1 minute;  Used as the negative caching TTL: how long a resolver caches “no such record” answers (NXDOMAIN).
+	soa := fmt.Sprintf("%s. hostmaster.%s. %s %d %d %d %d", soaNameserver, zone, serial, refresh, retry, expire, minimum)
+
 	// Create the zone in PowerDNS
-	zondeDef := powerdns.Zone{
+	zoneDef := powerdns.Zone{
 		Name:        powerdns.String(zone),
 		Kind:        powerdns.ZoneKindPtr(powerdns.NativeZoneKind),
 		DNSsec:      powerdns.Bool(false),
-		SOAEdit:     powerdns.String(""),
-		SOAEditAPI:  powerdns.String(""),
+		SOAEdit:     powerdns.String(soa),
+		SOAEditAPI:  powerdns.String(soa),
 		APIRectify:  powerdns.Bool(true),
 		Nameservers: nameservers,
 	}
-	_, err := pdns.Zones.Add(ctx, &zondeDef)
 
+	_, err := pdns.Zones.Add(ctx, &zoneDef)
 	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v with zone definition: %+v", err, zondeDef)
+		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v with zone definition: %+v", err, zoneDef)
 	}
 
 	// Generate a TSIG key

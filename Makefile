@@ -14,8 +14,8 @@ CLIENT_SDK := $(CLIENT_DIR)/sdk.gen.ts
 DIST_DIR := $(DOC_DIR)/client-dist
 
 # Docker Image details
-DOCKER_REPO ?= farberg/$(PROJECT_NAME)
-DOCKER_TAG ?= latest
+DOCKER_REPO ?= ghcr.io/pfisterer/$(PROJECT_NAME)
+DOCKER_TAG ?= $(shell cat internal/helper/VERSION)
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
@@ -85,22 +85,19 @@ run: build
 
 docker: docker-build docker-login multi-arch-build 
 
-docker-login:
-	@echo "🔑 Logging into Docker Hub (or configured registry)..."
-	@docker login
-
 docker-build:
 	@echo "🏗️ Building Docker image $(DOCKER_REPO):$(DOCKER_TAG)..."
 	docker build --progress=plain -t "$(DOCKER_REPO):$(DOCKER_TAG)" .
 	@echo "✅ Docker image $(DOCKER_REPO):$(DOCKER_TAG) built."
 	@echo "You can push it with: docker push $(DOCKER_REPO):$(DOCKER_TAG)"
 
-multi-arch-build: docker-login
+multi-arch-build:
 	@echo "🏗️ Building multi-architecture Docker image for $(DOCKER_PLATFORMS)..."
 	docker buildx build \
 		--progress plain \
 		--platform $(DOCKER_PLATFORMS) \
 		--tag "$(DOCKER_REPO):$(DOCKER_TAG)" \
+		--push \
 		.
 	@echo "✅ Multi-architecture image $(DOCKER_REPO):$(DOCKER_TAG) built and pushed."
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"
@@ -117,5 +114,4 @@ help:
 	@echo "  build     → Compile Go binary"
 	@echo "  clean     → Remove build artifacts"
 	@echo "  run       → Run Go app"
-	@echo "  docker-login        → Log into Docker Hub (required before pushing multi-arch images)"
 	@echo "  multi-arch-build    → Build and push multi-architecture Docker image (requires buildx & Docker login)"

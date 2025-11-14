@@ -32,7 +32,7 @@ txtPrefix: dynamic-zones-dns-
 extraArgs:
   - --rfc2136-host={{ .dnsServerAddress }}
   - --rfc2136-port={{ .dnsServerPort }}
-  - --rfc2136-zone={{ .zone }}.
+  - --rfc2136-zone={{ .zone }}
   - --rfc2136-tsig-secret={{ .tsigKey }}
   - --rfc2136-tsig-secret-alg={{ .tsigAlgorithm }}
   - --rfc2136-tsig-keyname={{ .tsigKeyname }}
