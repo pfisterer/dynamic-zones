@@ -96,6 +96,7 @@ multi-arch-build:
 	docker buildx build \
 		--progress plain \
 		--platform $(DOCKER_PLATFORMS) \
+		--tag "$(DOCKER_REPO):latest" \
 		--tag "$(DOCKER_REPO):$(DOCKER_TAG)" \
 		--push \
 		.
