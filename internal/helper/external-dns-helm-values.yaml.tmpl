@@ -1,4 +1,6 @@
+# ------------------------------------------------------------------------------
 # Namespace is usually created outside Helm, but you can note it here
+# ------------------------------------------------------------------------------
 namespace: external-dns
 
 # ------------------------------------------------------------------------------
@@ -10,27 +12,26 @@ image:
   pullPolicy: IfNotPresent
 
 # ------------------------------------------------------------------------------
-# Environment variable for TSIG secret (referencing a Kubernetes Secret)
+# Provider (Helm-native)
 # ------------------------------------------------------------------------------
-extraEnv:
-  - name: RFC2136_TSIG_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: {{ .secretName }}
-        key: tsig-secret
+logLevel: debug
+
+provider:
+  name: rfc2136
+
+registry: txt
+txtOwnerId: dynamic-zones-dns
+txtPrefix: dynamic-zones-dns-
+
 
 # ------------------------------------------------------------------------------
 # CLI arguments corresponding to your deployment spec
 # ------------------------------------------------------------------------------
 extraArgs:
-  - --registry=txt
-  - --txt-prefix={{ .txtPrefix }}
-  - --txt-owner-id={{ .txtOwnerId }}
-  - --provider=rfc2136
   - --rfc2136-host={{ .dnsServerAddress }}
   - --rfc2136-port={{ .dnsServerPort }}
   - --rfc2136-zone={{ .zone }}.
-  - --rfc2136-tsig-secret-env=RFC2136_TSIG_SECRET
+  - --rfc2136-tsig-secret={{ .tsigKey }}
   - --rfc2136-tsig-secret-alg={{ .tsigAlgorithm }}
   - --rfc2136-tsig-keyname={{ .tsigKeyname }}
   - --rfc2136-tsig-axfr

@@ -146,7 +146,7 @@ func GetAppConfigFromEnvironment() AppConfig {
 		DnsServerAddress:   helper.GetEnvString("DYNAMIC_ZONES_SERVER_ADDRESS", "localhost"),
 		DnsServerPort:      int32(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_PORT", 15353)),
 		ApiTokenTTLHours:   helper.GetEnvInt("DYNAMIC_ZONES_API_TOKEN_TTL_HOURS", 24),
-		ExternalDnsVersion: helper.GetEnvString("DYNAMIC_ZONES_EXTERNAL_DNS_IMAGE_VERSION", "v0.19.1"),
+		ExternalDnsVersion: helper.GetEnvString("DYNAMIC_ZONES_EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
 	}
 
 }

@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          keep-n-tagged: 1
+          keep-n-tagged: 3
           delete-untagged: true
           delete-ghost-images: true
           delete-orphaned-images: true

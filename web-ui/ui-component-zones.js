@@ -139,7 +139,6 @@ function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone 
 
     const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns&part=`;
     const helmCommand = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}values.yaml' | helm install external-dns external-dns/external-dns -n external-dns -f - `;
-    const curlCommandSecretYaml = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}secret.yaml' | kubectl apply -f -`;
 
     return html`
         <div class="panel-block">
@@ -149,7 +148,7 @@ function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone 
         <div class="panel-block">
             <p>
                 You can curl helm's values.yaml and a secret's yaml below directly using something like. Don't forget to add the local helm repository for external-dns first: 
-                <code>helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/</code> and then run <code>helm repo update</code>.
+                <code>helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/; helm repo update</code>.
             </p>
         </div>
 
@@ -157,10 +156,6 @@ function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone 
             <${CodeBlock} code=${helmCommand} />
         </div>
 
-        <div class="panel-block">
-            <${CodeBlock} code=${curlCommandSecretYaml} />
-        </div>
-        
         <div class="panel-block">
             <h2 class="subtitle">Kubernetes External DNS Deployment</h2>
         </div>
@@ -170,10 +165,6 @@ function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone 
                 Use the following configuration to set up your Kubernetes cluster to automatically perform updates on this DNS server. 
                 Please refer to the <a href="https://github.com/kubernetes-sigs/external-dns">External DNS documentation</a> for more information.
             </p>
-        </div>
-        
-        <div class="panel-block">
-            <${CodeBlock} code=${externalDnsSecretYaml} />
         </div>
         
         <div class="panel-block">

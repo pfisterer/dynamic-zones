@@ -82,7 +82,6 @@ func getZone(app *AppData) gin.HandlerFunc {
 		format := c.Query("format")
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.ExternalDnsVersion)
-		part := c.DefaultQuery("part", "values.yaml")
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
@@ -94,20 +93,9 @@ func getZone(app *AppData) gin.HandlerFunc {
 		}
 
 		if format == "external-dns" && statusCode == http.StatusOK {
-			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML", part)
-			var ok bool
-			var yamlString string
+			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML")
 
-			switch part {
-			case "values.yaml":
-				yamlString, ok = returnValue.(map[string]any)["externalDnsValuesYaml"].(string)
-			case "secret.yaml":
-				yamlString, ok = returnValue.(map[string]any)["externalDnsSecretYaml"].(string)
-			default:
-				app.Log.Errorf("getZone: Invalid part '%s' requested", part)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid part requested"})
-				return
-			}
+			yamlString, ok := returnValue.(map[string]any)["externalDnsValuesYaml"].(string)
 
 			if !ok {
 				app.Log.Errorf("getZone: Failed to cast externalDnsConfig to string")
