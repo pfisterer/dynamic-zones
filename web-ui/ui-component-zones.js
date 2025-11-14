@@ -138,7 +138,7 @@ function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone 
     }, [user]);
 
     const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns&part=`;
-    const helmCommand = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}values.yaml' | helm install external-dns external-dns/external-dns -n external-dns -f - `;
+    const helmCommand = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}values.yaml' | helm upgrade --install external-dns external-dns/external-dns -n external-dns -f -`;
 
     return html`
         <div class="panel-block">
