@@ -116,7 +116,7 @@ function ActivateZone({ zone, onChange }) {
 // ----------------------------------------
 // External DNS config display
 // ----------------------------------------
-function ExternalDnsConfig({ externalDnsConfig, zone }) {
+function ExternalDnsConfig({ externalDnsValuesYaml, externalDnsSecretYaml, zone }) {
     const { apiUrl } = useAppConfig();
     const { user } = useAuth();
     const [token, setToken] = useState(null);
@@ -137,8 +137,9 @@ function ExternalDnsConfig({ externalDnsConfig, zone }) {
         })();
     }, [user]);
 
-    const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns`;
-    const curlCommand = `curl -H "Authorization: Bearer ${token || "insert_your_token"}" ${url}`;
+    const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns&part=`;
+    const helmCommand = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}values.yaml' | helm install external-dns external-dns/external-dns -n external-dns -f - `;
+    const curlCommandSecretYaml = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}secret.yaml' | kubectl apply -f -`;
 
     return html`
         <div class="panel-block">
@@ -147,12 +148,17 @@ function ExternalDnsConfig({ externalDnsConfig, zone }) {
 
         <div class="panel-block">
             <p>
-                You can curl the config below directly using something like:
+                You can curl helm's values.yaml and a secret's yaml below directly using something like. Don't forget to add the local helm repository for external-dns first: 
+                <code>helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/</code> and then run <code>helm repo update</code>.
             </p>
         </div>
 
         <div class="panel-block">
-            <${CodeBlock} code=${curlCommand} />
+            <${CodeBlock} code=${helmCommand} />
+        </div>
+
+        <div class="panel-block">
+            <${CodeBlock} code=${curlCommandSecretYaml} />
         </div>
         
         <div class="panel-block">
@@ -167,8 +173,13 @@ function ExternalDnsConfig({ externalDnsConfig, zone }) {
         </div>
         
         <div class="panel-block">
-            <${CodeBlock} code=${externalDnsConfig} />
+            <${CodeBlock} code=${externalDnsSecretYaml} />
         </div>
+        
+        <div class="panel-block">
+            <${CodeBlock} code=${externalDnsValuesYaml} />
+        </div>
+
     `;
 }
 
@@ -494,7 +505,7 @@ function ActiveDomain({ zone: zoneName, onChange }) {
         `}
         ${activeTab === "Keys" && html`<${ShowKeys} zone=${zone.zoneData} />`}
         ${activeTab === "DNS Update Command" && html`<${DnsUpdateCommand} zone=${zone.zoneData} />`}
-        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsConfig=${zone.externalDnsConfig} zone=${zone.zoneData} />`}
+        ${activeTab === "External DNS Config" && html`<${ExternalDnsConfig} externalDnsValuesYaml=${zone.externalDnsValuesYaml} externalDnsSecretYaml=${zone.externalDnsSecretYaml} zone=${zone.zoneData} />`}
     `;
 }
 

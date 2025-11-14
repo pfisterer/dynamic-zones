@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"text/template"
@@ -21,7 +22,7 @@ func InjectAppLogic(app *AppData) gin.HandlerFunc {
 	}
 }
 
-func (app *AppData) GetZone(ctx context.Context, username string, zone string) (statusCode int, message any, err error) {
+func (app *AppData) GetZone(ctx context.Context, username string, zone string, externalDnsVersion string) (statusCode int, message any, err error) {
 	// Get zone from storage (if it exists, the user is allowed to access it)
 	stored_zone, err := app.Storage.GetZone(username, zone)
 	if err != nil {
@@ -45,7 +46,7 @@ func (app *AppData) GetZone(ctx context.Context, username string, zone string) (
 	}
 
 	// Get the external-dns config for the zone
-	externalDNSConfig, err := toExternalDNSConfig(app, pnds_zone)
+	valuesYaml, secretYaml, err := toExternalDNSConfig(app, pnds_zone, externalDnsVersion)
 	if err != nil {
 		return http.StatusInternalServerError,
 			gin.H{"error": "Failed to get external-dns config"},
@@ -54,8 +55,9 @@ func (app *AppData) GetZone(ctx context.Context, username string, zone string) (
 
 	// Return the data to the client
 	returnValue := map[string]any{
-		"zoneData":          pnds_zone,
-		"externalDnsConfig": externalDNSConfig,
+		"zoneData":              pnds_zone,
+		"externalDnsValuesYaml": valuesYaml,
+		"externalDnsSecretYaml": secretYaml,
 	}
 
 	app.Log.Info("app.getZone: returning response: ", pnds_zone)
@@ -130,7 +132,7 @@ func (app *AppData) DeleteZone(ctx context.Context, username string, zone string
 		nil
 }
 
-func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse) (message any, err error) {
+func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse, externalDnsVersion string) (string, string, error) {
 	txtPrefix := "dynamic-zones-dns-"
 	txtOwnerId := "dynamic-zones-dns"
 
@@ -141,22 +143,40 @@ func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse) (messa
 		"dnsServerPort":    app.Config.DnsServerPort,
 		"zone":             pnds_zone.Zone,
 		"tsigKey":          pnds_zone.ZoneKeys[0].Key,
+		"tsigKeyBase64":    base64.StdEncoding.EncodeToString([]byte(pnds_zone.ZoneKeys[0].Key)),
 		"tsigAlgorithm":    pnds_zone.ZoneKeys[0].Algorithm,
 		"tsigKeyname":      pnds_zone.ZoneKeys[0].Keyname,
+		"secretName":       fmt.Sprintf("external-dns-rfc2136-%s-secret", pnds_zone.Zone),
+		"imageVersion":     externalDnsVersion,
 	}
 
-	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSYamlTemplate)
+	// Create the values yaml file
+	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSValuesYamlTemplate)
 
 	if err != nil {
 		app.Log.Panicf("toExternalDNSConfig: Unable to parse the external-dns template: ", err)
-		return nil, fmt.Errorf("toExternalDNSConfig: Unable to parse the external-dns template: %v", err)
+		return "", "", fmt.Errorf("toExternalDNSConfig: Unable to parse the external-dns template: %v", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, templateData); err != nil {
 		app.Log.Panicf("toExternalDNSConfig: Unable to execute the external-dns template: ", err)
-		return "", fmt.Errorf("toExternalDNSConfig: Unable to execute the external-dns template: %v", err)
+		return "", "", fmt.Errorf("toExternalDNSConfig: Unable to execute the external-dns template: %v", err)
 	}
 
-	return buf.String(), nil
+	// Create the secrets yaml file
+	tmplSecret, err := template.New("external-dns-secret").Parse(helper.ExternalDNSSecretYamlTemplate)
+
+	if err != nil {
+		app.Log.Panicf("toExternalDNSConfig: Unable to parse the external-dns secret template: ", err)
+		return "", "", fmt.Errorf("toExternalDNSConfig: Unable to parse the external-dns secret template: %v", err)
+	}
+
+	var bufSecret bytes.Buffer
+	if err := tmplSecret.Execute(&bufSecret, templateData); err != nil {
+		app.Log.Panicf("toExternalDNSConfig: Unable to execute the external-dns secret template: ", err)
+		return "", "", fmt.Errorf("toExternalDNSConfig: Unable to execute the external-dns secret template: %v", err)
+	}
+
+	return buf.String(), bufSecret.String(), nil
 }

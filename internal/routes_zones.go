@@ -47,7 +47,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
-			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone)
+			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone, app.Config.ExternalDnsVersion)
 			app.Log.Debugf("Checked zone '%s', status code: %d", zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
 			app.Log.Debugf("Zone '%s' exists: %t", zone, zoneExists)
@@ -81,20 +81,34 @@ func getZone(app *AppData) gin.HandlerFunc {
 		zone := c.Param("zone")
 		format := c.Query("format")
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		externalDnsVersion := c.DefaultQuery("image-version", app.Config.ExternalDnsVersion)
+		part := c.DefaultQuery("part", "values.yaml")
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		statusCode, returnValue, err := app.GetZone(ctx, user.PreferredUsername, zone)
+		statusCode, returnValue, err := app.GetZone(ctx, user.PreferredUsername, zone, externalDnsVersion)
 		if err != nil {
 			app.Log.Warnf("getZone: zone '%s' does not exist: %w", zone, err)
 		}
 
 		if format == "external-dns" && statusCode == http.StatusOK {
-			app.Log.Debug("getZone: format=external-dns requested, transforming response to plain YAML")
+			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML", part)
+			var ok bool
+			var yamlString string
 
-			yamlString, ok := returnValue.(map[string]any)["externalDnsConfig"].(string)
+			switch part {
+			case "values.yaml":
+				yamlString, ok = returnValue.(map[string]any)["externalDnsValuesYaml"].(string)
+			case "secret.yaml":
+				yamlString, ok = returnValue.(map[string]any)["externalDnsSecretYaml"].(string)
+			default:
+				app.Log.Errorf("getZone: Invalid part '%s' requested", part)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid part requested"})
+				return
+			}
+
 			if !ok {
 				app.Log.Errorf("getZone: Failed to cast externalDnsConfig to string")
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error"})

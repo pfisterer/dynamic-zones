@@ -49,6 +49,7 @@ type AppConfig struct {
 	DnsServerAddress   string                  `json:"dns_server_address"`
 	DnsServerPort      int32                   `json:"dns_server_port_string"`
 	ApiTokenTTLHours   int                     `json:"api_token_ttl_hours"`
+	ExternalDnsVersion string                  `json:"external_dns_version"`
 }
 
 type AppData struct {
@@ -145,6 +146,7 @@ func GetAppConfigFromEnvironment() AppConfig {
 		DnsServerAddress:   helper.GetEnvString("DYNAMIC_ZONES_SERVER_ADDRESS", "localhost"),
 		DnsServerPort:      int32(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_PORT", 15353)),
 		ApiTokenTTLHours:   helper.GetEnvInt("DYNAMIC_ZONES_API_TOKEN_TTL_HOURS", 24),
+		ExternalDnsVersion: helper.GetEnvString("DYNAMIC_ZONES_EXTERNAL_DNS_IMAGE_VERSION", "v0.19.1"),
 	}
 
 }
