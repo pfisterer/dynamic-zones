@@ -232,7 +232,7 @@ func addDevModeEntry(fset *token.FileSet, node *ast.File, envVars map[string]Env
 	})
 }
 
-// generateMarkdown prints the final output table.
+// generateMarkdown prints the final output table with intermediate bolded headers.
 func generateMarkdown(envVars map[string]EnvVarInfo) {
 	// A basic ordered list of categories for cleaner output
 	categoryOrder := map[string]string{
@@ -245,6 +245,7 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 	}
 
 	fmt.Println("\n## ⚙️ Environment Variables Reference")
+	fmt.Println("") // Add a newline after the main header
 
 	// Create a map to group variables by the user-friendly category name
 	grouped := make(map[string][]EnvVarInfo)
@@ -256,13 +257,19 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 		grouped[catName] = append(grouped[catName], info)
 	}
 
+	// --- Start the single large table ---
+	fmt.Println("| **Variable Name** | **Default Value** | **Description** |")
+	fmt.Println("| :---------------- | :---------------- | :-------------- |")
+
 	// Print in the defined order
 	for _, catName := range categoryOrder {
 		if vars, ok := grouped[catName]; ok && len(vars) > 0 {
-			fmt.Printf("\n### %s\n", catName)
-			fmt.Println("\n| **Variable Name** | **Default Value** | **Description** |")
-			fmt.Println("| :---------------- | :---------------- | :-------------- |")
 
+			// 1. Print the category header row (bolded)
+			// Use an empty cell for the second and third columns to create a span effect
+			fmt.Printf("| **%s** | | |\n", catName)
+
+			// 2. Print the environment variables for this category
 			for _, info := range vars {
 				// Clean up description and default value for display
 				desc := info.Description
@@ -279,4 +286,5 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 			}
 		}
 	}
+	// --- Table ends implicitly here ---
 }
