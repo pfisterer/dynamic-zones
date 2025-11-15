@@ -43,15 +43,21 @@ func getZones(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		userZones := app.Uzp.GetUserZones(user)
+		userZones, err := app.Uzp.GetUserZones(user)
+		if err != nil {
+			app.Log.Errorf("Error getting user zones: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
+			return
+		}
+
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
-			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone, app.Config.WebServer.ExternalDnsVersion)
-			app.Log.Debugf("Checked zone '%s', status code: %d", zone, statusCode)
+			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone.Zone, app.Config.WebServer.ExternalDnsVersion)
+			app.Log.Debugf("Checked zone '%s', status code: %d", zone.Zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
-			app.Log.Debugf("Zone '%s' exists: %t", zone, zoneExists)
-			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone, Exists: zoneExists})
+			app.Log.Debugf("Zone '%s' exists: %t", zone.Zone, zoneExists)
+			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone.Zone, Exists: zoneExists})
 		}
 
 		zones := AvailableZonesResponse{Zones: zonesWithStatus}
@@ -138,7 +144,14 @@ func postZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Ensure the user is allowed to create the zone
-		if !app.Uzp.IsAllowedZone(user, zone) {
+		isAllowed, err := app.Uzp.IsAllowedZone(user, zone)
+		if err != nil {
+			app.Log.Errorf("Error getting user zones: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
+			return
+		}
+
+		if !isAllowed {
 			app.Log.Error("User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to create this zone"})
 			return
@@ -177,7 +190,14 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Check if the user is allowed to delete the zone
-		if !app.Uzp.IsAllowedZone(user, zone) {
+		isAllowed, err := app.Uzp.IsAllowedZone(user, zone)
+		if err != nil {
+			app.Log.Errorf("Error getting user zones: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
+			return
+		}
+
+		if !isAllowed {
 			app.Log.Error("User is not allowed to delete zone: ", zone, " for user: ", user.PreferredUsername)
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to delete this zone"})
 			return

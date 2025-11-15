@@ -67,7 +67,14 @@ type WebServerConfig struct {
 }
 
 type UserZoneProviderConfig struct {
-	DomainSuffixes string `json:"domain_suffixes"`
+	// The type of zone provider (one of "fixed")
+	Provider string `json:"provider"`
+	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "example.com, example2.org")
+	FixedDomainSuffixes string `json:"fixed_domain_suffixes"`
+	// The webhook URL for zone provider "webhook"
+	WebhookUrl string `json:"webhook_url"`
+	// The webhook bearer token for zone provider "webhook"
+	WebhookBearerToken string `json:"webhook_bearer_token"`
 }
 
 type AppConfig struct {
@@ -118,7 +125,10 @@ func GetAppConfigFromEnvironment() AppConfig {
 		},
 
 		UserZoneProvider: UserZoneProviderConfig{
-			DomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "example.com, example2.org"),
+			Provider:            helper.GetEnvString("ZONE_PROVIDER_TYPE", "fixed"),
+			FixedDomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "example.com, example2.org"),
+			WebhookUrl:          helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
+			WebhookBearerToken:  helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
 		},
 
 		DevMode: helper.GetEnvString("API_MODE", "production") == "development",

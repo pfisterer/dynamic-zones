@@ -2,45 +2,57 @@ package zones
 
 import (
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
 	"go.uber.org/zap"
 )
 
-type UserZoneProvider struct {
+type FixedZoneProvider struct {
 	zone_suffixes []string
 	logger        *zap.Logger
 }
 
-func NewUserZoneProvider(config string, logger *zap.Logger) *UserZoneProvider {
+func NewFixedZoneProvider(config string, logger *zap.Logger) *FixedZoneProvider {
 	// Split config by comma and trim spaces
 	zones := strings.Split(config, ",")
 	for i, zone := range zones {
 		zones[i] = strings.TrimSpace(zone)
 	}
 
-	return &UserZoneProvider{
+	return &FixedZoneProvider{
 		zone_suffixes: zones,
 		logger:        logger,
 	}
 }
 
-func (m *UserZoneProvider) GetUserZones(user *auth.UserClaims) []string {
-	result := make([]string, 0, len(m.zone_suffixes))
+func (m *FixedZoneProvider) GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error) {
+	result := make([]ZoneResponse, 0, len(m.zone_suffixes))
 
 	for _, zone := range m.zone_suffixes {
-		result = append(result, makeDnsCompliant(user.PreferredUsername)+"."+zone)
+		name := makeDnsCompliant(user.PreferredUsername) + "." + zone
+		result = append(result, ZoneResponse{
+			Zone:    name,
+			ZoneSOA: zone,
+		})
+		m.logger.Debug("zones.GetUserZones: added zone", zap.String("zone", name), zap.String("soa", zone))
 	}
 
-	m.logger.Debug("zones.GetUserZones: ", zap.String("username", user.PreferredUsername), zap.Strings("result", result))
-
-	return result
+	return result, nil
 }
 
-func (m *UserZoneProvider) IsAllowedZone(user *auth.UserClaims, zone string) bool {
-	return slices.Contains(m.GetUserZones(user), zone)
+func (m *FixedZoneProvider) IsAllowedZone(user *auth.UserClaims, zone string) (bool, error) {
+	userZones, err := m.GetUserZones(user)
+	if err != nil {
+		return false, err
+	}
+
+	for _, uz := range userZones {
+		if uz.Zone == zone {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func makeDnsCompliant(input string) string {

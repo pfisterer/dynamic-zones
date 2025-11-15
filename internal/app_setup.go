@@ -21,7 +21,7 @@ import (
 
 type AppData struct {
 	Config      config.AppConfig
-	Uzp         *zones.FixedZoneProvider
+	Uzp         zones.ZoneProvider
 	Storage     *storage.Storage
 	Pdns        *powerdns.Client
 	RefreshTime uint64

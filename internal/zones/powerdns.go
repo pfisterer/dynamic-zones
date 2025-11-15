@@ -3,6 +3,7 @@ package zones
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
@@ -85,7 +86,9 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	retry := 3600    // 1 hour; If a secondary fails to contact the master, retry after this interval.
 	expire := 604800 // 1 week; How long a secondary will continue serving old data if it cannot reach the master.
 	minimum := 60    // 1 minute;  Used as the negative caching TTL: how long a resolver caches “no such record” answers (NXDOMAIN).
-	soa := fmt.Sprintf("%s. hostmaster.%s. %s %d %d %d %d", soaNameserver, zone, serial, refresh, retry, expire, minimum)
+	soa := fmt.Sprintf("%s hostmaster.%s. %s %d %d %d %d", soaNameserver, zone, serial, refresh, retry, expire, minimum)
+
+	log.Printf("powerdns.CreateZone: Creating zone '%s' with SOA record: %s", zone, soa)
 
 	// Create the zone in PowerDNS
 	zoneDef := powerdns.Zone{
@@ -101,6 +104,31 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	_, err := pdns.Zones.Add(ctx, &zoneDef)
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v with zone definition: %+v", err, zoneDef)
+	}
+
+	// Create SOA RRSet inside the zone
+	soaZone := zone
+	if soaZone[len(soaZone)-1] != '.' {
+		soaZone += "."
+	}
+
+	soaRRSet := powerdns.RRset{
+		Name: powerdns.String(soaZone),
+		Type: powerdns.RRTypePtr(powerdns.RRTypeSOA),
+		TTL:  powerdns.Uint32(3600),
+		Records: []powerdns.Record{
+			{
+				Content:  powerdns.String(soa),
+				Disabled: powerdns.Bool(false),
+			},
+		},
+		ChangeType: powerdns.ChangeTypePtr(powerdns.ChangeTypeReplace),
+	}
+
+	zonePatch := powerdns.Zone{RRsets: []powerdns.RRset{soaRRSet}}
+	err = pdns.Zones.Change(ctx, zone, &zonePatch)
+	if err != nil {
+		return nil, fmt.Errorf("powerdns.CreateZone: Failed to set SOA RR via patch: %v", err)
 	}
 
 	// Generate a TSIG key
