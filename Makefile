@@ -20,9 +20,9 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build
+.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build doc-env
 
-all: bundle build bundle-deps
+all: bundle build bundle-deps doc-env
 
 install-npm:
 	@echo "⬇️ Installing npm dependencies..."
@@ -103,11 +103,16 @@ multi-arch-build:
 	@echo "✅ Multi-architecture image $(DOCKER_REPO):$(DOCKER_TAG) built and pushed."
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"
 
+doc-env: check-modules
+	@echo "📄 Generating Environment Variable documentation..."
+	go run ./cmd/docgen internal/app_config.go > "CONFIGURATION_VARIABLES.md"
+
 help:
 	@echo "Usage: make <target>"
 	@echo "  all       → Build and generate everything"
 	@echo "  install-npm → Install npm dependencies from package.json"
 	@echo "  doc       → Generate swagger.json"
+	@echo "  doc-env   → Generate and insert environment variable docs into README.md"
 	@echo "  convert   → Convert swagger.json → openapi.json"
 	@echo "  client    → Generate TypeScript client"
 	@echo "  bundle    → Bundle client into JS"

@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// MockUserZoneProvider is a mock implementation of UserZoneProvider for testing purposes.
 type UserZoneProvider struct {
 	zone_suffixes []string
 	logger        *zap.Logger

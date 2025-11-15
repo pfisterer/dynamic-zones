@@ -124,40 +124,9 @@ make multi-arch-build
 
 ## Configuration Settings
 
-Configuration is done through environment variables. For a full list of available configuration options, refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
+Configuration is done through environment variables. 
 
-You’ll need to configure:
-| **Environment Variable**                     | **Example Value**            | **Description**                                                 |
-| -------------------------------------------- | ---------------------------- | --------------------------------------------------------------- |
-| **General Settings**                         |                              |                                                                 |
-| `DYNAMIC_ZONES_API_MODE`                     | `production`                 | Run mode; use `development` to enable dev mode                  |
-| `DYNAMIC_ZONES_API_DOMAIN_SUFFIXES`          | `example.com, example2.org`  | Comma-separated list of allowed domain suffixes for new zones   |
-| `DYNAMIC_ZONES_SERVER_DEFAULT_TTL`           | `31536000` (1 year)          | Default TTL in seconds for records in created zones             |
-| `DYNAMIC_ZONES_API_DB_TYPE`                  | `sqlite`                     | Database backend type (e.g., `sqlite`, `postgres`, etc.)        |
-| `DYNAMIC_ZONES_API_DB_CONNECTION_STRING`     | `file::memory:?cache=shared` | Connection string for the selected database                     |
-| **API Server**                               |                              |                                                                 |
-| `DYNAMIC_ZONES_API_BIND`                     | `:8082`                      | Address and port where the API service listens                  |
-| `DYNAMIC_ZONES_API_BASE_URL`                 | `http://localhost:8082`      | Base URL used for building API responses and redirects          |
-| **PowerDNS Configuration**                   |                              |                                                                 |
-| `PDNS_URL`                                   | `http://localhost:8080`      | Base URL of the PowerDNS API                                    |
-| `PDNS_VHOST`                                 | `localhost`                  | PowerDNS virtual host name                                      |
-| `PDNS_API_KEY`                               | `my-default-api-key`         | API key for authenticating with PowerDNS                        |
-| `DYNAMIC_ZONES_SERVER_ADDRESS`               | `localhost`                  | Address where the PowerDNS server listens                       |
-| `DYNAMIC_ZONES_SERVER_PORT`                  | `15353`                      | Port number of the PowerDNS server (should be 53 in production) |
-| **User Authentication**                      |                              |                                                                 |
-| `DYNAMIC_ZONES_API_AUTH_PROVIDER`            | `""`                         | Authentication provider (`fake` or `oidc`)                      |
-| `OIDC_ISSUER_URL`                            | `""`                         | OIDC issuer URL for authentication                              |
-| `OIDC_CLIENT_ID`                             | `""`                         | Client ID for OIDC authentication                               |
-| **Upstream DNS Updates**                     |                              |                                                                 |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_SERVER`          | `""`                         | Hostname or IP of the upstream DNS server for zone delegation   |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_NAME`       | `""`                         | TSIG key name used for authenticated DNS updates                |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_ALG`        | `""`                         | TSIG algorithm used (e.g., `hmac-sha256`)                       |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_SECRET`     | `""`                         | TSIG secret for secure DNS updates                              |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_PORT`            | `53`                         | Port number of the upstream DNS server                          |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_ZONE`            | `""`                         | Zone name in the upstream DNS server for delegation             |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_NAME`            | `""`                         | Name (typically an A record) to update in the upstream zone     |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_TTL`             | `900`                        | TTL (Time To Live) in seconds for upstream DNS records          |
-| `DYNAMIC_ZONES_UPSTREAM_DNS_UPDATE_INTERVAL` | `3600`                       | How often (in seconds) the upstream record is updated           |
+For a full list of available configuration options, see [README_ENV_VARIABLES.md](README_ENV_VARIABLES.md) or refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
 
 ## Releasing a New Version
 

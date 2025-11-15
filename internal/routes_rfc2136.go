@@ -78,7 +78,7 @@ func canonicalRecordName(name, zone string) string {
 
 // GetServerAddress constructs the server address string (host:port) from AppData config.
 func GetServerAddress(app *AppData) string {
-	return net.JoinHostPort(app.Config.DnsServerAddress, strconv.Itoa(int(app.Config.DnsServerPort)))
+	return net.JoinHostPort(app.Config.PowerDns.DnsServerAddress, strconv.Itoa(int(app.Config.PowerDns.DnsServerPort)))
 }
 
 // GetTSIGCredentials extracts and validates TSIG credentials from HTTP headers for AXFR.
@@ -357,7 +357,7 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 
 		name := canonicalRecordName(req.Name, req.Zone)
 
-		dnsServer := net.JoinHostPort(app.Config.DnsServerAddress, strconv.Itoa(int(app.Config.DnsServerPort)))
+		dnsServer := net.JoinHostPort(app.Config.PowerDns.DnsServerAddress, strconv.Itoa(int(app.Config.PowerDns.DnsServerPort)))
 
 		switch strings.ToUpper(req.Type) {
 		case "A":

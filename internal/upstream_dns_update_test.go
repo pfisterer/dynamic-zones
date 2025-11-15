@@ -22,7 +22,7 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	defer logger.Sync()
 
 	log.Info("Starting upstream DNS update test")
-	dynamicZonesDnsIPAddress := net.ParseIP(appConfig.DnsServerAddress)
+	dynamicZonesDnsIPAddress := net.ParseIP(appConfig.PowerDns.DnsServerAddress)
 
 	err := PerformSingleUpstreamDnsUpdateCheck(&appConfig.UpstreamDns, dynamicZonesDnsIPAddress, log, true)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
 	"github.com/farberg/dynamic-zones/internal/helper"
@@ -18,39 +17,6 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 )
-
-type UpstreamDnsUpdateConfig struct {
-	Server                string `json:"server"`
-	Tsig_Name             string `json:"tsig_name"`
-	Tsig_Alg              string `json:"tsig_alg"`
-	Tsig_Secret           string `json:"tsig_secret"`
-	Port                  int    `json:"port"`
-	Zone                  string `json:"zone"`
-	Name                  string `json:"name"`
-	Ttl                   int    `json:"ttl"`
-	UpdateIntervalSeconds int    `json:"interval"`
-}
-
-type AppConfig struct {
-	UpstreamDns        UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
-	DomainSuffixes     string                  `json:"domain_suffixes"`
-	DevMode            bool                    `json:"dev_mode"`
-	DefaultTTLSeconds  uint64                  `json:"default_ttl_seconds"`
-	DbType             string                  `json:"db_type"`
-	DbConnectionString string                  `json:"db_connection_string"`
-	PdnsUrl            string                  `json:"pdns_url"`
-	PdnsVhost          string                  `json:"pdns_vhost"`
-	PdnsApiKey         string                  `json:"pdns_api_key"`
-	GinBindString      string                  `json:"gin_bind_string"`
-	AuthProvider       string                  `json:"auth_provider"`
-	OIDCIssuerURL      string                  `json:"oidc_issuer_url"`
-	OIDCClientID       string                  `json:"oidc_client_id"`
-	WebserverBaseUrl   string                  `json:"webserver_base_url"`
-	DnsServerAddress   string                  `json:"dns_server_address"`
-	DnsServerPort      int32                   `json:"dns_server_port_string"`
-	ApiTokenTTLHours   int                     `json:"api_token_ttl_hours"`
-	ExternalDnsVersion string                  `json:"external_dns_version"`
-}
 
 type AppData struct {
 	Config      AppConfig
@@ -76,6 +42,10 @@ func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
 	return logger, log
 }
 
+func createUserZoneProvider(appConfig AppConfig, logger *zap.Logger) *zones.UserZoneProvider {
+	return zones.NewUserZoneProvider(appConfig.UserZoneProvider.DomainSuffixes, logger)
+}
+
 func RunApplication() {
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
@@ -92,7 +62,7 @@ func RunApplication() {
 	// Create componentes
 	pdns := setupPowerDns(log, &appConfig)
 	db := setupStorage(log, &appConfig)
-	uzp := zones.NewUserZoneProvider(appConfig.DomainSuffixes, logger)
+	uzp := createUserZoneProvider(appConfig, logger)
 
 	appData := AppData{
 		Config:  appConfig,
@@ -108,7 +78,7 @@ func RunApplication() {
 
 	// Create and run the web server server forever
 	router := setupGinWebserver(&appData)
-	err := router.Run(appConfig.GinBindString)
+	err := router.Run(appConfig.WebServer.GinBindString)
 	if err != nil {
 		log.Fatalf("app.RunApp: Failed to start server: %v", err)
 	}
@@ -116,43 +86,8 @@ func RunApplication() {
 	log.Info("app.RunApp: Application stopped.")
 }
 
-func GetAppConfigFromEnvironment() AppConfig {
-
-	return AppConfig{
-		UpstreamDns: UpstreamDnsUpdateConfig{
-			Server:                helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_SERVER", ""),
-			Tsig_Name:             helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_NAME", ""),
-			Tsig_Alg:              helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_ALG", ""),
-			Tsig_Secret:           helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_SECRET", ""),
-			Port:                  helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_PORT", 53),
-			Zone:                  helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_ZONE", ""),
-			Name:                  helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_NAME", ""),
-			Ttl:                   helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_TTL", 900),
-			UpdateIntervalSeconds: helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
-		},
-		DomainSuffixes:     helper.GetEnvString("DYNAMIC_ZONES_API_DOMAIN_SUFFIXES", "example.com, example2.org"),
-		DevMode:            helper.GetEnvString("DYNAMIC_ZONES_API_MODE", "production") == "development",
-		DefaultTTLSeconds:  uint64(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
-		DbType:             helper.GetEnvString("DYNAMIC_ZONES_API_DB_TYPE", "sqlite"),
-		DbConnectionString: helper.GetEnvString("DYNAMIC_ZONES_API_DB_CONNECTION_STRING", "file::memory:?cache=shared"),
-		PdnsUrl:            helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
-		PdnsVhost:          helper.GetEnvString("PDNS_VHOST", "localhost"),
-		PdnsApiKey:         helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
-		GinBindString:      helper.GetEnvString("DYNAMIC_ZONES_API_BIND", ":8082"),
-		AuthProvider:       helper.GetEnvString("DYNAMIC_ZONES_API_AUTH_PROVIDER", ""),
-		OIDCIssuerURL:      helper.GetEnvString("OIDC_ISSUER_URL", ""),
-		OIDCClientID:       helper.GetEnvString("OIDC_CLIENT_ID", ""),
-		WebserverBaseUrl:   helper.GetEnvString("DYNAMIC_ZONES_API_BASE_URL", "http://localhost:8082"),
-		DnsServerAddress:   helper.GetEnvString("DYNAMIC_ZONES_SERVER_ADDRESS", "localhost"),
-		DnsServerPort:      int32(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_PORT", 15353)),
-		ApiTokenTTLHours:   helper.GetEnvInt("DYNAMIC_ZONES_API_TOKEN_TTL_HOURS", 24),
-		ExternalDnsVersion: helper.GetEnvString("DYNAMIC_ZONES_EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
-	}
-
-}
-
 func setupStorage(log *zap.SugaredLogger, appConfig *AppConfig) *storage.Storage {
-	storage, err := storage.NewStorage(appConfig.DbType, appConfig.DbConnectionString)
+	storage, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
@@ -161,7 +96,7 @@ func setupStorage(log *zap.SugaredLogger, appConfig *AppConfig) *storage.Storage
 }
 
 func setupPowerDns(log *zap.SugaredLogger, appConfig *AppConfig) *powerdns.Client {
-	pdns := powerdns.New(appConfig.PdnsUrl, appConfig.PdnsVhost, powerdns.WithAPIKey(appConfig.PdnsApiKey))
+	pdns := powerdns.New(appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, powerdns.WithAPIKey(appConfig.PowerDns.PdnsApiKey))
 	if pdns == nil {
 		log.Fatalf("app.setupPowerDns: Failed to create PowerDNS client")
 	}
@@ -213,7 +148,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	router.StaticFile("/swagger.json", "./docs/swagger.json")
 
 	// Inject authentication data into the context
-	switch app.Config.AuthProvider {
+	switch app.Config.WebServer.AuthProvider {
 	case "fake":
 		app.Log.Warnf("Using fake authentication provider, do not use in production")
 		router.Use(auth.InjectFakeAuthMiddleware())
@@ -223,8 +158,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 		app.Log.Infof("Using OIDC authentication provider.")
 
 		oidcConfig := auth.OIDCVerifierConfig{
-			IssuerURL: app.Config.OIDCIssuerURL,
-			ClientID:  app.Config.OIDCClientID,
+			IssuerURL: app.Config.WebServer.OIDCIssuerURL,
+			ClientID:  app.Config.WebServer.OIDCClientID,
 		}
 
 		// Validate that all required OIDC environment variables are set
@@ -245,12 +180,12 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 			"auth_provider": "oidc",
 			"issuer_url":    oidcConfig.IssuerURL,
 			"client_id":     oidcConfig.ClientID,
-			"redirect_uri":  fmt.Sprintf("%s/ui/index.html", app.Config.WebserverBaseUrl),
-			"logout_uri":    fmt.Sprintf("%s/ui/index.html", app.Config.WebserverBaseUrl),
+			"redirect_uri":  fmt.Sprintf("%s/ui/index.html", app.Config.WebServer.WebserverBaseUrl),
+			"logout_uri":    fmt.Sprintf("%s/ui/index.html", app.Config.WebServer.WebserverBaseUrl),
 		}
 
 	default:
-		app.Log.Fatalf("Unknown authentication provider '%s'. Supported providers: fake, oidc.", app.Config.AuthProvider)
+		app.Log.Fatalf("Unknown authentication provider '%s'. Supported providers: fake, oidc.", app.Config.WebServer.AuthProvider)
 	}
 
 	// Expose authorization config to the frontend
@@ -261,8 +196,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Expose DNS server configuration
 	router.GET(("/app_config.json"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"dns_server_address": app.Config.DnsServerAddress,
-			"dns_server_port":    app.Config.DnsServerPort,
+			"dns_server_address": app.Config.PowerDns.DnsServerAddress,
+			"dns_server_port":    app.Config.PowerDns.DnsServerPort,
 			"version":            helper.AppVersion,
 		})
 	})

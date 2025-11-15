@@ -25,11 +25,11 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 	// Get the IP address to this DNS server to publish to the upstream DNS server
 	c := app.Config.UpstreamDns
-	dynamicZonesDnsIPAddress := net.ParseIP(app.Config.DnsServerAddress)
+	dynamicZonesDnsIPAddress := net.ParseIP(app.Config.PowerDns.DnsServerAddress)
 
 	// Check configuration for validity
 	if dynamicZonesDnsIPAddress == nil {
-		log.Warnf("Invalid DNS server address: %s, skipping periodic update", app.Config.DnsServerAddress)
+		log.Warnf("Invalid DNS server address: %s, skipping periodic update", app.Config.PowerDns.DnsServerAddress)
 		return
 	}
 

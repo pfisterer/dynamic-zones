@@ -137,8 +137,8 @@ func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse, extern
 	templateData := map[string]any{
 		"txtPrefix":        txtPrefix,
 		"txtOwnerId":       txtOwnerId,
-		"dnsServerAddress": app.Config.DnsServerAddress,
-		"dnsServerPort":    app.Config.DnsServerPort,
+		"dnsServerAddress": app.Config.PowerDns.DnsServerAddress,
+		"dnsServerPort":    app.Config.PowerDns.DnsServerPort,
 		"zone":             pnds_zone.Zone,
 		"tsigKey":          pnds_zone.ZoneKeys[0].Key,
 		"tsigAlgorithm":    pnds_zone.ZoneKeys[0].Algorithm,

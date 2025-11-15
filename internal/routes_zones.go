@@ -47,7 +47,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
-			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone, app.Config.ExternalDnsVersion)
+			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone, app.Config.WebServer.ExternalDnsVersion)
 			app.Log.Debugf("Checked zone '%s', status code: %d", zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
 			app.Log.Debugf("Zone '%s' exists: %t", zone, zoneExists)
@@ -81,7 +81,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 		zone := c.Param("zone")
 		format := c.Query("format")
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
-		externalDnsVersion := c.DefaultQuery("image-version", app.Config.ExternalDnsVersion)
+		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)

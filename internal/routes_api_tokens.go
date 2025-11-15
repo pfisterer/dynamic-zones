@@ -75,7 +75,7 @@ func createToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
-		ttl := time.Duration(app.Config.ApiTokenTTLHours) * time.Hour
+		ttl := time.Duration(app.Config.WebServer.ApiTokenTTLHours) * time.Hour
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Create token called for user: ", user.PreferredUsername)
