@@ -1,4 +1,4 @@
-package app
+package config
 
 import (
 	"time"
@@ -84,44 +84,44 @@ func GetAppConfigFromEnvironment() AppConfig {
 
 	return AppConfig{
 		UpstreamDns: UpstreamDnsUpdateConfig{
-			Server:                helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_SERVER", ""),
-			Tsig_Name:             helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_NAME", ""),
-			Tsig_Alg:              helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_ALG", ""),
-			Tsig_Secret:           helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_TSIG_SECRET", ""),
-			Port:                  helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_PORT", 53),
-			Zone:                  helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_ZONE", ""),
-			Name:                  helper.GetEnvString("DYNAMIC_ZONES_UPSTREAM_DNS_NAME", ""),
-			Ttl:                   helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_TTL", 900),
-			UpdateIntervalSeconds: helper.GetEnvInt("DYNAMIC_ZONES_UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
+			Server:                helper.GetEnvString("UPSTREAM_DNS_SERVER", ""),
+			Port:                  helper.GetEnvInt("UPSTREAM_DNS_PORT", 53),
+			Zone:                  helper.GetEnvString("UPSTREAM_DNS_ZONE", ""),
+			Name:                  helper.GetEnvString("UPSTREAM_DNS_NAME", ""),
+			Tsig_Name:             helper.GetEnvString("UPSTREAM_DNS_TSIG_NAME", ""),
+			Tsig_Alg:              helper.GetEnvString("UPSTREAM_DNS_TSIG_ALG", ""),
+			Tsig_Secret:           helper.GetEnvString("UPSTREAM_DNS_TSIG_SECRET", ""),
+			Ttl:                   helper.GetEnvInt("UPSTREAM_DNS_TTL", 900),
+			UpdateIntervalSeconds: helper.GetEnvInt("UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
 		},
 		PowerDns: PowerDnsConfig{
 			PdnsUrl:           helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
 			PdnsVhost:         helper.GetEnvString("PDNS_VHOST", "localhost"),
 			PdnsApiKey:        helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
-			DnsServerAddress:  helper.GetEnvString("DYNAMIC_ZONES_SERVER_ADDRESS", "localhost"),
-			DnsServerPort:     int32(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_PORT", 15353)),
-			DefaultTTLSeconds: uint64(helper.GetEnvInt("DYNAMIC_ZONES_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
+			DnsServerAddress:  helper.GetEnvString("PDNS_SERVER_ADDRESS", "localhost"),
+			DnsServerPort:     int32(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
+			DefaultTTLSeconds: uint64(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
 		},
 		Storage: StorageConfig{
-			DbType:             helper.GetEnvString("DYNAMIC_ZONES_API_DB_TYPE", "sqlite"),
-			DbConnectionString: helper.GetEnvString("DYNAMIC_ZONES_API_DB_CONNECTION_STRING", "file::memory:?cache=shared"),
+			DbType:             helper.GetEnvString("DB_TYPE", "sqlite"),
+			DbConnectionString: helper.GetEnvString("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
 		},
 
 		WebServer: WebServerConfig{
-			GinBindString:      helper.GetEnvString("DYNAMIC_ZONES_API_BIND", ":8082"),
-			AuthProvider:       helper.GetEnvString("DYNAMIC_ZONES_API_AUTH_PROVIDER", ""),
+			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
+			AuthProvider:       helper.GetEnvString("API_AUTH_PROVIDER", ""),
+			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
 			OIDCIssuerURL:      helper.GetEnvString("OIDC_ISSUER_URL", ""),
 			OIDCClientID:       helper.GetEnvString("OIDC_CLIENT_ID", ""),
-			WebserverBaseUrl:   helper.GetEnvString("DYNAMIC_ZONES_API_BASE_URL", "http://localhost:8082"),
-			ApiTokenTTLHours:   helper.GetEnvInt("DYNAMIC_ZONES_API_TOKEN_TTL_HOURS", 24),
-			ExternalDnsVersion: helper.GetEnvString("DYNAMIC_ZONES_EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
+			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
+			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
 		},
 
 		UserZoneProvider: UserZoneProviderConfig{
-			DomainSuffixes: helper.GetEnvString("DYNAMIC_ZONES_API_DOMAIN_SUFFIXES", "example.com, example2.org"),
+			DomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "example.com, example2.org"),
 		},
 
-		DevMode: helper.GetEnvString("DYNAMIC_ZONES_API_MODE", "production") == "development",
+		DevMode: helper.GetEnvString("API_MODE", "production") == "development",
 	}
 
 }
