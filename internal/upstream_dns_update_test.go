@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/joho/godotenv"
 )
 
@@ -15,7 +16,7 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	}
 
 	// Get application configuration from environment variables
-	appConfig := GetAppConfigFromEnvironment()
+	appConfig := config.GetAppConfigFromEnvironment()
 
 	// Load application configuration and create logger
 	logger, log := CreateAppLogger(appConfig)

@@ -7,6 +7,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/farberg/dynamic-zones/internal/zones"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
@@ -54,7 +55,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 }
 
-func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger, forceUpdate bool) error {
+func PerformSingleUpstreamDnsUpdateCheck(c *config.UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger, forceUpdate bool) error {
 	log.Debug("Performing upstream DNS update check")
 
 	// Make sure FQDNs are properly formatted
@@ -99,7 +100,7 @@ func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZone
 	return nil
 }
 
-func addRecord(ipAddr net.IP, c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
+func addRecord(ipAddr net.IP, c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
 	remoteDnsServer := fmt.Sprintf("%s:%d", c.Server, c.Port)
 
 	if ipAddr.To4() != nil { //IPv4
@@ -133,7 +134,7 @@ func addRecord(ipAddr net.IP, c *UpstreamDnsUpdateConfig, recordNameFQDN string,
 	return nil
 }
 
-func deleteRecords(c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
+func deleteRecords(c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
 	remoteDnsServer := fmt.Sprintf("%s:%d", c.Server, c.Port)
 
 	log.Debugf("Deleting existing records for %s in zone %s on server %s", recordNameFQDN, c.Zone, remoteDnsServer)

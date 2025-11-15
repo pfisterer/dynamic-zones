@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
+	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/farberg/dynamic-zones/internal/storage"
 	"github.com/farberg/dynamic-zones/internal/zones"
@@ -19,8 +20,8 @@ import (
 )
 
 type AppData struct {
-	Config      AppConfig
-	Uzp         *zones.UserZoneProvider
+	Config      config.AppConfig
+	Uzp         *zones.FixedZoneProvider
 	Storage     *storage.Storage
 	Pdns        *powerdns.Client
 	RefreshTime uint64
@@ -28,7 +29,7 @@ type AppData struct {
 	Log         *zap.SugaredLogger
 }
 
-func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
+func CreateAppLogger(appConfig config.AppConfig) (*zap.Logger, *zap.SugaredLogger) {
 	logger, log := helper.InitLogger(appConfig.DevMode)
 	if appConfig.DevMode {
 		log.Warn("app.SetupComponents: Running in development mode. This is not secure for production!")
@@ -42,10 +43,6 @@ func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
 	return logger, log
 }
 
-func createUserZoneProvider(appConfig AppConfig, logger *zap.Logger) *zones.UserZoneProvider {
-	return zones.NewUserZoneProvider(appConfig.UserZoneProvider.DomainSuffixes, logger)
-}
-
 func RunApplication() {
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
@@ -53,7 +50,7 @@ func RunApplication() {
 	}
 
 	// Get application configuration from environment variables
-	appConfig := GetAppConfigFromEnvironment()
+	appConfig := config.GetAppConfigFromEnvironment()
 
 	// Load application configuration and create logger
 	logger, log := CreateAppLogger(appConfig)
@@ -62,7 +59,7 @@ func RunApplication() {
 	// Create componentes
 	pdns := setupPowerDns(log, &appConfig)
 	db := setupStorage(log, &appConfig)
-	uzp := createUserZoneProvider(appConfig, logger)
+	uzp := zones.CreateUserZoneProvider(&appConfig, logger)
 
 	appData := AppData{
 		Config:  appConfig,
@@ -86,7 +83,7 @@ func RunApplication() {
 	log.Info("app.RunApp: Application stopped.")
 }
 
-func setupStorage(log *zap.SugaredLogger, appConfig *AppConfig) *storage.Storage {
+func setupStorage(log *zap.SugaredLogger, appConfig *config.AppConfig) *storage.Storage {
 	storage, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
@@ -95,7 +92,7 @@ func setupStorage(log *zap.SugaredLogger, appConfig *AppConfig) *storage.Storage
 	return storage
 }
 
-func setupPowerDns(log *zap.SugaredLogger, appConfig *AppConfig) *powerdns.Client {
+func setupPowerDns(log *zap.SugaredLogger, appConfig *config.AppConfig) *powerdns.Client {
 	pdns := powerdns.New(appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, powerdns.WithAPIKey(appConfig.PowerDns.PdnsApiKey))
 	if pdns == nil {
 		log.Fatalf("app.setupPowerDns: Failed to create PowerDNS client")
@@ -210,7 +207,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	return router
 }
 
-func LogAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
+func LogAppConfig(appConfig config.AppConfig, log *zap.SugaredLogger) {
 	var appConfigJson []byte
 	var err error
 
