@@ -105,7 +105,7 @@ multi-arch-build:
 
 doc-env: check-modules
 	@echo "📄 Generating Environment Variable documentation..."
-	go run ./cmd/docgen internal/app_config.go > "CONFIGURATION_VARIABLES.md"
+	go run ./cmd/docgen internal/config/app_config.go > "README_ENV_VARIABLES.md"
 
 help:
 	@echo "Usage: make <target>"

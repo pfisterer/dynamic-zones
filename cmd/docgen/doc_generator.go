@@ -279,7 +279,7 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 
 				defaultValue := strings.TrimSpace(info.Default)
 				if defaultValue == "" {
-					defaultValue = "'' (empty string)"
+					defaultValue = "''"
 				}
 
 				fmt.Printf("| `%s` | `%s` | %s |\n", info.Name, defaultValue, desc)
