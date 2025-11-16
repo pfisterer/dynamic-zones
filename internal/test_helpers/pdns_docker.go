@@ -47,7 +47,7 @@ type PdnsContainerTestInstance struct {
 	dockerController *DockerController
 	cleanupHooks     []func() error
 	apiPort          int
-	externalDnsPort  int
+	externalDnsPort  uint16
 	baseUrl          string
 }
 
@@ -59,7 +59,7 @@ func (instance *PdnsContainerTestInstance) GetBaseUrl() string {
 	return instance.baseUrl
 }
 
-func (instance *PdnsContainerTestInstance) GetExternalDnsPort() int {
+func (instance *PdnsContainerTestInstance) GetExternalDnsPort() uint16 {
 	return instance.externalDnsPort
 }
 
@@ -141,7 +141,7 @@ func StartPndsTestContainer(ctx context.Context) (instance *PdnsContainerTestIns
 		containerId:      containerID,
 		dockerController: dc,
 		apiPort:          externalApiPort,
-		externalDnsPort:  externalDnsPort,
+		externalDnsPort:  uint16(externalDnsPort),
 		baseUrl:          fmt.Sprintf("http://localhost:%d", externalApiPort),
 		cleanupHooks: []func() error{
 			func() error {

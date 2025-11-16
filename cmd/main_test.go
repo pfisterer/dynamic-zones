@@ -163,7 +163,7 @@ func testDeleteZone(t *testing.T, zone string) {
 	t.Logf("testDeleteZone: Ok, Zone %s not found as expected", zone)
 }
 
-func testDnsUpdate(t *testing.T, zone zones.ZoneDataResponse, nameserverPort int) {
+func testDnsUpdate(t *testing.T, zone zones.ZoneDataResponse, nameserverPort uint16) {
 	testname := "test." + zone.Zone + "."
 	testcontent := "111.222.33.44"
 	testttl := uint32(3600)
@@ -182,7 +182,7 @@ func testDnsUpdate(t *testing.T, zone zones.ZoneDataResponse, nameserverPort int
 	// Create a new DNS record using RFC 2136 update
 	t.Logf("testDnsUpdate: Using data from zone %s for DNS update test. Zone name: %s, Zone keys: %+v", zone.Zone, zone.Zone, zone.ZoneKeys)
 
-	_, err = zones.Rfc2136AddARecord(zone.ZoneKeys[0].Keyname, zone.ZoneKeys[0].Algorithm, zone.ZoneKeys[0].Key, nameserver+":"+strconv.Itoa(nameserverPort), zone.Zone+".", testname, testcontent, testttl)
+	_, err = zones.Rfc2136AddARecord(zone.ZoneKeys[0].Keyname, zone.ZoneKeys[0].Algorithm, zone.ZoneKeys[0].Key, nameserver+":"+strconv.Itoa(int(nameserverPort)), zone.Zone+".", testname, testcontent, testttl)
 	if err != nil {
 		t.Fatalf("testDnsUpdate: Failed to create DNS record: %v", err)
 	}

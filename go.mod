@@ -9,6 +9,7 @@ require (
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-contrib/zap v1.1.5
 	github.com/gin-gonic/gin v1.11.0
+	github.com/go-playground/validator/v10 v10.27.0
 	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/joeig/go-powerdns/v3 v3.19.0
 	github.com/joho/godotenv v1.5.1
@@ -50,7 +51,6 @@ require (
 	github.com/go-openapi/swag v0.19.15 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.28.0 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
