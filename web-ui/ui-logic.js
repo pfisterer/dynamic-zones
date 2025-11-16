@@ -79,6 +79,7 @@ function Main() {
                 <${Route} component=${NotFound} />
             <//>
         <//>
+        <div class="mb-6"></div>
         `
 }
 
