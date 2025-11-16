@@ -1,4 +1,4 @@
-import { render, html, Router, Route, Switch, Link, useHashLocation } from './dist/deps.mjs';
+import { render, html, Router, Route, Switch, Link, useHashLocation, useLocation, useEffect } from './dist/deps.mjs';
 import { useAuth, AuthProvider } from './ui-context-auth.js';
 import { AppConfigProvider, useAppConfig } from './ui-context-appconfig.js';
 import { ListTokens } from './ui-component-tokens.js';
@@ -69,11 +69,23 @@ function Main() {
         `
     }
 
+    function Redirect({ to }) {
+        const [_, navigate] = useLocation();
+        useEffect(() => {
+            navigate(to, { replace: true });
+        }, [to]);
+        return null;
+    }
+
+
     return html`
         <${Router} hook=${useHashLocation}>
             ${header}   
             <${Switch}>
-                <${Route} path="/" component=${ListZones} />
+                <${Route} path="/">
+                    ${html`<${Redirect} to="/zones" />`}
+                <//>
+                <${Route} path="/zones" component=${ListZones} nest/>
                 <${Route} path="/tokens" component=${ListTokens} />
                 <${Route} path="/documentation" component=${Documentation} />
                 <${Route} component=${NotFound} />

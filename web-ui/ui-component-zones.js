@@ -1,4 +1,4 @@
-import { html, useState, useEffect } from './dist/deps.mjs';
+import { html, useState, useEffect, Route, Switch, Link, useRoute, useLocation } from './dist/deps.mjs';
 import { useAuth, authHeaders } from './ui-context-auth.js';
 import { useAppConfig } from './ui-context-appconfig.js';
 import { CodeBlock } from './ui-component-codeblock.js';
@@ -260,46 +260,38 @@ function DnsRecordRow({ zone, tsigKey, record, onChange }) {
 
     return html`
         <tr>
-        <td>
-            <input class="input" value=${fields.name} onInput=${e => setFields({ ...fields, name: e.target.value })} disabled=${loading || !editing || !isEditable} /> </td>
+            <td>
+                <input class="input" value=${fields.name} onInput=${e => setFields({ ...fields, name: e.target.value })} disabled=${loading || !editing || !isEditable} /> 
+            </td>
+            <td>
+                ${editing && isEditable ? html`
+                <div class="select">
+                    <select value=${fields.type} onChange=${e => setFields({ ...fields, type: e.target.value })} > ${SUPPORTED_TYPES.map(t => html`<option value=${t}>${t}</option>`)}
+                    </select>
+                </div>
+                ` : html`<input class="input" value=${fields.type} disabled=${true} />
+                `}
+            </td>
+            <td>
+                <input class="input" type="number" value=${fields.ttl} onInput=${e => setFields({ ...fields, ttl: e.target.value })} disabled=${loading || !editing || !isEditable} />
+            </td>
+            <td>
+                <input class="input" value=${fields.value} onInput=${e => setFields({ ...fields, value: e.target.value })} disabled=${loading || !editing || !isEditable} />
+            </td>
+            <td>
+                ${editing && isEditable ? html`
+                <button class="button is-success" onClick=${handleUpdate} disabled=${loading}>${loading ? "Saving..." : "Save"} </button>
+                ` : html`
+                <button class="button" onClick=${() => isEditable && setEditing(true)} disabled=${loading || !isEditable}> Edit </button> `}
+                <button class="button is-danger ml-1" onClick=${handleDelete} disabled=${loading || !isEditable} >
+                ${loading ? "Deleting..." : "Delete"}
+                </button>
 
-        <td>
-            ${editing && isEditable ? html`
-            <div class="select">
-                <select value=${fields.type} onChange=${e => setFields({ ...fields, type: e.target.value })} > ${SUPPORTED_TYPES.map(t => html`<option value=${t}>${t}</option>`)}
-                </select>
-            </div>
-            ` : html`
-            <input class="input" value=${fields.type} disabled=${true}
-            />
-            `}
-        </td>
+                <button class="button ml-1" onClick=${handleCopy}>Copy nsupdate</button>
 
-        <td>
-            <input class="input" type="number" value=${fields.ttl} onInput=${e => setFields({ ...fields, ttl: e.target.value })} disabled=${loading || !editing || !isEditable} />
-        </td>
-
-        <td>
-            <input class="input" value=${fields.value} onInput=${e => setFields({ ...fields, value: e.target.value })} disabled=${loading || !editing || !isEditable} />
-        </td>
-
-        <td>
-            ${editing && isEditable ? html`
-            <button class="button is-success" onClick=${handleUpdate} disabled=${loading}>
-                ${loading ? "Saving..." : "Save"}
-            </button>
-            ` : html`
-            <button class="button" onClick=${() => isEditable && setEditing(true)} disabled=${loading || !isEditable}> Edit </button> `}
-
-            <button class="button is-danger ml-1" onClick=${handleDelete} disabled=${loading || !isEditable} >
-            ${loading ? "Deleting..." : "Delete"}
-            </button>
-
-            <button class="button ml-1" onClick=${handleCopy}>Copy nsupdate</button>
-
-            ${error && html`<div class="has-text-danger">${error.message}</div>`}
-        </td>
-        </tr>
+                ${error && html`<div class="has-text-danger">${error.message}</div>`}
+            </td>
+            </tr>
     `;
 }
 
@@ -388,7 +380,6 @@ function DnsRecordsList({ zone, tsigKey }) {
             setLoading(false);
         }
     }
-
 
     useEffect(() => { fetchRecords(); }, []);
 
@@ -514,17 +505,16 @@ function AvailableDomain({ zone, onChange }) {
     `;
 }
 
-function AvailableDomainsList({ zones, onChange }) {
+function RouteNotFound() {
     return html`
         <section class="mt-3">
             <div class="container">
-                <h1 class="title">Domains</h1>
-                ${zones.map(z => html`<${AvailableDomain} zone=${z} onChange=${onChange} />`)}
+                <h3 class="title is-4 has-text-danger">❌ Zone Not Found</h3>
+                <p>The zone specified in the URL could not be located in your account.</p>
             </div>
         </section>
-    `;
+    `
 }
-
 // ----------------------------------------
 // List Zones
 // ----------------------------------------
@@ -534,6 +524,9 @@ export function ListZones() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [reloadTrigger, setReloadTrigger] = useState(true);
+    const [match, params] = useRoute("/zone/:name");
+    const activeZoneName = match ? params.name : null;
+    const [_, navigate] = useLocation()
 
     useEffect(async () => {
         setLoading(true); setError(null);
@@ -547,5 +540,54 @@ export function ListZones() {
     if (loading) return html`<p>Loading zones...</p>`;
     if (error) return html`<a onClick=${() => setReloadTrigger(!reloadTrigger)}>Retry Load</a>`;
 
-    return html`<${AvailableDomainsList} zones=${zones} onChange=${() => setReloadTrigger(!reloadTrigger)} />`;
+    const selectedZone = zones.find(e => e.name === params?.name);
+    return html`
+        <section class="section pt-4">
+            <h1 class="title is-3">Zone Management</h1>
+            
+            <div class="mb-5">
+                <nav class="panel">
+                    <p class="panel-heading">
+                        Available Zones (${zones.length})
+                    </p>
+                    ${zones.map(zone => html`
+                        <${Link} 
+                            to=${"/zone/" + zone.name} 
+                            class="panel-block ${activeZoneName === zone.name ? 'has-background-grey-light has-text-white-ter' : ''}"
+                        >
+                            <span class="panel-icon">
+                                <i class="fas fa-globe"></i>
+                            </span>
+                            ${zone.name}
+                        <//> 
+                    `)}
+                    ${zones.length === 0 && html`
+                        <div class="panel-block">
+                            No zones available.
+                        </div>
+                    `}
+                </nav>
+            </div>
+
+            <div class="box">
+                <${Switch}>
+                    <!-- Show the currently selected zone -->
+                    <${Route} path="/zone/:name">
+                        ${() => selectedZone ? html`<${AvailableDomain} zone=${selectedZone} onChange=${() => setReloadTrigger(!reloadTrigger)} />` : html`<${RouteNotFound}/>`}
+                    <//>
+
+                    <!-- Redirect to the first zone if available -->
+                    <${Route} path="/">
+                        ${() => zones.length > 0 ? (navigate(`/zone/${zones[0].name}`, { replace: true }), null) : html`
+                            <div class="content has-text-centered p-6">
+                                    <h3 class="subtitle is-5">⬆️ Select a zone above to manage its DNS records.</h3>
+                            </div>
+                        `}  
+                    <//>
+
+                    <${Route} component=${RouteNotFound} />
+                 <//>
+            </div>
+        </section>
+    `;
 }
