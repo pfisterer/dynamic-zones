@@ -16,7 +16,11 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	}
 
 	// Get application configuration from environment variables
-	appConfig := config.GetAppConfigFromEnvironment()
+	appConfig, err := config.GetAppConfigFromEnvironment()
+	if err != nil {
+		fmt.Printf("Failed to get app config from environment: %v", err)
+		return
+	}
 
 	// Load application configuration and create logger
 	logger, log := CreateAppLogger(appConfig)
@@ -25,7 +29,7 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	log.Info("Starting upstream DNS update test")
 	dynamicZonesDnsIPAddress := net.ParseIP(appConfig.PowerDns.DnsServerAddress)
 
-	err := PerformSingleUpstreamDnsUpdateCheck(&appConfig.UpstreamDns, dynamicZonesDnsIPAddress, log, true)
+	err = PerformSingleUpstreamDnsUpdateCheck(&appConfig.UpstreamDns, dynamicZonesDnsIPAddress, log, true)
 	if err != nil {
 		log.Errorf("Upstream DNS update test failed: %v", err)
 		t.Fatalf("Upstream DNS update test failed: %v", err)

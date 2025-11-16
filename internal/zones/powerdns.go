@@ -3,12 +3,13 @@ package zones
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"github.com/joeig/go-powerdns/v3"
+	"github.com/miekg/dns"
+	"go.uber.org/zap"
 )
 
 const PowerdnsKey = "DYNAMIC_ZONES_pdns_client"
@@ -31,9 +32,33 @@ func InjectPdnsMiddleware(client *powerdns.Client) gin.HandlerFunc {
 	}
 }
 
-func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneDataResponse, error) {
+type PowerDnsClient struct {
+	powerdns          *powerdns.Client
+	log               *zap.SugaredLogger
+	defaultTTLSeconds uint32
+	zoneNsNames       []string
+}
+
+func NewPowerDnsClient(url, vhost, apiKey string, defaultTtlSecs uint32, zoneNsNames []string, log *zap.SugaredLogger) (*PowerDnsClient, error) {
+	pdns := powerdns.New(url, vhost, powerdns.WithAPIKey(apiKey))
+
+	if pdns == nil {
+		log.Fatalf("app.setupPowerDns: Failed to create PowerDNS client")
+		return nil, fmt.Errorf("failed to create PowerDNS client")
+	}
+
+	return &PowerDnsClient{
+		powerdns:          pdns,
+		log:               log,
+		defaultTTLSeconds: defaultTtlSecs,
+		zoneNsNames:       zoneNsNames,
+	}, nil
+
+}
+
+func (p *PowerDnsClient) GetZone(ctx context.Context, zone string) (*ZoneDataResponse, error) {
 	// Get zone metadata from PowerDNS
-	zonemeta, err := pdns.Metadata.Get(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate)
+	zonemeta, err := p.powerdns.Metadata.Get(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.GetZone: Failed to get metadata from PowerDNS: %v", err)
 	}
@@ -46,7 +71,7 @@ func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneData
 
 	// Get keys listed in the metadata
 	for _, keyname := range zonemeta.Metadata {
-		tsigkey, err := pdns.TSIGKeys.Get(ctx, keyname)
+		tsigkey, err := p.powerdns.TSIGKeys.Get(ctx, keyname)
 		if err != nil {
 			return nil, fmt.Errorf("powerdns.GetZone: Failed to get TSIG key '%s' from PowerDNS: %v", keyname, err)
 		}
@@ -60,75 +85,95 @@ func GetZone(ctx context.Context, pdns *powerdns.Client, zone string) (*ZoneData
 	return &response, nil
 }
 
-func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone string, force bool, nameservers []string) (*ZoneDataResponse, error) {
-	// Construct the new, compliant key name
-	// Replace all dots with dashes to comply with PowerDNS key name requirements
-	keyname := "key-" + helper.Sha1Hash("user-"+user+"-zone-"+zone+"-key")
-
-	// Delete potentially existing zone and key if forcing
-	if force {
-		_ = pdns.Zones.Delete(ctx, zone)
-		_ = pdns.TSIGKeys.Delete(ctx, keyname)
-	}
-
-	// Construct a valid SOA record (serial in YYYYMMDDnn format)
+func (p *PowerDnsClient) prepare(zoneFQDN string) *powerdns.Zone {
+	// Build your SOA serial in YYYYMMDDnn
 	serial := time.Now().Format("20060102") + "01"
-	soaNameserver := nameservers[0]
+	soaNameserver := dns.Fqdn(p.zoneNsNames[0])
+	refresh := uint32(10800)
+	retry := uint32(3600)
+	expire := uint32(604800)
+	minimum := p.defaultTTLSeconds
+	soaContent := fmt.Sprintf("%s hostmaster.%s %s %d %d %d %d", soaNameserver, zoneFQDN, serial, refresh, retry, expire, minimum)
 
-	// make sure that soaNameserver ends with .
-	if soaNameserver[len(soaNameserver)-1] != '.' {
-		soaNameserver += "."
+	// Prepare NS records
+	nsRecords := make([]powerdns.Record, len(p.zoneNsNames))
+	for i, ns := range p.zoneNsNames {
+		nsRecords[i] = powerdns.Record{
+			Content:  powerdns.String(dns.Fqdn(ns)),
+			Disabled: powerdns.Bool(false),
+		}
 	}
 
-	// Create SOA record
-	// <primary-ns> <hostmaster-email> <serial> <refresh> <retry> <expire> <minimum>
-	refresh := 10800 // 3 hours; Tells secondary/slave servers how often they should check with the master for updates.
-	retry := 3600    // 1 hour; If a secondary fails to contact the master, retry after this interval.
-	expire := 604800 // 1 week; How long a secondary will continue serving old data if it cannot reach the master.
-	minimum := 60    // 1 minute;  Used as the negative caching TTL: how long a resolver caches “no such record” answers (NXDOMAIN).
-	soa := fmt.Sprintf("%s hostmaster.%s. %s %d %d %d %d", soaNameserver, zone, serial, refresh, retry, expire, minimum)
-
-	log.Printf("powerdns.CreateZone: Creating zone '%s' with SOA record: %s", zone, soa)
-
-	// Create the zone in PowerDNS
-	zoneDef := powerdns.Zone{
-		Name:        powerdns.String(zone),
-		Kind:        powerdns.ZoneKindPtr(powerdns.NativeZoneKind),
-		DNSsec:      powerdns.Bool(false),
-		SOAEdit:     powerdns.String(soa),
-		SOAEditAPI:  powerdns.String(soa),
-		APIRectify:  powerdns.Bool(true),
-		Nameservers: nameservers,
-	}
-
-	_, err := pdns.Zones.Add(ctx, &zoneDef)
-	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Error creating zone: %v with zone definition: %+v", err, zoneDef)
-	}
-
-	// Create SOA RRSet inside the zone
-	soaZone := zone
-	if soaZone[len(soaZone)-1] != '.' {
-		soaZone += "."
-	}
-
+	// Build the RRsets: SOA + NS
 	soaRRSet := powerdns.RRset{
-		Name: powerdns.String(soaZone),
-		Type: powerdns.RRTypePtr(powerdns.RRTypeSOA),
-		TTL:  powerdns.Uint32(3600),
+		Name:       powerdns.String(zoneFQDN),
+		Type:       powerdns.RRTypePtr(powerdns.RRTypeSOA),
+		TTL:        powerdns.Uint32(p.defaultTTLSeconds),
+		ChangeType: powerdns.ChangeTypePtr(powerdns.ChangeTypeReplace),
 		Records: []powerdns.Record{
 			{
-				Content:  powerdns.String(soa),
+				Content:  powerdns.String(soaContent),
 				Disabled: powerdns.Bool(false),
 			},
 		},
-		ChangeType: powerdns.ChangeTypePtr(powerdns.ChangeTypeReplace),
 	}
 
-	zonePatch := powerdns.Zone{RRsets: []powerdns.RRset{soaRRSet}}
-	err = pdns.Zones.Change(ctx, zone, &zonePatch)
+	// Build the zone definition with rrsets
+	zoneDef := powerdns.Zone{
+		Name:        powerdns.String(zoneFQDN),
+		Kind:        powerdns.ZoneKindPtr(powerdns.NativeZoneKind),
+		DNSsec:      powerdns.Bool(false),
+		SOAEdit:     powerdns.String("DEFAULT"),
+		SOAEditAPI:  powerdns.String("DEFAULT"),
+		APIRectify:  powerdns.Bool(true),
+		Nameservers: p.zoneNsNames,
+		RRsets:      []powerdns.RRset{soaRRSet},
+	}
+
+	return &zoneDef
+}
+
+func (p *PowerDnsClient) EnsureIntermediateZoneExists(ctx context.Context, zone string) error {
+	// zone name as FQDN
+	zoneFQDN := dns.Fqdn(zone)
+
+	// Check if zone already exists
+	response, err := p.powerdns.Zones.Get(ctx, zoneFQDN)
+	if err == nil {
+		p.log.Debugf("Intermediate zone %s already exists: %+v", zoneFQDN, response)
+		p.log.Debugf("Intermediate zone %s already exists, skipping creation", zoneFQDN)
+		return nil
+	}
+
+	// Create zone via API with SOA + NS
+	zoneDef := p.prepare(zoneFQDN)
+	_, err = p.powerdns.Zones.Add(ctx, zoneDef)
 	if err != nil {
-		return nil, fmt.Errorf("powerdns.CreateZone: Failed to set SOA RR via patch: %v", err)
+		return fmt.Errorf("CreateZone: error creating zone: %v, definition: %+v", err, zoneDef)
+	}
+
+	return nil
+}
+
+func (p *PowerDnsClient) CreateZone(ctx context.Context, user, zone string, force bool) (*ZoneDataResponse, error) {
+	// zone name as FQDN
+	zoneFQDN := dns.Fqdn(zone)
+
+	// Compute TSIG key name, etc.
+	keyname := "key-" + helper.Sha1Hash("user-"+user+"-zone-"+zone+"-key")
+
+	// If force is set, delete existing zone and key (if they exist)
+	if force {
+		_ = p.powerdns.Zones.Delete(ctx, zoneFQDN)
+		_ = p.powerdns.TSIGKeys.Delete(ctx, keyname)
+	}
+
+	// Create zone via API with SOA + NS
+	zoneDef := p.prepare(zoneFQDN)
+	p.log.Debugf("powerdns.CreateZone: Creating zone with definition: %+v", zoneDef)
+	_, err := p.powerdns.Zones.Add(ctx, zoneDef)
+	if err != nil {
+		return nil, fmt.Errorf("CreateZone: error creating zone: %v, definition: %+v", err, zoneDef)
 	}
 
 	// Generate a TSIG key
@@ -139,13 +184,13 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	}
 
 	// Create the TSIG key in PowerDNS
-	tsigkey, err := pdns.TSIGKeys.Create(ctx, keyname, algorithm, key)
+	tsigkey, err := p.powerdns.TSIGKeys.Create(ctx, keyname, algorithm, key)
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error creating TSIG key: %v", err)
 	}
 
 	// Allow the TSIG key to perform AXFR
-	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowAXFR, []string{*tsigkey.Name})
+	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowAXFR, []string{*tsigkey.Name})
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error setting ALLOW-AXFR-TSIG metadata: %v", err)
 	}
@@ -155,32 +200,32 @@ func CreateZone(ctx context.Context, pdns *powerdns.Client, user string, zone st
 	// that first a dynamic update has to be allowed either by the global allow-dnsupdate-from setting,
 	// or by a per-zone ALLOW-DNSUPDATE-FROM metadata setting.
 	// Secondly, if a zone has a TSIG-ALLOW-DNSUPDATE metadata setting, that must match too.
-	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
+	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
 	}
 
 	// Allow the TSIG key to perform dynamic updates
-	_, err = pdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
+	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
 	if err != nil {
 		return nil, fmt.Errorf("powerdns.CreateZone: Error setting TSIG dynamic update metadata: %v", err)
 	}
 
-	return GetZone(ctx, pdns, zone)
+	return p.GetZone(ctx, zone)
 }
 
-func DeleteZone(ctx context.Context, pdns *powerdns.Client, zone string, delete_all_keys bool) error {
+func (p *PowerDnsClient) DeleteZone(ctx context.Context, zone string, delete_all_keys bool) error {
 
 	if delete_all_keys {
 		// Get the TSIG key name from the zone metadata
-		metadata, err := pdns.Metadata.Get(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate)
+		metadata, err := p.powerdns.Metadata.Get(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate)
 		if err != nil {
 			return fmt.Errorf("powerdns.DeleteZone: Error getting metadata kind 'powerdns.MetadataTSIGAllowDNSUpdate' for zone %s: %v", zone, err)
 		}
 
 		// Delete the TSIG key
 		for _, keyname := range metadata.Metadata {
-			err = pdns.TSIGKeys.Delete(ctx, keyname)
+			err = p.powerdns.TSIGKeys.Delete(ctx, keyname)
 			if err != nil {
 				return fmt.Errorf("powerdns.DeleteZone: Error deleting TSIG key: %v", err)
 			}
@@ -188,7 +233,7 @@ func DeleteZone(ctx context.Context, pdns *powerdns.Client, zone string, delete_
 	}
 
 	// Delete the zone
-	err := pdns.Zones.Delete(ctx, zone)
+	err := p.powerdns.Zones.Delete(ctx, zone)
 	if err != nil {
 		return fmt.Errorf("powerdns.DeleteZone: Error deleting zone: %v", err)
 	}

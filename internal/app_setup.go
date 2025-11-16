@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
@@ -11,7 +12,6 @@ import (
 	"github.com/farberg/dynamic-zones/internal/storage"
 	"github.com/farberg/dynamic-zones/internal/zones"
 	"github.com/gin-contrib/cors"
-	"github.com/joeig/go-powerdns/v3"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 
@@ -20,13 +20,13 @@ import (
 )
 
 type AppData struct {
-	Config      config.AppConfig
-	Uzp         zones.ZoneProvider
-	Storage     *storage.Storage
-	Pdns        *powerdns.Client
-	RefreshTime uint64
-	Logger      *zap.Logger
-	Log         *zap.SugaredLogger
+	Config       config.AppConfig
+	ZoneProvider zones.ZoneProvider
+	Storage      *storage.Storage
+	PowerDns     *zones.PowerDnsClient
+	RefreshTime  uint64
+	Logger       *zap.Logger
+	Log          *zap.SugaredLogger
 }
 
 func CreateAppLogger(appConfig config.AppConfig) (*zap.Logger, *zap.SugaredLogger) {
@@ -38,7 +38,7 @@ func CreateAppLogger(appConfig config.AppConfig) (*zap.Logger, *zap.SugaredLogge
 	}
 
 	// Print application configuration
-	LogAppConfig(appConfig, log)
+	logAppConfig(appConfig, log)
 
 	return logger, log
 }
@@ -50,24 +50,45 @@ func RunApplication() {
 	}
 
 	// Get application configuration from environment variables
-	appConfig := config.GetAppConfigFromEnvironment()
+	appConfig, err := config.GetAppConfigFromEnvironment()
+	if err != nil {
+		log.Fatal("Error loading application configuration: ", err)
+	}
 
 	// Load application configuration and create logger
 	logger, log := CreateAppLogger(appConfig)
 	defer logger.Sync()
 
-	// Create componentes
-	pdns := setupPowerDns(log, &appConfig)
-	db := setupStorage(log, &appConfig)
-	uzp := zones.CreateUserZoneProvider(&appConfig, logger)
+	// Create components
+
+	thisNsServer := fmt.Sprintf("%s.%s", appConfig.UpstreamDns.Name, appConfig.UpstreamDns.Zone)
+
+	pdns, err := zones.NewPowerDnsClient(
+		appConfig.PowerDns.PdnsUrl,
+		appConfig.PowerDns.PdnsVhost,
+		appConfig.PowerDns.PdnsApiKey,
+		appConfig.PowerDns.DefaultTTLSeconds,
+		[]string{thisNsServer},
+		log,
+	)
+	if err != nil {
+		log.Fatalf("Failed to create PowerDNS client: %v", err)
+	}
+
+	db, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
+	if err != nil {
+		log.Fatalf("Failed to connect to the database: %v", err)
+	}
+
+	zoneProvider := zones.NewUserZoneProvider(&appConfig, logger)
 
 	appData := AppData{
-		Config:  appConfig,
-		Uzp:     uzp,
-		Storage: db,
-		Pdns:    pdns,
-		Logger:  logger,
-		Log:     log,
+		Config:       appConfig,
+		ZoneProvider: zoneProvider,
+		Storage:      db,
+		PowerDns:     pdns,
+		Logger:       logger,
+		Log:          log,
 	}
 
 	// Start application
@@ -75,30 +96,12 @@ func RunApplication() {
 
 	// Create and run the web server server forever
 	router := setupGinWebserver(&appData)
-	err := router.Run(appConfig.WebServer.GinBindString)
+	err = router.Run(appConfig.WebServer.GinBindString)
 	if err != nil {
 		log.Fatalf("app.RunApp: Failed to start server: %v", err)
 	}
 
 	log.Info("app.RunApp: Application stopped.")
-}
-
-func setupStorage(log *zap.SugaredLogger, appConfig *config.AppConfig) *storage.Storage {
-	storage, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
-	if err != nil {
-		log.Fatalf("Failed to connect to the database: %v", err)
-	}
-
-	return storage
-}
-
-func setupPowerDns(log *zap.SugaredLogger, appConfig *config.AppConfig) *powerdns.Client {
-	pdns := powerdns.New(appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, powerdns.WithAPIKey(appConfig.PowerDns.PdnsApiKey))
-	if pdns == nil {
-		log.Fatalf("app.setupPowerDns: Failed to create PowerDNS client")
-	}
-
-	return pdns
 }
 
 func setupGinWebserver(app *AppData) (router *gin.Engine) {
@@ -207,7 +210,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	return router
 }
 
-func LogAppConfig(appConfig config.AppConfig, log *zap.SugaredLogger) {
+func logAppConfig(appConfig config.AppConfig, log *zap.SugaredLogger) {
 	var appConfigJson []byte
 	var err error
 

@@ -17,6 +17,7 @@ type ZoneProviderWebhook struct {
 	bearerToken string
 	cache       *ttlcache.Cache[string, []ZoneResponse]
 	logger      *zap.Logger
+	log         *zap.SugaredLogger
 }
 
 func NewWebhookZoneProvider(url string, bearerToken string, logger *zap.Logger) *ZoneProviderWebhook {
@@ -33,6 +34,7 @@ func NewWebhookZoneProvider(url string, bearerToken string, logger *zap.Logger) 
 		bearerToken: bearerToken,
 		cache:       cache,
 		logger:      logger,
+		log:         logger.Sugar(),
 	}
 }
 
@@ -42,16 +44,16 @@ func (m *ZoneProviderWebhook) GetUserZones(user *auth.UserClaims) ([]ZoneRespons
 	cacheKey := user.PreferredUsername
 	cachedItem := m.cache.Get(cacheKey)
 	if cachedItem != nil {
-		m.logger.Debug("zones.GetUserZones: cache hit", zap.String("user", user.PreferredUsername))
+		m.log.Debugf("zones.GetUserZones: cache hit for user %s", user.PreferredUsername)
 		return cachedItem.Value(), nil
 	}
 
 	// Not in cache, make webhook request
-	m.logger.Debug("zones.GetUserZones: cache miss, making webhook request", zap.String("user", user.PreferredUsername))
+	m.log.Debugf("zones.GetUserZones: cache miss, making webhook request for user %s", user.PreferredUsername)
 
-	result, err := fetchZonesFromWebhook(m.url, m.bearerToken, user, m.logger)
+	result, err := m.fetchZonesFromWebhook(m.url, m.bearerToken, user)
 	if err != nil {
-		m.logger.Error("zones.GetUserZones: error fetching zones from webhook", zap.String("user", user.PreferredUsername), zap.Error(err))
+		m.log.Errorf("zones.GetUserZones: error fetching zones from webhook for user %s: %v", user.PreferredUsername, err)
 		return []ZoneResponse{}, err
 	}
 
@@ -60,21 +62,21 @@ func (m *ZoneProviderWebhook) GetUserZones(user *auth.UserClaims) ([]ZoneRespons
 	return result, nil
 }
 
-func (m *ZoneProviderWebhook) IsAllowedZone(user *auth.UserClaims, zone string) (bool, error) {
+func (m *ZoneProviderWebhook) IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
 	userZones, err := m.GetUserZones(user)
 	if err != nil {
-		return false, err
+		return false, ZoneResponse{}, err
 	}
 
 	for _, uz := range userZones {
 		if uz.Zone == zone {
-			return true, nil
+			return true, uz, nil
 		}
 	}
-	return false, nil
+	return false, ZoneResponse{}, nil
 }
 
-func fetchZonesFromWebhook(url string, bearerToken string, user *auth.UserClaims, logger *zap.Logger) ([]ZoneResponse, error) {
+func (m *ZoneProviderWebhook) fetchZonesFromWebhook(url string, bearerToken string, user *auth.UserClaims) ([]ZoneResponse, error) {
 	// Marshal the user object to JSON
 	userJSON, err := json.Marshal(user)
 	if err != nil {
@@ -113,6 +115,6 @@ func fetchZonesFromWebhook(url string, bearerToken string, user *auth.UserClaims
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
-	logger.Debug("fetchZonesFromWebhook: fetched zones", zap.Int("count", len(zones)), zap.String("user", user.PreferredUsername))
+	m.log.Debugf("fetchZonesFromWebhook: fetched zones for user %s, count %d", user.PreferredUsername, len(zones))
 	return zones, nil
 }

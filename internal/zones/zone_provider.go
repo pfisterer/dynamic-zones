@@ -13,16 +13,21 @@ type ZoneResponse struct {
 
 type ZoneProvider interface {
 	GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error)
-	IsAllowedZone(user *auth.UserClaims, zone string) (bool, error)
+	IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error)
 }
 
-func CreateUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZoneProvider {
-	if appConfig.UserZoneProvider.Provider == "fixed" {
+func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZoneProvider {
+
+	switch appConfig.UserZoneProvider.Provider {
+	case "fixed":
 		return NewFixedZoneProvider(appConfig.UserZoneProvider.FixedDomainSuffixes, logger)
-	} else if appConfig.UserZoneProvider.Provider == "webhook" {
+
+	case "webhook":
 		return NewWebhookZoneProvider(appConfig.UserZoneProvider.WebhookUrl, appConfig.UserZoneProvider.WebhookBearerToken, logger)
-	} else {
-		logger.Fatal("zones.CreateUserZoneProvider: unknown UserZoneProvider type", zap.String("type", appConfig.UserZoneProvider.Provider))
+
+	default:
+		logger.Fatal("zones.CreateUserZoneProvider: unknown UserZoneProvider type",
+			zap.String("type", appConfig.UserZoneProvider.Provider))
 		return nil
 	}
 

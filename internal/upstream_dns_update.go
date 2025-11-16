@@ -162,7 +162,7 @@ func deleteRecords(c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log
 
 }
 
-func toNsUpdateCommand(tsigName, tsigAlg, tsigSecret, serverAddr string, serverPort int, zoneName, commands string) string {
+func toNsUpdateCommand(tsigName, tsigAlg, tsigSecret, serverAddr string, serverPort uint16, zoneName, commands string) string {
 	tmpl, err := template.New("nsupdate").Parse(tmplString)
 	if err != nil {
 		return "<error parsing template>"

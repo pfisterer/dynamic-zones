@@ -11,6 +11,7 @@ import (
 type FixedZoneProvider struct {
 	zone_suffixes []string
 	logger        *zap.Logger
+	log           *zap.SugaredLogger
 }
 
 func NewFixedZoneProvider(config string, logger *zap.Logger) *FixedZoneProvider {
@@ -20,9 +21,13 @@ func NewFixedZoneProvider(config string, logger *zap.Logger) *FixedZoneProvider 
 		zones[i] = strings.TrimSpace(zone)
 	}
 
+	logger.Info("zones.NewFixedZoneProvider: initialized FixedZoneProvider",
+		zap.Int("num_zones", len(zones)), zap.Strings("zones", zones))
+
 	return &FixedZoneProvider{
 		zone_suffixes: zones,
 		logger:        logger,
+		log:           logger.Sugar(),
 	}
 }
 
@@ -35,24 +40,25 @@ func (m *FixedZoneProvider) GetUserZones(user *auth.UserClaims) ([]ZoneResponse,
 			Zone:    name,
 			ZoneSOA: zone,
 		})
-		m.logger.Debug("zones.GetUserZones: added zone", zap.String("zone", name), zap.String("soa", zone))
 	}
+
+	m.log.Debugf("zones.GetUserZones: returning zones for user %s: %v", user.PreferredUsername, result)
 
 	return result, nil
 }
 
-func (m *FixedZoneProvider) IsAllowedZone(user *auth.UserClaims, zone string) (bool, error) {
+func (m *FixedZoneProvider) IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
 	userZones, err := m.GetUserZones(user)
 	if err != nil {
-		return false, err
+		return false, ZoneResponse{}, err
 	}
 
 	for _, uz := range userZones {
 		if uz.Zone == zone {
-			return true, nil
+			return true, uz, nil
 		}
 	}
-	return false, nil
+	return false, ZoneResponse{}, nil
 }
 
 func makeDnsCompliant(input string) string {

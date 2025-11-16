@@ -10,7 +10,7 @@ import (
 
 // PerformALookup queries both A (IPv4) and AAAA (IPv6) records using a custom nameserver.
 // It ignores NXDOMAIN errors for individual record types and returns whatever results are available.
-func PerformALookup(nameserverAddress string, nameserverPort int, hostname string) ([]net.IP, error) {
+func PerformALookup(nameserverAddress string, nameserverPort uint16, hostname string) ([]net.IP, error) {
 	var ips []net.IP
 	addr := net.JoinHostPort(nameserverAddress, fmt.Sprintf("%d", nameserverPort))
 	client := &dns.Client{Timeout: 5 * time.Second}
