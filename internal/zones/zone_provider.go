@@ -20,7 +20,7 @@ func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZonePr
 
 	switch appConfig.UserZoneProvider.Provider {
 	case "fixed":
-		return NewFixedZoneProvider(appConfig.UserZoneProvider.FixedDomainSuffixes, logger)
+		return NewFixedZoneProvider(appConfig.UserZoneProvider.FixedDomainSuffixes, appConfig.UserZoneProvider.FixedDomainSoa, logger)
 
 	case "webhook":
 		return NewWebhookZoneProvider(appConfig.UserZoneProvider.WebhookUrl, appConfig.UserZoneProvider.WebhookBearerToken, logger)

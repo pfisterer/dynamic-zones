@@ -10,15 +10,24 @@ import (
 
 type FixedZoneProvider struct {
 	zone_suffixes []string
+	zone_soa      []string
 	logger        *zap.Logger
 	log           *zap.SugaredLogger
 }
 
-func NewFixedZoneProvider(config string, logger *zap.Logger) *FixedZoneProvider {
+func NewFixedZoneProvider(suffixes, soa string, logger *zap.Logger) *FixedZoneProvider {
 	// Split config by comma and trim spaces
-	zones := strings.Split(config, ",")
+	zones := strings.Split(suffixes, ",")
+	zones_soa := strings.Split(soa, ",")
+	log := logger.Sugar()
+
+	if len(zones) != len(zones_soa) {
+		log.Fatalf("Length of suffixes (%d) and soa (%d) must match", len(zones), len(zones_soa))
+	}
+
 	for i, zone := range zones {
 		zones[i] = strings.TrimSpace(zone)
+		zones_soa[i] = strings.TrimSpace(zones_soa[i])
 	}
 
 	logger.Info("zones.NewFixedZoneProvider: initialized FixedZoneProvider",
@@ -26,19 +35,20 @@ func NewFixedZoneProvider(config string, logger *zap.Logger) *FixedZoneProvider 
 
 	return &FixedZoneProvider{
 		zone_suffixes: zones,
+		zone_soa:      zones_soa,
 		logger:        logger,
-		log:           logger.Sugar(),
+		log:           log,
 	}
 }
 
 func (m *FixedZoneProvider) GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error) {
 	result := make([]ZoneResponse, 0, len(m.zone_suffixes))
 
-	for _, zone := range m.zone_suffixes {
+	for i, zone := range m.zone_suffixes {
 		name := makeDnsCompliant(user.PreferredUsername) + "." + zone
 		result = append(result, ZoneResponse{
 			Zone:    name,
-			ZoneSOA: zone,
+			ZoneSOA: m.zone_soa[i],
 		})
 	}
 

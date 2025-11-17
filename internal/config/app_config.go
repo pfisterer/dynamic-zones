@@ -71,8 +71,10 @@ type WebServerConfig struct {
 type UserZoneProviderConfig struct {
 	// The type of zone provider
 	Provider string `json:"provider" validate:"oneof=fixed webhook"`
-	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "example.com, example2.org")
+	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "test.example.com, example.example2.org")
 	FixedDomainSuffixes string `json:"fixed_domain_suffixes" validate:"required_if=Provider fixed"`
+	// Comma-separated list of fixed domains where SOA of this nameserver starts (in the same order as FixedDomainSuffixes, e.g., "example.com, example2.org")
+	FixedDomainSoa string `json:"fixed_domain_soa" validate:"required_if=Provider fixed"`
 	// The webhook URL for zone provider "webhook"
 	WebhookUrl string `json:"webhook_url" validate:"required_if=Provider webhook,omitempty,url"`
 	// The webhook bearer token for zone provider "webhook"
@@ -129,6 +131,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		UserZoneProvider: UserZoneProviderConfig{
 			Provider:            helper.GetEnvString("ZONE_PROVIDER_TYPE", "fixed"),
 			FixedDomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "test.example.com, demo.example2.org"),
+			FixedDomainSoa:      helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SOA", "example.com, example2.org"),
 			WebhookUrl:          helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
 			WebhookBearerToken:  helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
 		},
