@@ -17,6 +17,9 @@ function LoginLogoutButton() {
 }
 
 function Header(props) {
+    const [currentPath] = useLocation();
+    const getLinkClass = (href) => { return (currentPath.startsWith(href)) ? "has-text-danger" : ""; };
+
     return html`
         <nav class="navbar is-fixed-top" role="navigation" class="has-background-white-bis has-text-primary-invert" hoverable="false">
                 <div class="navbar-brand">
@@ -29,14 +32,14 @@ function Header(props) {
                 </div>
 
                 <div class="navbar-item">
-                    <${Link}  className=${(active) => (active ? "has-text-danger" : "")} href="/">Home</$Link>
+                    <${Link} className=${getLinkClass("/zones")} href="/zones">Home<//>
                 </div>
                 <div class="navbar-item">
-                    <${Link} className=${(active) => (active ? "has-text-danger" : "")} href="/tokens">API Tokens</$Link>
+                    <${Link} className=${active => active ? "has-text-danger" : ""} href="/tokens">API Tokens<//>
                 </div>
 
                 <div class="navbar-item">
-                    <${Link} className=${(active) => (active ? "has-text-danger" : "")} href="/documentation">Documentation</$Link>
+                    <${Link} className=${active => active ? "has-text-danger" : ""} href="/documentation">Documentation<//>
                 </div>
                 
                 <div class="navbar-end">
