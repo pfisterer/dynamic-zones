@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: default
+  name: powerdns-config
+data:
+  pdns.conf: |
+    # PowerDNS configuration file
+    local-address=0.0.0.0
+    local-port=53
+
+    # logLevel: 0 = emergency, 1 = alert, 2 = critical, 3 = error, 4 = warning, 5 = notice, 6 = info, 7 = debug
+    loglevel=7
+
+    # SQLite3
+    launch=gsqlite3
+    gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+
+    # API
+    webserver-address=0.0.0.0
+    webserver-port=8080
+    webserver-allow-from=0.0.0.0/0
+    webserver-loglevel=normal # none, normal, detailed
+    api=yes
+    api-key={{ powerdns_api_key }}
+
+    # Allow DSN updates but deny from any source here
+    # cf. https://doc.powerdns.com/authoritative/dnsupdate.html#dnsupdate-metadata
+    dnsupdate=yes
+    allow-dnsupdate-from=
+    dnsupdate-require-tsig=true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: powerdns
+  labels:
+    app: powerdns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: powerdns
+  template:
+    metadata:
+      labels:
+        app: powerdns
+    spec:
+      initContainers:
+        # Make sure that initially, the sqlite database exists
+        # when the volume is first created by copying the
+        # default db from the container to the volume
+        - name: copy-sqlite
+          image: powerdns/pdns-auth-master
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /mnt/pdns.sqlite3 ]; then
+                echo "Copying /var/lib/powerdns/pdns.sqlite3 to /mnt/ ..."
+                cp /var/lib/powerdns/pdns.sqlite3 /mnt/
+              else
+                echo "Not touching the existing database in /mnt"
+              fi
+          volumeMounts:
+            - name: pdns-data
+              mountPath: /mnt
+
+      containers:
+        # Main application container
+        - name: powerdns
+          image: powerdns/pdns-auth-master
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api-http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: pdns-conf
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+            - name: pdns-data
+              mountPath: /var/lib/powerdns
+      volumes:
+        - name: pdns-conf
+          configMap:
+            name: powerdns-config
+        - name: pdns-data
+          persistentVolumeClaim:
+            claimName: pdns-data-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  namespace: default
+  name: pdns-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: default
+  name: powerdns-api
+  labels:
+    app: powerdns
+spec:
+  selector:
+    app: powerdns
+  ports:
+    - name: api
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: default
+  name: powerdns-dns
+  labels:
+    app: powerdns
+spec:
+  selector:
+    app: powerdns
+  ports:
+    - name: dns-udp
+      protocol: UDP
+      port: 53
+      targetPort: 53
+    - name: dns-tcp
+      protocol: TCP
+      port: 53
+      targetPort: 53
+  type: LoadBalancer

@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamic-zones
+  namespace: default
+  annotations:
+    keel.sh/policy: all
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 60m"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dynamic-zones
+  template:
+    metadata:
+      labels:
+        app: dynamic-zones
+    spec:
+      containers:
+        - name: dynamic-zones
+          image: ghcr.io/pfisterer/dynamic-zones:{{ dynamic_zones_version | default("latest") }}"
+          ports:
+            - containerPort: 8082
+          env:
+{{- if api_mode }}
+            - name: API_MODE
+              value: "{{ api_mode }}"
+{{- end }}
+
+{{- if api_auth_provider == "oidc" }}
+            - name: API_AUTH_PROVIDER
+              value: "{{ api_auth_provider }}"
+
+{{- if oidc_issuer_url }}
+            - name: OIDC_ISSUER_URL
+              value: "{{ oidc_issuer_url }}"
+            - name: OIDC_CLIENT_ID
+              value: "{{ oidc_client_id }}"
+
+{{- if zone_provider_type == "fixed" }}
+            - name: ZONE_PROVIDER_TYPE
+              value: "{{ zone_provider_type }}"
+            - name: ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES
+              value: "{{ zone_provider_fixed_domain_suffixes }}"
+            - name: ZONE_PROVIDER_FIXED_DOMAIN_SOA
+              value: "{{ zone_provider_fixed_domain_soa }}"
+{{- end }}
+            - name: DB_TYPE
+              value: "{{ database_type }}"
+            - name: DB_CONNECTION_STRING
+              value: "{{ database_connection_string }}"
+
+            - name: PDNS_URL
+              value: "{{ powerdns_url }}"
+            - name: PDNS_VHOST
+              value: "{{ powerdns_vhost }}"
+            - name: PDNS_API_KEY
+              value: "{{ powerdns_api_key }}"
+            - name: PDNS_SERVER_ADDRESS
+              value: "{{ powerdns_server_ip }}"
+            - name: PDNS_SERVER_PORT
+              value: "{{ powerdns_server_port}}"
+
+{{- if api_bind_string }}
+            - name: API_BIND
+              value: "{{ api_bind_string }}"
+{{- end }}
+            - name: API_BASE_URL
+              value: https://{{ app_hostname}}
+
+            - name: UPSTREAM_DNS_SERVER
+              value: "{{ upstream_dns_server }}"
+            - name: UPSTREAM_DNS_PORT
+              value: "53"
+            - name: UPSTREAM_DNS_ZONE
+              value: "{{ upstream_dns_zone }}"
+            - name: UPSTREAM_DNS_NAME
+              value: "{{ upstream_dns_name }}"
+            - name: UPSTREAM_DNS_TSIG_NAME
+              value: "{{ upstream_dns_tsig_name }}"
+            - name: UPSTREAM_DNS_TSIG_ALG
+              value: "{{ upstream_dns_tsig_alg }}"
+            - name: UPSTREAM_DNS_TSIG_SECRET
+              value: "{{ upstream_dns_tsig_secret }}"
+            - name: UPSTREAM_DNS_TTL
+              value: "60"
+            - name: UPSTREAM_DNS_UPDATE_INTERVAL
+              value: "300"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynamic-zones
+  namespace: default
+spec:
+  selector:
+    app: dynamic-zones
+  ports:
+    - protocol: TCP
+      port: 8082
+      targetPort: 8082
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dynamic-zones
+  namespace: default
+  annotations:
+{{- if cert_manager_email }}
+    # cert-manager annotations to request a certificate
+    cert-manager.io/cluster-issuer: letsencrypt-production
+{{- end }}
+    # NGINX Ingress Controller annotations for HTTP to HTTPS redirection
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+    - host: "{{ app_hostname }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dynamic-zones
+                port:
+                  number: 8082
+  tls:
+    - hosts:
+        - "{{ app_hostname }}"
+      secretName: dyndns-dhbw-cloud-tls

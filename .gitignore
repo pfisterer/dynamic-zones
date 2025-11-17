@@ -11,3 +11,5 @@ docs/
 .npm-temp
 node_modules/
 __*
+ansible-deployment-example/inventory.yaml
+kubeconfig-*.yaml

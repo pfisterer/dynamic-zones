@@ -1,0 +1,32 @@
+all:
+    hosts:
+        "141.72.1.2.4":
+            ip_family: ipv4
+            ansible_user: root
+
+            api_mode: development
+            api_auth_provider: oidc
+            oidc_issuer_url: https://XXX.cloud/realms/YYYY
+            oidc_client_id: some-client-id
+
+            database_type: "postgres"
+
+            app_hostname: xxx.yyy.cloud
+
+            cert_manager_email: your.mail@example.com
+
+            powerdns_url: "http://powerdns-api:8080"
+            powerdns_server_ip: "141.1.2.3"
+            powerdns_server_port: 53
+            powerdns_api_key: some-secret-api-key
+
+            pg_password_root: some-secret-root-pw
+            pg_password_dynamic_zones: some-secret-user-pw
+            database_connection_string: "host=postgresdb-rw user=dynamic_zones password={{ pg_password_dynamic_zones }} dbname=dynamic_zones port=5432 sslmode=disable"
+
+            upstream_dns_server: your-ns.yyy.de.
+            upstream_dns_tsig_name: some-key-name
+            upstream_dns_tsig_alg: hmac-sha256
+            upstream_dns_tsig_secret: some-base64-secret
+            upstream_dns_zone: the.zone.you.are.managing.
+            upstream_dns_name: ns

@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dynamic-zones-db-credentials-admin
+  namespace: default
+type: Opaque
+data:
+  username: "{{ pg_username_root | b64encode }}"
+  password: "{{ pg_password_root | b64encode }}"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dynamic-zones-db-credentials-user
+  namespace: default
+type: Opaque
+data:
+  username: "{{ pg_username | b64encode }}"
+  password: "{{ pg_password_dynamic_zones | b64encode }}"
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgresdb
+  namespace: default
+spec:
+  instances: 1
+  storage:
+    size: 20Gi
+    storageClass: local-path
+  superuserSecret:
+    name: dynamic-zones-db-credentials-admin
+  bootstrap:
+    initdb:
+      database: "{{ pg_username }}"
+      owner: "{{ pg_username }}"
+      secret:
+        name: dynamic-zones-db-credentials-user
