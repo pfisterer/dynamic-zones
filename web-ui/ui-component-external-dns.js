@@ -28,38 +28,42 @@ export function ExternalDnsConfig({ externalDnsValuesYaml, zone }) {
     }, [user]);
 
     const url = `${apiUrl}v1/zones/${zone.zone}/?format=external-dns&part=`;
+    const helmAddRepoCommand = `helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/; helm repo update`;
     const helmCommand = `curl -H 'Authorization: Bearer ${token || "insert_your_token"}' '${url}values.yaml' | helm upgrade --install external-dns external-dns/external-dns -n external-dns -f -`;
 
     return html`
-        <div class="panel-block">
-            <h2 class="subtitle">Kubernetes <a href="https://github.com/kubernetes-sigs/external-dns">External DNS</> support</h2>
-        </div>
+        <section class="section p-4">
+            <div class="container content">
+                <p>
+                    This section show how to configure <a href="https://github.com/kubernetes-sigs/external-dns">External DNS</a>. 
+                    
+                    This allows for the automatic management of DNS records in this Dynamic Zones server based on the resources in your Kubernetes cluster. 
+                    
+                    You need to add the External DNS Helm repository to your local Helm setup first (only once):
 
-        <div class="panel-block">
-            <p>
-                You can curl helm's values.yaml and a secret's yaml below directly using something like. Don't forget to add the local helm repository for external-dns first: 
-                <code>helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/; helm repo update</code>.
-            </p>
-        </div>
+                    <${CodeBlock} code=${helmAddRepoCommand} />
+                </p>
+                <p>
+                    You can curl Helm's values.yaml directly using something like the following command:
+                    
+                    <${CodeBlock} code=${helmCommand} />
 
-        <div class="panel-block">
-            <${CodeBlock} code=${helmCommand} />
-        </div>
+                    ${!token ? html`
+                        <div class="has-background-danger has-text-white">
+                            You need a valid token to authenticate the request. Use the "API Tokens" section to create one.
+                            This token should have read-only permissions. Once created, a token (preferably read-only) 
+                            will be automatically inserted into the command above.
+                        </div>
+                        ` : ''}
+                </p>
+                        
+                <p>
+                    For a manual installation, use the following values.yaml content:
 
-        <div class="panel-block">
-            <h2 class="subtitle">Kubernetes External DNS Deployment</h2>
-        </div>
-
-        <div class="panel-block">
-            <p>
-                Use the following configuration to set up your Kubernetes cluster to automatically perform updates on this DNS server. 
-                Please refer to the <a href="https://github.com/kubernetes-sigs/external-dns">External DNS documentation</a> for more information.
-            </p>
-        </div>
-        
-        <div class="panel-block">
-            <${CodeBlock} code=${externalDnsValuesYaml} />
-        </div>
-
+                    <${CodeBlock} code=${externalDnsValuesYaml} />
+                </p>
+            </div>
+        </section>
     `;
+
 }
