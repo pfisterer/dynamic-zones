@@ -58,7 +58,7 @@ func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVers
 	return http.StatusOK, returnValue, nil
 }
 
-func (app *AppData) checkZoneExissts(zone string) (statusCode int, message any, err error) {
+func (app *AppData) checkZoneExists(zone string) (statusCode int, message any, err error) {
 	//Check if the zone already exists
 	zone_exists, err := app.Storage.ZoneExists(zone)
 	if err != nil {
@@ -77,7 +77,7 @@ func (app *AppData) checkZoneExissts(zone string) (statusCode int, message any, 
 
 func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.ZoneResponse) (statusCode int, message any, err error) {
 	// Check if the zone already exists
-	if statusCode, message, err := app.checkZoneExissts(zone.Zone); err != nil {
+	if statusCode, message, err := app.checkZoneExists(zone.Zone); err != nil {
 		return statusCode, message, err
 	}
 
@@ -85,7 +85,7 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.
 
 	// Check which Zones we are authoritative for
 	authoritative_zones := collectAuthoritativeZones(zone.Zone, zone.ZoneSOA)
-	for _, auth_zone := range authoritative_zones {
+	for i, auth_zone := range authoritative_zones {
 		is_requested := auth_zone == zone.Zone
 		app.Log.Info("app.CreateZone: We are authoritative for: ", auth_zone)
 
@@ -93,12 +93,23 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.
 		// Only store the requested zone in our Storage
 		if !is_requested {
 			app.Log.Debugf("Creating intermediate zone %s without storage entry", auth_zone)
-			err = app.PowerDns.EnsureIntermediateZoneExists(ctx, auth_zone)
+
+			// Check if there is a next child zone, then NS delegation records need to be created
+			var nextChildZone string
+			if i+1 < len(authoritative_zones) {
+				nextChildZone = authoritative_zones[i+1]
+			}
+
+			// Ensure the zone and the NS delegation exist in PowerDNS
+			err = app.PowerDns.EnsureIntermediateZoneExists(ctx, auth_zone, nextChildZone)
 			if err != nil {
 				return http.StatusInternalServerError,
 					gin.H{"error": "Failed to ensure intermediate zone " + auth_zone + " exists in DNS server"},
 					fmt.Errorf("💥 app.CreateZone zone: Failed to ensure intermediate zone %s exists in PowerDNS: %v", auth_zone, err)
 			}
+
+			// Now add the delegation NS records for the next zone down, if any
+
 		} else {
 			app.Log.Debugf("Creating requested zone %s", auth_zone)
 

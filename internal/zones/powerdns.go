@@ -85,7 +85,7 @@ func (p *PowerDnsClient) GetZone(ctx context.Context, zone string) (*ZoneDataRes
 	return &response, nil
 }
 
-func (p *PowerDnsClient) prepare(zoneFQDN string) *powerdns.Zone {
+func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string) *powerdns.Zone {
 	// Build your SOA serial in YYYYMMDDnn
 	serial := time.Now().Format("20060102") + "01"
 	soaNameserver := dns.Fqdn(p.zoneNsNames[0])
@@ -133,23 +133,45 @@ func (p *PowerDnsClient) prepare(zoneFQDN string) *powerdns.Zone {
 	return &zoneDef
 }
 
-func (p *PowerDnsClient) EnsureIntermediateZoneExists(ctx context.Context, zone string) error {
+func (p *PowerDnsClient) EnsureIntermediateZoneExists(ctx context.Context, zone, nextChildZone string) error {
 	// zone name as FQDN
 	zoneFQDN := dns.Fqdn(zone)
 
-	// Check if zone already exists
-	response, err := p.powerdns.Zones.Get(ctx, zoneFQDN)
+	// Check if zone already exists, if not, create it
+	_, err := p.powerdns.Zones.Get(ctx, zoneFQDN)
 	if err == nil {
-		p.log.Debugf("Intermediate zone %s already exists: %+v", zoneFQDN, response)
 		p.log.Debugf("Intermediate zone %s already exists, skipping creation", zoneFQDN)
-		return nil
+	} else {
+		p.log.Debugf("Intermediate zone %s does not exist (%v), will create it", zoneFQDN, err)
+
+		// Create zone via API with SOA + NS
+		zoneDef := p.prepareZoneForCreation(zoneFQDN)
+		_, err = p.powerdns.Zones.Add(ctx, zoneDef)
+
+		if err != nil {
+			return fmt.Errorf("CreateZone: error creating zone: %v, definition: %+v", err, zoneDef)
+		}
 	}
 
-	// Create zone via API with SOA + NS
-	zoneDef := p.prepare(zoneFQDN)
-	_, err = p.powerdns.Zones.Add(ctx, zoneDef)
-	if err != nil {
-		return fmt.Errorf("CreateZone: error creating zone: %v, definition: %+v", err, zoneDef)
+	// In any case, ensure that the NS delegation for the next child zone exists
+	if nextChildZone != "" {
+		childFQDN := dns.Fqdn(nextChildZone)
+
+		contents := make([]string, len(p.zoneNsNames))
+		for i, ns := range p.zoneNsNames {
+			contents[i] = dns.Fqdn(ns)
+		}
+
+		// Remove any existing delegation (ignore errors if none exist)
+		_ = p.powerdns.Records.Delete(ctx, zoneFQDN, childFQDN, powerdns.RRTypeNS)
+
+		// Add the correct delegation
+		p.log.Debugf("Adding delegation record in %s to the next child-zone %s with contents %v", zoneFQDN, childFQDN, contents)
+		err := p.powerdns.Records.Add(ctx, zoneFQDN, childFQDN, powerdns.RRTypeNS, p.defaultTTLSeconds, contents)
+		if err != nil {
+			return fmt.Errorf("failed to add NS delegation for %s in %s: %w", childFQDN, zoneFQDN, err)
+		}
+
 	}
 
 	return nil
@@ -169,7 +191,7 @@ func (p *PowerDnsClient) CreateZone(ctx context.Context, user, zone string, forc
 	}
 
 	// Create zone via API with SOA + NS
-	zoneDef := p.prepare(zoneFQDN)
+	zoneDef := p.prepareZoneForCreation(zoneFQDN)
 	p.log.Debugf("powerdns.CreateZone: Creating zone with definition: %+v", zoneDef)
 	_, err := p.powerdns.Zones.Add(ctx, zoneDef)
 	if err != nil {
