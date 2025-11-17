@@ -17,6 +17,7 @@ export function CodeBlock({ code }) {
         .code-container {
             position: relative; 
             width: 100%; 
+            max-width: 100%;
             padding: 0.5em 0.75em; /* Minimales Padding */
             background-color: #f5f5f5;
         }
@@ -45,6 +46,11 @@ export function CodeBlock({ code }) {
             font-size: 0.85em; 
             line-height: 1.3;
             width: 100%;
+            max-width: 100%;
+        }
+
+        .code-container pre code {
+            word-break: break-all; /* Ensures single long strings break */
         }
     `;
 
