@@ -3,6 +3,7 @@ import { useAuth, authHeaders } from './ui-context-auth.js';
 import { useAppConfig } from './ui-context-appconfig.js';
 import { html, useState, useEffect } from './dist/deps.mjs';
 import { FetchModal } from './ui-modal-fetch.js';
+import { Delayed } from './ui-component-delayed.js';
 
 export function ListTokens() {
     const { user } = useAuth();
@@ -62,7 +63,7 @@ export function ListTokens() {
         }
     }
 
-    if (loading) return html`<p>Loading tokens...</p>`;
+    if (loading) return html`<${Delayed}><p>Loading tokens...</p><//>`;
     if (error) return html`<p>Error: ${error.message}</p>`;
 
     return html`

@@ -79,12 +79,8 @@ export function DnsUpdateCommand({ zone }) {
                 </div>
 
                 ${zone.zone_keys.map(key => html`
-                    <div class="panel-block">
-                        <div class="box" style="width:100%; overflow:auto;">
-                            <h3 class="subtitle">Keyname: ${key.keyname}</h3>
-                            <${CodeBlock} code=${generateNsUpdate({ name: form.name, type: form.type, ttl: Number(form.ttl), value: form.value }, zone.zone, key, appConfig)} /> 
-                        </div>
-                    </div>
+                    <h3 class="subtitle">Keyname: ${key.keyname}</h3>
+                    <${CodeBlock} code=${generateNsUpdate({ name: form.name, type: form.type, ttl: Number(form.ttl), value: form.value }, zone.zone, key, appConfig)} /> 
                 `)}
 
             </div>

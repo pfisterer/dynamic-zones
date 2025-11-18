@@ -4,7 +4,7 @@ import { AppConfigProvider, useAppConfig } from './ui-context-appconfig.js';
 import { ListTokens } from './ui-component-tokens.js';
 import { ListZones } from './ui-component-zones.js';
 import { Documentation } from './ui-component-documentation.js';
-
+import { Delayed } from './ui-component-delayed.js';
 
 function LoginLogoutButton() {
     const { user, login, logout } = useAuth()
@@ -60,8 +60,12 @@ function Main() {
     const title = appConfig ? html`<b>Dynamic Zones</b> (${appVersion})` : "Loading application..."
     const header = html`<${Header} title=${title} version=${appVersion} />`
 
-    if (!appConfig)
-        return header
+    if (!appConfig) {
+        return html`
+            ${header}
+            <${Delayed}><p>Loading application configuration...</p><//>
+        `
+    }
 
     if (!user) {
         return html`

@@ -4,6 +4,7 @@ import { ShowKeys } from './ui-component-show-keys.js';
 import { ExternalDnsConfig } from './ui-component-external-dns.js';
 import { DnsUpdateCommand } from './ui-component-dns-update-cmd.js';
 import { DnsRecordsList } from './ui-component-dns-record-list.js';
+import { Delayed } from './ui-component-delayed.js';
 import { getV1Zones, getV1ZonesByZone, postV1ZonesByZone, deleteV1ZonesByZone } from 'dynamic-zones';
 
 // ----------------------------------------
@@ -28,7 +29,7 @@ function ActivateZone({ zone, onChange }) {
         }
     }
 
-    if (loading) return html`<p>Activating zone ${zone}...</p>`;
+    if (loading) return html`<${Delayed}><p>Activating zone ${zone}...</p><//>`;
     if (error)
         return html`
             <div class="block">
@@ -84,7 +85,7 @@ function ActiveDomain({ zone: zoneName, onChange }) {
         } catch (e) { setError(e); } finally { setLoading(false); }
     }
 
-    if (loading) return html`<p>${message}</p>`;
+    if (loading) return html`<${Delayed}><p>${message}</p><//>`;
     if (error) return html`<p class="has-text-danger">${error.message}</p>`;
     if (!zone || !zone.zoneData) return html`<p class="has-text-danger">Zone data corrupted.</p>`;
 
@@ -163,24 +164,29 @@ export function ListZones() {
     const activeZoneName = match ? params.name : null;
     const [_, navigate] = useLocation()
 
-    useEffect(async () => {
-        setLoading(true); setError(null);
-        try {
-            const res = await getV1Zones({ headers: authHeaders(user) });
-            if (!res.data?.zones) throw new Error("Unable to load zones");
-            setZones(res.data.zones);
-        } catch (e) { setError(e); } finally { setLoading(false); }
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setError(null);
+
+            try {
+                const res = await getV1Zones({ headers: authHeaders(user) });
+                if (!res.data?.zones) throw new Error("Unable to load zones");
+                if (!cancelled) setZones(res.data.zones);
+            } catch (e) {
+                if (!cancelled) setError(e);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+
+        //Add cleanup function to prevent state updates after unmount
+        return () => { cancelled = true; };
     }, [user, reloadTrigger]);
 
-    if (loading) return html`<p>Loading zones...</p>`;
+    if (loading) return html`<${Delayed}><p>Loading zones...</p><//>`;
     if (error) return html`<a onClick=${() => setReloadTrigger(!reloadTrigger)}>Retry Load</a>`;
-
-    function getZoneHtml(name) {
-        const zone = zones.find(z => z.name === name)
-        return zone ?
-            html`<${AvailableDomain} zone=${zone} onChange=${() => setReloadTrigger(!reloadTrigger)} />` :
-            html`<${RouteNotFound}>`
-    }
 
     return html`
         <section class="section pt-4">
@@ -210,24 +216,29 @@ export function ListZones() {
                 </nav>
             </div>
 
-            <div class="box">
-                <${Switch}>
-                    <!-- Show the currently selected zone -->
-                    <${Route} path="/zone/:name" nest>
-                        ${param => getZoneHtml(param.name)}
-                    <//>
+            <${Switch}>
+                <!-- Show the currently selected zone -->
+                <${Route} path="/zone/:name" nest>
+                    ${param => {
+            const zone = zones.find(z => z.name === param.name)
+            return zone ?
+                html`<${AvailableDomain} zone=${zone} onChange=${() => setReloadTrigger(!reloadTrigger)} />` :
+                html`<${RouteNotFound}>`
+        }
 
-                    <!-- Redirect to the first zone if available -->
-                    <${Route} path="/">
-                        ${() => zones.length > 0 ? (navigate(`/zone/${zones[0].name}`, { replace: true }), null) : html`
-                            <div class="content has-text-centered p-6">
-                                    <h3 class="subtitle is-5">⬆️ Select a zone above to manage its DNS records.</h3>
-                            </div>
-                        `}  
-                    <//>
+        }
+                <//>
 
-                 <//>
-            </div>
+                <!-- Redirect to the first zone if available -->
+                <${Route} path="/">
+                    ${() => zones.length > 0 ? (navigate(`/zone/${zones[0].name}`, { replace: true }), null) : html`
+                        <div class="content has-text-centered p-6">
+                                <h3 class="subtitle is-5">⬆️ Select a zone above to manage its DNS records.</h3>
+                        </div>
+                    `}  
+                <//>
+
+                <//>
         </section>
     `;
 }
