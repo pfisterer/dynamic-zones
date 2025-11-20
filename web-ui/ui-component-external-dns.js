@@ -2,6 +2,7 @@ import { html, useState, useEffect } from './dist/deps.mjs';
 import { useAuth, authHeaders } from './ui-context-auth.js';
 import { useAppConfig } from './ui-context-appconfig.js';
 import { CodeBlock } from './ui-component-codeblock.js';
+import { Delayed } from './ui-component-delayed.js';
 import { getV1Tokens } from 'dynamic-zones';
 
 // ----------------------------------------
@@ -49,11 +50,13 @@ export function ExternalDnsConfig({ externalDnsValuesYaml, zone }) {
                     <${CodeBlock} code=${helmCommand} />
 
                     ${!token ? html`
-                        <div class="has-background-danger has-text-white">
-                            You need a valid token to authenticate the request. Use the "API Tokens" section to create one.
-                            This token should have read-only permissions. Once created, a token (preferably read-only) 
-                            will be automatically inserted into the command above.
-                        </div>
+                        <${Delayed}>
+                            <div class="has-background-danger has-text-white">
+                                You need a valid token to authenticate the request. Use the "API Tokens" section to create one.
+                                This token should have read-only permissions. Once created, a token (preferably read-only) 
+                                will be automatically inserted into the command above.
+                            </div>
+                        <//>
                         ` : ''}
                 </p>
                         
