@@ -58,23 +58,6 @@ func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVers
 	return http.StatusOK, returnValue, nil
 }
 
-func (app *AppData) checkZoneExists(zone string) (statusCode int, message any, err error) {
-	//Check if the zone already exists
-	zone_exists, err := app.Storage.ZoneExists(zone)
-	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to check if zone exists"},
-			fmt.Errorf("💥 app.CreateZone zone: Failed to check if zone exists: %v", zone)
-
-	} else if zone_exists {
-		return http.StatusConflict,
-			gin.H{"error": "Zone already exists"},
-			fmt.Errorf("💥 app.CreateZone zone: Zone %s already exists", zone)
-	}
-
-	return http.StatusOK, nil, nil
-}
-
 func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.ZoneResponse) (statusCode int, message any, err error) {
 	// Check if the zone already exists
 	if statusCode, message, err := app.checkZoneExists(zone.Zone); err != nil {
@@ -108,13 +91,11 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.
 					fmt.Errorf("💥 app.CreateZone zone: Failed to ensure intermediate zone %s exists in PowerDNS: %v", auth_zone, err)
 			}
 
-			// Now add the delegation NS records for the next zone down, if any
-
 		} else {
 			app.Log.Debugf("Creating requested zone %s", auth_zone)
 
 			// Create in PowerDNS
-			zoneResponse, err = app.PowerDns.CreateZone(ctx, username, auth_zone /* force = */, true)
+			zoneResponse, err = app.PowerDns.CreateUserZone(ctx, username, auth_zone /* force = */, true)
 			if err != nil {
 				return http.StatusInternalServerError,
 					gin.H{"error": "Failed to create zone " + auth_zone + " in DNS server"},
@@ -156,6 +137,23 @@ func (app *AppData) DeleteZone(ctx context.Context, username string, zone string
 	return http.StatusNoContent,
 		nil,
 		nil
+}
+
+func (app *AppData) checkZoneExists(zone string) (statusCode int, message any, err error) {
+	//Check if the zone already exists
+	zone_exists, err := app.Storage.ZoneExists(zone)
+	if err != nil {
+		return http.StatusInternalServerError,
+			gin.H{"error": "Failed to check if zone exists"},
+			fmt.Errorf("💥 app.CreateZone zone: Failed to check if zone exists: %v", zone)
+
+	} else if zone_exists {
+		return http.StatusConflict,
+			gin.H{"error": "Zone already exists"},
+			fmt.Errorf("💥 app.CreateZone zone: Zone %s already exists", zone)
+	}
+
+	return http.StatusOK, nil, nil
 }
 
 func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse, externalDnsVersion string) (string, error) {

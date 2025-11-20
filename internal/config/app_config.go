@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -68,13 +69,35 @@ type WebServerConfig struct {
 	ExternalDnsVersion string `json:"external_dns_version" validate:"required"`
 }
 
+type DefaultRecord struct {
+	// The name of the record (relative to the zone, e.g., "_acme-challenge")
+	Name string `json:"name"`
+	// The type of record (e.g., "CNAME", "TXT", "A")
+	Type string `json:"type"`
+	// The content of the record (e.g., "auth.my-proxy.int")
+	Content string `json:"content"`
+	// Optional TTL, defaults to zone default if 0
+	TTL uint32 `json:"ttl,omitempty"`
+}
+
 type UserZoneProviderConfig struct {
+	// List of default records to create in each new zone for "fixed" provider (e.g., ""[{"name":"_acme-challenge","type":"CNAME","content":"auth.my-proxy.int","ttl":300}]"")
+	DefaultRecords []DefaultRecord `json:"default_records" validate:"omitempty"`
+	// TSIG key name for admin updates, added to all zones (intermediate and requested)provider
+	DefaultAdminTsigKeyName string `json:"default_admin_tsig_name,omitempty" validate:"omitempty"`
+	// TSIG key for for admin updates, added to all zones (intermediate and requested)provider
+	DefaultAdminTsigKey string `json:"default_admin_tsig_key,omitempty" validate:"omitempty"`
+	// TSIG algorithm for for admin updates, added to all zones (intermediate and requested)provider
+	DefaultAdminTsigAlg string `json:"default_admin_tsig_alg,omitempty" validate:"omitempty"`
+
 	// The type of zone provider
 	Provider string `json:"provider" validate:"oneof=fixed webhook"`
 	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "test.example.com, example.example2.org")
+
 	FixedDomainSuffixes string `json:"fixed_domain_suffixes" validate:"required_if=Provider fixed"`
 	// Comma-separated list of fixed domains where SOA of this nameserver starts (in the same order as FixedDomainSuffixes, e.g., "example.com, example2.org")
 	FixedDomainSoa string `json:"fixed_domain_soa" validate:"required_if=Provider fixed"`
+
 	// The webhook URL for zone provider "webhook"
 	WebhookUrl string `json:"webhook_url" validate:"required_if=Provider webhook,omitempty,url"`
 	// The webhook bearer token for zone provider "webhook"
@@ -92,6 +115,7 @@ type AppConfig struct {
 }
 
 func GetAppConfigFromEnvironment() (AppConfig, error) {
+	err := error(nil)
 
 	appConfig := AppConfig{
 		UpstreamDns: UpstreamDnsUpdateConfig{
@@ -129,18 +153,36 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		},
 
 		UserZoneProvider: UserZoneProviderConfig{
-			Provider:            helper.GetEnvString("ZONE_PROVIDER_TYPE", "fixed"),
+			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME", ""),
+			DefaultAdminTsigKey:     helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY", ""),
+			DefaultAdminTsigAlg:     helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_ALG", ""),
+			DefaultRecords: func() []DefaultRecord {
+				raw := helper.GetEnvString("ZONE_PROVIDER_DEFAULT_RECORDS", "[]")
+				var records []DefaultRecord
+				if err = json.Unmarshal([]byte(raw), &records); err != nil {
+					err = fmt.Errorf("failed to parse ZONE_PROVIDER_DEFAULT_RECORDS: %w", err)
+				}
+				return records
+			}(),
+
+			Provider: helper.GetEnvString("ZONE_PROVIDER_TYPE", "fixed"),
+
 			FixedDomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "test.example.com, demo.example2.org"),
 			FixedDomainSoa:      helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SOA", "example.com, example2.org"),
-			WebhookUrl:          helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
-			WebhookBearerToken:  helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
+
+			WebhookUrl:         helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
+			WebhookBearerToken: helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
 		},
 
 		DevMode: helper.GetEnvString("API_MODE", "production") == "development",
 	}
 
 	//Validate the configuration
-	err := appConfig.Validate()
+	if err != nil {
+		return AppConfig{}, err
+	}
+
+	err = appConfig.Validate()
 
 	return appConfig, err
 

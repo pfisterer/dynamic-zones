@@ -7,7 +7,9 @@ import (
 )
 
 type ZoneResponse struct {
-	Zone    string `json:"zone"`
+	// The DNS zone name (e.g., "my-user.users.example.com")
+	Zone string `json:"zone"`
+	// The zone name from which on this nameserver is authoritative (e.g., "users.example.com")
 	ZoneSOA string `json:"zone_soa"`
 }
 
@@ -17,13 +19,14 @@ type ZoneProvider interface {
 }
 
 func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZoneProvider {
+	c := appConfig.UserZoneProvider
 
-	switch appConfig.UserZoneProvider.Provider {
+	switch c.Provider {
 	case "fixed":
-		return NewFixedZoneProvider(appConfig.UserZoneProvider.FixedDomainSuffixes, appConfig.UserZoneProvider.FixedDomainSoa, logger)
+		return NewFixedZoneProvider(c.FixedDomainSuffixes, c.FixedDomainSoa, logger)
 
 	case "webhook":
-		return NewWebhookZoneProvider(appConfig.UserZoneProvider.WebhookUrl, appConfig.UserZoneProvider.WebhookBearerToken, logger)
+		return NewWebhookZoneProvider(c.WebhookUrl, c.WebhookBearerToken, logger)
 
 	default:
 		logger.Fatal("zones.CreateUserZoneProvider: unknown UserZoneProvider type",

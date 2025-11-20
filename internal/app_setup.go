@@ -64,11 +64,10 @@ func RunApplication() {
 	thisNsServer := fmt.Sprintf("%s.%s", appConfig.UpstreamDns.Name, appConfig.UpstreamDns.Zone)
 
 	pdns, err := zones.NewPowerDnsClient(
-		appConfig.PowerDns.PdnsUrl,
-		appConfig.PowerDns.PdnsVhost,
-		appConfig.PowerDns.PdnsApiKey,
-		appConfig.PowerDns.DefaultTTLSeconds,
-		[]string{thisNsServer},
+		appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, appConfig.PowerDns.PdnsApiKey, appConfig.PowerDns.DefaultTTLSeconds,
+		[]string{thisNsServer}, appConfig.UserZoneProvider.DefaultAdminTsigKeyName, appConfig.UserZoneProvider.DefaultAdminTsigKey,
+		appConfig.UserZoneProvider.DefaultAdminTsigAlg,
+		appConfig.UserZoneProvider.DefaultRecords,
 		log,
 	)
 	if err != nil {
