@@ -139,6 +139,10 @@ func toExternalDNSConfig(app *AppData, pdnsZone *zones.ZoneDataResponse, externa
 		return "", fmt.Errorf("parse external-dns template: %w", err)
 	}
 
+	if len(pdnsZone.ZoneKeys) <= 0 {
+		return "", fmt.Errorf("no zone keys available for zone %s", pdnsZone.Zone)
+	}
+
 	data := map[string]any{
 		"txtPrefix":        "dynamic-zones-dns-",
 		"txtOwnerId":       "dynamic-zones-dns",
