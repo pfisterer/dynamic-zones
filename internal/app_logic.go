@@ -22,178 +22,148 @@ func InjectAppLogic(app *AppData) gin.HandlerFunc {
 	}
 }
 
-func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVersion string) (statusCode int, message any, err error) {
-	// Get zone from storage (if it exists, the user is allowed to access it)
-	stored_zone, err := app.Storage.GetZone(username, zone)
+func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVersion string) (int, any, error) {
+	// Get from storage
+	storedZone, err := app.Storage.GetZone(username, zone)
 	if err != nil {
-		return http.StatusInternalServerError, gin.H{"error": "Failed to get zone from storage"}, fmt.Errorf("💥 app.getZone: Failed to get zone from storage: %v", err)
+		return errorResult(http.StatusInternalServerError, "Failed to get zone from storage", fmt.Errorf("app.getZone: %w", err))
+	}
+	if storedZone == nil {
+		return errorResult(http.StatusNotFound, "Zone does not exist", fmt.Errorf("app.getZone: zone %s not found", zone))
 	}
 
-	if stored_zone == nil {
-		return http.StatusNotFound,
-			gin.H{"error": "Zone does not exist"}, fmt.Errorf("💥 app.getZone: Zone %s does not exist", zone)
-	}
-
-	// Get zone from PowerDNS
-	pnds_zone, err := app.PowerDns.GetZone(ctx, zone)
+	// Get from PowerDNS
+	pdnsZone, err := app.PowerDns.GetZone(ctx, zone)
 	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to get zone from DNS server"}, fmt.Errorf("💥 app.getZone: Failed to get zone from PowerDNS: %v", err)
+		return errorResult(http.StatusInternalServerError, "Failed to get zone from DNS server", fmt.Errorf("app.getZone: %w", err))
 	}
 
-	// Get the external-dns config for the zone
-	valuesYaml, err := toExternalDNSConfig(app, pnds_zone, externalDnsVersion)
+	// Generate external-dns config
+	valuesYaml, err := toExternalDNSConfig(app, pdnsZone, externalDnsVersion)
 	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to get external-dns config"}, fmt.Errorf("💥 app.getZone: Failed to get external-dns config: %v", err)
+		return errorResult(http.StatusInternalServerError, "Failed to get external-dns config", fmt.Errorf("app.getZone: %w", err))
 	}
 
-	// Return the data to the client
-	returnValue := map[string]any{
-		"zoneData":              pnds_zone,
+	// Return zone data
+	app.Log.Infof("app.getZone: returning zone %s", zone)
+
+	return http.StatusOK, gin.H{
+		"zoneData":              pdnsZone,
 		"externalDnsValuesYaml": valuesYaml,
-	}
-
-	app.Log.Info("app.getZone: returning response: ", pnds_zone)
-	return http.StatusOK, returnValue, nil
+	}, nil
 }
 
-func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.ZoneResponse) (statusCode int, message any, err error) {
-	// Check if the zone already exists
-	if statusCode, message, err := app.checkZoneExists(zone.Zone); err != nil {
-		return statusCode, message, err
+func (app *AppData) DeleteZone(ctx context.Context, username, zone string) (int, any, error) {
+	if err := app.PowerDns.DeleteZone(ctx, zone, true); err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to delete zone from DNS server",
+			fmt.Errorf("app.DeleteZone: %w", err))
 	}
 
-	var zoneResponse *zones.ZoneDataResponse
+	if err := app.Storage.DeleteZone(username, zone); err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to delete zone from storage",
+			fmt.Errorf("app.DeleteZone: %w", err))
+	}
 
-	// Check which Zones we are authoritative for
-	authoritative_zones := collectAuthoritativeZones(zone.Zone, zone.ZoneSOA)
-	for i, auth_zone := range authoritative_zones {
-		is_requested := auth_zone == zone.Zone
-		app.Log.Info("app.CreateZone: We are authoritative for: ", auth_zone)
+	app.Log.Infof("app.DeleteZone: %s deleted for user %s", zone, username)
+	return http.StatusNoContent, nil, nil
+}
 
-		// Create all zones we are authoritative for in PowerDNS
-		// Only store the requested zone in our Storage
-		if !is_requested {
-			app.Log.Debugf("Creating intermediate zone %s without storage entry", auth_zone)
+func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.ZoneResponse) (int, any, error) {
+	// Check if zone exists
+	if status, msg, err := app.checkZoneExists(zone.Zone); err != nil {
+		return status, msg, err
+	}
 
-			// Check if there is a next child zone, then NS delegation records need to be created
-			var nextChildZone string
-			if i+1 < len(authoritative_zones) {
-				nextChildZone = authoritative_zones[i+1]
-			}
+	// Check which zones this nameserver is authoritative for
+	authoritative := getAuthoritativeZones(zone.Zone, zone.ZoneSOA)
 
-			// Ensure the zone and the NS delegation exist in PowerDNS
-			err = app.PowerDns.EnsureIntermediateZoneExists(ctx, auth_zone, nextChildZone)
-			if err != nil {
-				return http.StatusInternalServerError,
-					gin.H{"error": "Failed to ensure intermediate zone " + auth_zone + " exists in DNS server"},
-					fmt.Errorf("💥 app.CreateZone zone: Failed to ensure intermediate zone %s exists in PowerDNS: %v", auth_zone, err)
-			}
-
-		} else {
-			app.Log.Debugf("Creating requested zone %s", auth_zone)
-
-			// Create in PowerDNS
-			zoneResponse, err = app.PowerDns.CreateUserZone(ctx, username, auth_zone /* force = */, true)
-			if err != nil {
-				return http.StatusInternalServerError,
-					gin.H{"error": "Failed to create zone " + auth_zone + " in DNS server"},
-					fmt.Errorf("💥 app.CreateZone zone: Failed to create %s zone in PowerDNS: %v", auth_zone, err)
-			}
-			// Create in Storage
-			refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
-			_, err = app.Storage.CreateZone(username, auth_zone, refreshTime)
-			if err != nil {
-				return http.StatusInternalServerError,
-					gin.H{"error": "Failed to create zone " + auth_zone + " in storage"},
-					fmt.Errorf("💥 app.CreateZone zone: Failed to create zone %s: %v", auth_zone, err)
-			}
+	// Create all  intermediates zones
+	for i, z := range authoritative {
+		// Skip the requested zone itself
+		if z == zone.Zone {
+			continue
 		}
 
+		// Determine next child zone
+		nextChildZone := next(authoritative, i)
+
+		app.Log.Infof("app.CreateZone: Creating intermediate zone '%s' I'm authoritative for (with child zone delegation to %s)", z, nextChildZone)
+		if err := app.PowerDns.EnsureIntermediateZoneExists(ctx, z, nextChildZone); err != nil {
+			return errorResult(http.StatusInternalServerError, "Failed to ensure intermediate zone exists", err)
+		}
+	}
+
+	// This is the requested zone, create it
+	zoneResponse, err := app.PowerDns.CreateUserZone(ctx, username, zone.Zone, true)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to create zone in DNS server", fmt.Errorf("app.CreateZone: %w", err))
+	}
+
+	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
+	if _, err := app.Storage.CreateZone(username, zone.Zone, refreshTime); err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to create zone in storage", fmt.Errorf("app.CreateZone: %w", err))
 	}
 
 	return http.StatusCreated, gin.H{"success": zoneResponse}, nil
 }
 
-func (app *AppData) DeleteZone(ctx context.Context, username string, zone string) (statusCode int, message any, err error) {
-	// Delete the zone from PowerDNS
-	err = app.PowerDns.DeleteZone(ctx, zone, true)
-	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to delete zone from DNS server"},
-			fmt.Errorf("💥 app.Delete zone: Failed to delete zone from PowerDNS: %v", err)
-	}
-
-	// Delete the zone
-	err = app.Storage.DeleteZone(username, zone)
-	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to delete zone from storage"},
-			fmt.Errorf("💥 app.Delete zone: Failed to delete zone from storage: %v", err)
-	}
-
-	app.Log.Info("app.Delete zone: Deleted zone: ", zone, " for user: ", username)
-	return http.StatusNoContent,
-		nil,
-		nil
+// Generic helper for consistent error returns
+func errorResult(code int, msg string, err error) (int, gin.H, error) {
+	return code, gin.H{"error": msg}, err
 }
 
-func (app *AppData) checkZoneExists(zone string) (statusCode int, message any, err error) {
-	//Check if the zone already exists
-	zone_exists, err := app.Storage.ZoneExists(zone)
-	if err != nil {
-		return http.StatusInternalServerError,
-			gin.H{"error": "Failed to check if zone exists"},
-			fmt.Errorf("💥 app.CreateZone zone: Failed to check if zone exists: %v", zone)
-
-	} else if zone_exists {
-		return http.StatusConflict,
-			gin.H{"error": "Zone already exists"},
-			fmt.Errorf("💥 app.CreateZone zone: Zone %s already exists", zone)
+// Helper to get next element in slice or empty string if at end
+func next(slice []string, i int) string {
+	if i+1 < len(slice) {
+		return slice[i+1]
 	}
+	return ""
+}
 
+func (app *AppData) checkZoneExists(zone string) (int, any, error) {
+	exists, err := app.Storage.ZoneExists(zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to check if zone exists",
+			fmt.Errorf("app.checkZoneExists: %w", err))
+	}
+	if exists {
+		return errorResult(http.StatusConflict, "Zone already exists",
+			fmt.Errorf("app.checkZoneExists: %s exists", zone))
+	}
 	return http.StatusOK, nil, nil
 }
 
-func toExternalDNSConfig(app *AppData, pnds_zone *zones.ZoneDataResponse, externalDnsVersion string) (string, error) {
-	txtPrefix := "dynamic-zones-dns-"
-	txtOwnerId := "dynamic-zones-dns"
+func toExternalDNSConfig(app *AppData, pdnsZone *zones.ZoneDataResponse, externalDnsVersion string) (string, error) {
+	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSValuesYamlTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parse external-dns template: %w", err)
+	}
 
-	templateData := map[string]any{
-		"txtPrefix":        txtPrefix,
-		"txtOwnerId":       txtOwnerId,
+	data := map[string]any{
+		"txtPrefix":        "dynamic-zones-dns-",
+		"txtOwnerId":       "dynamic-zones-dns",
 		"dnsServerAddress": app.Config.PowerDns.DnsServerAddress,
 		"dnsServerPort":    app.Config.PowerDns.DnsServerPort,
-		"zone":             pnds_zone.Zone,
-		"tsigKey":          pnds_zone.ZoneKeys[0].Key,
-		"tsigAlgorithm":    pnds_zone.ZoneKeys[0].Algorithm,
-		"tsigKeyname":      pnds_zone.ZoneKeys[0].Keyname,
-		"secretName":       fmt.Sprintf("external-dns-rfc2136-%s-secret", pnds_zone.Zone),
+		"zone":             pdnsZone.Zone,
+		"tsigKey":          pdnsZone.ZoneKeys[0].Key,
+		"tsigAlgorithm":    pdnsZone.ZoneKeys[0].Algorithm,
+		"tsigKeyname":      pdnsZone.ZoneKeys[0].Keyname,
+		"secretName":       fmt.Sprintf("external-dns-rfc2136-%s-secret", pdnsZone.Zone),
 		"imageVersion":     externalDnsVersion,
 	}
 
-	// Create the values yaml file
-	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSValuesYamlTemplate)
-
-	if err != nil {
-		app.Log.Panicf("toExternalDNSConfig: Unable to parse the external-dns template: ", err)
-		return "", fmt.Errorf("toExternalDNSConfig: Unable to parse the external-dns template: %v", err)
-	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, templateData); err != nil {
-		app.Log.Panicf("toExternalDNSConfig: Unable to execute the external-dns template: ", err)
-		return "", fmt.Errorf("toExternalDNSConfig: Unable to execute the external-dns template: %v", err)
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute external-dns template: %w", err)
 	}
 
 	return buf.String(), nil
 }
 
-// collectAuthoritativeZones returns the slice of domain names (in “parent” chain) from fullName
+// getAuthoritativeZones returns the slice of domain names (in “parent” chain) from fullName
 // down to and including soaBase. E.g. fullName="a.b.c.d.e", soaBase="c.d.e" → ["c.d.e","b.c.d.e","a.b.c.d.e"]
 // The returned slice is ordered shortest to longest.
-func collectAuthoritativeZones(fullName, soaBase string) []string {
+func getAuthoritativeZones(fullName, soaBase string) []string {
 	// Normalize: remove trailing dot, if any
 	fullName = strings.TrimSuffix(fullName, ".")
 	soaBase = strings.TrimSuffix(soaBase, ".")
@@ -205,6 +175,7 @@ func collectAuthoritativeZones(fullName, soaBase string) []string {
 	if len(baseParts) > len(parts) {
 		return nil
 	}
+
 	// check suffix
 	for i := 1; i <= len(baseParts); i++ {
 		if parts[len(parts)-i] != baseParts[len(baseParts)-i] {
@@ -215,8 +186,7 @@ func collectAuthoritativeZones(fullName, soaBase string) []string {
 	var result []string
 	// build from fullName down to soaBase (longest to shortest)
 	for i := 0; i <= len(parts)-len(baseParts); i++ {
-		candidate := strings.Join(parts[i:], ".")
-		result = append(result, candidate)
+		result = append(result, strings.Join(parts[i:], "."))
 	}
 
 	// Reverse the slice to order from shortest entry first (soaBase to fullName)
