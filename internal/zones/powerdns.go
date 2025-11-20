@@ -256,8 +256,8 @@ func (p *PowerDnsClient) addKeyToZone(ctx context.Context, zone, keyname, algori
 
 	if existingKeyMatches {
 		p.log.Debugf("TSIG key %s already exists and matches desired key, skipping creation", keyname)
+		tsigkey = existingKey
 	} else {
-
 		// Delete existing key if it does not match
 		if existingKeyFound {
 			p.log.Debugf("Deleting existing TSIG key '%s' as it does not match the requested data", keyname)
@@ -274,12 +274,39 @@ func (p *PowerDnsClient) addKeyToZone(ctx context.Context, zone, keyname, algori
 		if err != nil {
 			return fmt.Errorf("powerdns.CreateZone: Error creating TSIG key: %v", err)
 		}
+	}
 
+	// --- helper to append a metadata entry safely without losing the old ones ---
+	appendMetadata := func(kind powerdns.MetadataKind, value string) error {
+		// Get existing metadata (may be nil)
+		existing, err := p.powerdns.Metadata.Get(ctx, zone, kind)
+		if err != nil {
+			return fmt.Errorf("getting metadata %s failed: %v", kind, err)
+		}
+
+		// Build a unique-set list
+		final := make([]string, 0)
+		existingSet := make(map[string]bool)
+
+		// Add existing values
+		if existing != nil && existing.Metadata != nil {
+			for _, v := range existing.Metadata {
+				existingSet[v] = true
+				final = append(final, v)
+			}
+		}
+
+		// Append only if not present
+		if !existingSet[value] {
+			final = append(final, value)
+		}
+
+		_, err = p.powerdns.Metadata.Set(ctx, zone, kind, final)
+		return err
 	}
 
 	// Allow the TSIG key to perform AXFR
-	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowAXFR, []string{*tsigkey.Name})
-	if err != nil {
+	if err := appendMetadata(powerdns.MetadataTSIGAllowAXFR, *tsigkey.Name); err != nil {
 		return fmt.Errorf("powerdns.CreateZone: Error setting ALLOW-AXFR-TSIG metadata: %v", err)
 	}
 
@@ -288,14 +315,15 @@ func (p *PowerDnsClient) addKeyToZone(ctx context.Context, zone, keyname, algori
 	// that first a dynamic update has to be allowed either by the global allow-dnsupdate-from setting,
 	// or by a per-zone ALLOW-DNSUPDATE-FROM metadata setting.
 	// Secondly, if a zone has a TSIG-ALLOW-DNSUPDATE metadata setting, that must match too.
-	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataAllowDNSUpdateFrom, []string{"0.0.0.0/0", "::/0"})
-	if err != nil {
+	if err := appendMetadata(powerdns.MetadataAllowDNSUpdateFrom, "0.0.0.0/0"); err != nil {
+		return fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
+	}
+	if err := appendMetadata(powerdns.MetadataAllowDNSUpdateFrom, "::/0"); err != nil {
 		return fmt.Errorf("powerdns.CreateZone: Error setting AllowDNSUpdateFrom metadata: %v", err)
 	}
 
 	// Allow the TSIG key to perform dynamic updates
-	_, err = p.powerdns.Metadata.Set(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate, []string{*tsigkey.Name})
-	if err != nil {
+	if err := appendMetadata(powerdns.MetadataTSIGAllowDNSUpdate, *tsigkey.Name); err != nil {
 		return fmt.Errorf("powerdns.CreateZone: Error setting TSIG dynamic update metadata: %v", err)
 	}
 
