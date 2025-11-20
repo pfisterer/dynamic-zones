@@ -1,32 +1,43 @@
 all:
     hosts:
-        "141.72.1.2.4":
+        "141.1.2.3":
             ip_family: ipv4
             ansible_user: root
 
+            dynamic_zones_version: 0.1.4-alpha
+            app_hostname: dyndns.xxx.cloud
+            cert_manager_email: xxx.yyy@zzz.de
+            #external_dns_image_version: ""
+
             api_mode: development
+            api_token_ttl_hours: 8760 # 1 year
             api_auth_provider: oidc
-            oidc_issuer_url: https://XXX.cloud/realms/YYYY
-            oidc_client_id: some-client-id
-
-            database_type: "postgres"
-
-            app_hostname: xxx.yyy.cloud
-
-            cert_manager_email: your.mail@example.com
+            oidc_issuer_url: https://sso.xxx.cloud/realms/yyy
+            oidc_client_id: xxx-cloud-dns
 
             powerdns_url: "http://powerdns-api:8080"
-            powerdns_server_ip: "141.1.2.3"
+            powerdns_server_ip: "141.72.5.244"
             powerdns_server_port: 53
-            powerdns_api_key: some-secret-api-key
+            powerdns_vhost: localhost
+            powerdns_api_key: my-api-key
 
-            pg_password_root: some-secret-root-pw
-            pg_password_dynamic_zones: some-secret-user-pw
+            database_type: "postgres"
+            pg_password_root: xxx
+            pg_password_dynamic_zones: xxx
             database_connection_string: "host=postgresdb-rw user=dynamic_zones password={{ pg_password_dynamic_zones }} dbname=dynamic_zones port=5432 sslmode=disable"
 
-            upstream_dns_server: your-ns.yyy.de.
-            upstream_dns_tsig_name: some-key-name
+            upstream_dns_server: xxx.yyy.de.
+            upstream_dns_tsig_name: cloud-ns.xxx.de
             upstream_dns_tsig_alg: hmac-sha256
             upstream_dns_tsig_secret: some-base64-secret
-            upstream_dns_zone: the.zone.you.are.managing.
+            upstream_dns_zone: cloud-ns.yyy.xxx.de.
             upstream_dns_name: ns
+
+            zone_provider_default_admin_tsig_name: dynamic-dns-admin-key
+            zone_provider_default_admin_tsig_key: some-base64-secret
+            zone_provider_default_admin_tsig_alg: HMAC-SHA512
+            zone_provider_default_records: "[]"
+
+            zone_provider_type: fixed
+            zone_provider_fixed_domain_suffixes: users.xxx.cloud
+            zone_provider_fixed_domain_soa: users.xxx.cloud

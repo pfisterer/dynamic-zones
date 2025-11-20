@@ -19,33 +19,48 @@ spec:
     spec:
       containers:
         - name: dynamic-zones
-          image: ghcr.io/pfisterer/dynamic-zones:{{ dynamic_zones_version | default("latest") }}"
+          image: ghcr.io/pfisterer/dynamic-zones:{{ dynamic_zones_version | default("latest") }}
           ports:
             - containerPort: 8082
           env:
-{{- if api_mode }}
+{% if api_mode is defined %}
             - name: API_MODE
               value: "{{ api_mode }}"
-{{- end }}
+{% endif %}
 
-{{- if api_auth_provider == "oidc" }}
+{% if api_auth_provider == "oidc" %}
             - name: API_AUTH_PROVIDER
               value: "{{ api_auth_provider }}"
-
-{{- if oidc_issuer_url }}
             - name: OIDC_ISSUER_URL
               value: "{{ oidc_issuer_url }}"
             - name: OIDC_CLIENT_ID
               value: "{{ oidc_client_id }}"
+{% endif %}
 
-{{- if zone_provider_type == "fixed" }}
+              
+            - name: ZONE_PROVIDER_DEFAULT_RECORDS
+              value: "{{ zone_provider_default_records }}"
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME
+              value: "{{ zone_provider_default_admin_tsig_name }}"
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY
+              value: "{{ zone_provider_default_admin_tsig_key }}"
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_ALG
+              value: "{{ zone_provider_default_admin_tsig_alg }}"
             - name: ZONE_PROVIDER_TYPE
               value: "{{ zone_provider_type }}"
+
+{% if zone_provider_type == "fixed" %}
             - name: ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES
               value: "{{ zone_provider_fixed_domain_suffixes }}"
             - name: ZONE_PROVIDER_FIXED_DOMAIN_SOA
               value: "{{ zone_provider_fixed_domain_soa }}"
-{{- end }}
+{% elif zone_provider_type == "fixed" %}
+            - name: ZONE_PROVIDER_WEBHOOK_URL
+              value: "{{ zone_provider_webhook_url }}"
+            - name: ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN
+              value: "{{ zone_provider_webhook_bearer_token }}"
+{% endif %}
+
             - name: DB_TYPE
               value: "{{ database_type }}"
             - name: DB_CONNECTION_STRING
@@ -61,13 +76,21 @@ spec:
               value: "{{ powerdns_server_ip }}"
             - name: PDNS_SERVER_PORT
               value: "{{ powerdns_server_port}}"
+            - name: PDNS_SERVER_DEFAULT_TTL
+              value: "60"
 
-{{- if api_bind_string }}
+            - name: EXTERNAL_DNS_IMAGE_VERSION
+              value: "{{ external_dns_image_version | default('') }}"
+
+{% if api_bind_string is defined %}
             - name: API_BIND
               value: "{{ api_bind_string }}"
-{{- end }}
+{% endif %}
             - name: API_BASE_URL
-              value: https://{{ app_hostname}}
+              value: "https://{{ app_hostname }}"
+
+            - name: API_TOKEN_TTL_HOURS
+              value: "{{ api_token_ttl_hours }}"
 
             - name: UPSTREAM_DNS_SERVER
               value: "{{ upstream_dns_server }}"
@@ -109,10 +132,10 @@ metadata:
   name: dynamic-zones
   namespace: default
   annotations:
-{{- if cert_manager_email }}
+{% if cert_manager_email %}
     # cert-manager annotations to request a certificate
     cert-manager.io/cluster-issuer: letsencrypt-production
-{{- end }}
+{% endif %}
     # NGINX Ingress Controller annotations for HTTP to HTTPS redirection
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
