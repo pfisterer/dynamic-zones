@@ -18,7 +18,7 @@ type EnvVarInfo struct {
 	Default       string
 	Description   string
 	Category      string
-	ValidationTag string // Stores the raw validation tag
+	ValidationTag string
 }
 
 // FieldMetadata holds the description and validation tag from struct definitions.
@@ -31,9 +31,17 @@ type FieldMetadata struct {
 var fieldMetadata = make(map[string]FieldMetadata)
 
 func main() {
+	// Aggressive panic recovery to ensure we catch any crash
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "!!! CRITICAL PANIC CAUGHT: %v\n", r)
+			fmt.Fprintf(os.Stderr, "Check the stack trace to find the failing type assertion.\n")
+			os.Exit(1)
+		}
+	}()
+
 	if len(os.Args) < 2 {
 		fmt.Println("Error: Please provide the Go source file path as the first argument.")
-		fmt.Println("Usage: go run docgen.go <path/to/config.go>")
 		os.Exit(1)
 	}
 
@@ -42,7 +50,7 @@ func main() {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, targetFile, nil, parser.ParseComments)
 	if err != nil {
-		fmt.Printf("Error parsing file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error parsing file: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -61,37 +69,71 @@ func main() {
 		}
 	}
 
-	// --- SECOND PASS: Extract Env Vars and Defaults from the function ---
+	// --- SECOND PASS: Extract Env Vars and Defaults from the function (MAIN DEBUG AREA) ---
 	ast.Inspect(node, func(n ast.Node) bool {
 		// Find the target function GetAppConfigFromEnvironment
 		if funcDecl, ok := n.(*ast.FuncDecl); ok && funcDecl.Name.Name == "GetAppConfigFromEnvironment" {
 
-			// *** CRITICAL FIX: Look for the variable assignment (appConfig := AppConfig{...}) ***
-			if assignStmt, ok := funcDecl.Body.List[0].(*ast.AssignStmt); ok {
+			if funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
+				fmt.Fprintf(os.Stderr, "TRACE: Function body is nil or empty.\n")
+				return false
+			}
 
-				// The value on the right side of the assignment (RHS) is the CompositeLit: AppConfig{...}
-				if lit, ok := assignStmt.Rhs[0].(*ast.CompositeLit); ok {
+			// Statement 0 is expected to be 'err := error(nil)' or similar, Statement 1 is the config assignment.
+			// We assume the variable is declared and initialized on the first line (err := nil) and the config assignment is the second, or the first is the config.
+			// If the declaration is 'var appConfig AppConfig', and the assignment is appConfig = AppConfig{...}
+			// We must be robust: Check all statements for the assignment.
+			var configLit *ast.CompositeLit
 
-					// Iterate over the top-level fields of AppConfig
-					for _, element := range lit.Elts {
-						if keyValue, ok := element.(*ast.KeyValueExpr); ok {
-							fieldName := keyValue.Key.(*ast.Ident).Name
-
-							// Special case: DevMode is complex, skip it here.
-							if fieldName == "DevMode" {
-								continue
-							}
-
-							category := strings.Trim(fieldName, " ")
-
-							// Check the value, which is another CompositeLit (nested struct)
-							if nestedLit, ok := keyValue.Value.(*ast.CompositeLit); ok {
-								extractNestedEnvVars(fset, nestedLit, category, envVars)
-							}
+			// Search the body for the config assignment
+			for _, stmt := range funcDecl.Body.List {
+				if assignStmt, ok := stmt.(*ast.AssignStmt); ok {
+					if len(assignStmt.Rhs) > 0 {
+						if lit, ok := assignStmt.Rhs[0].(*ast.CompositeLit); ok {
+							// Found the AppConfig{...} literal
+							configLit = lit
+							break
 						}
+					}
+				} else if declStmt, ok := stmt.(*ast.DeclStmt); ok {
+					// Handle variable declaration followed by assignment (unlikely in your structure, but safer)
+					if genDecl, ok := declStmt.Decl.(*ast.GenDecl); ok && genDecl.Tok == token.VAR {
+						// Handle the case where the config is declared globally/earlier
 					}
 				}
 			}
+
+			if configLit == nil {
+				fmt.Fprintf(os.Stderr, "TRACE: AppConfig CompositeLit not found in function body statements.\n")
+				return false
+			}
+
+			// Iterate over the top-level fields of AppConfig
+			for _, element := range configLit.Elts {
+				if keyValue, ok := element.(*ast.KeyValueExpr); ok {
+
+					keyIdent, keyOk := keyValue.Key.(*ast.Ident)
+					if !keyOk {
+						fmt.Fprintf(os.Stderr, "TRACE: Skipping element in AppConfig. Key is not *ast.Ident. Type: %T\n", keyValue.Key)
+						continue
+					}
+
+					fieldName := keyIdent.Name
+
+					// Special case: DevMode is complex, skip it here.
+					if fieldName == "DevMode" {
+						continue
+					}
+
+					category := strings.Trim(fieldName, " ")
+
+					// Check the value, which is another CompositeLit (nested struct)
+					if nestedLit, ok := keyValue.Value.(*ast.CompositeLit); ok {
+						extractNestedEnvVars(fset, nestedLit, category, envVars)
+					}
+				}
+			}
+
 			return false // Stop inspection after finding the function
 		}
 		return true
@@ -100,41 +142,36 @@ func main() {
 	// Manually add DevMode which is complex and requires special handling
 	addDevModeEntry(fset, node, envVars)
 
+	fmt.Fprintf(os.Stderr, "TRACE: Final variables extracted count: %d\n", len(envVars))
+
 	// 4. Generate Markdown
 	generateMarkdown(envVars)
 }
 
-// extractStructFieldDescriptions captures Doc, Comment, and the 'validate' tag for fields.
+// --- CORE FUNCTIONS ---
+
 func extractStructFieldDescriptions(structType *ast.StructType) {
 	for _, field := range structType.Fields.List {
 		var description string
 		var validationTag string
 
-		// Get comment/doc
 		if field.Doc != nil {
 			description = field.Doc.Text()
 		} else if field.Comment != nil {
 			description = field.Comment.Text()
 		}
 
-		// --- FIX: Use reflect.StructTag to safely parse the tag ---
 		if field.Tag != nil {
-			// Remove backticks
 			rawTag := strings.Trim(field.Tag.Value, "`")
-
-			// Use reflect to parse the tag string correctly
 			tag := reflect.StructTag(rawTag)
-
-			// Get the value associated with the "validate" key
 			validationTag = tag.Get("validate")
 		}
 
-		// Clean up the description
 		description = strings.TrimSpace(description)
 		description = strings.ReplaceAll(description, "\n", " ")
 
 		if (description != "" || validationTag != "") && len(field.Names) > 0 {
-			fieldName := field.Names[0].Name // Get the field name (e.g., Server)
+			fieldName := field.Names[0].Name
 			fieldMetadata[fieldName] = FieldMetadata{
 				Description:   description,
 				ValidationTag: validationTag,
@@ -143,42 +180,80 @@ func extractStructFieldDescriptions(structType *ast.StructType) {
 	}
 }
 
+// processEnvCall is a helper to extract the details from a helper.GetEnv* call expression.
+func processEnvCall(fset *token.FileSet, fieldName, category string, envVars map[string]EnvVarInfo, callExpr *ast.CallExpr) {
+	args := callExpr.Args
+
+	// Arg 0: Environment Variable Name (safe extraction)
+	var envVar string
+	if basicLit, ok := args[0].(*ast.BasicLit); ok {
+		envVar = strings.Trim(basicLit.Value, "\"")
+	} else {
+		fmt.Fprintf(os.Stderr, "TRACE: WARNING: Skipping field %s: Env Var name (Arg 0) is not a literal, type is %T.\n", fieldName, args[0])
+		return
+	}
+
+	// Arg 1: Default Value
+	defaultValue := extractDefaultValue(fset, args[1])
+
+	// Retrieve the metadata
+	metadata, found := fieldMetadata[fieldName]
+	description := "No documentation comment found."
+	validationTag := ""
+	if found {
+		description = metadata.Description
+		validationTag = metadata.ValidationTag
+	}
+
+	info := EnvVarInfo{
+		Name:          envVar,
+		Default:       defaultValue,
+		Category:      category,
+		Description:   description,
+		ValidationTag: validationTag,
+	}
+	envVars[envVar] = info
+}
+
 // extractNestedEnvVars finds helper.GetEnv* calls inside nested structs and retrieves validation info.
 func extractNestedEnvVars(fset *token.FileSet, lit *ast.CompositeLit, category string, envVars map[string]EnvVarInfo) {
 	for _, element := range lit.Elts {
 		if keyValue, ok := element.(*ast.KeyValueExpr); ok {
-			fieldName := keyValue.Key.(*ast.Ident).Name
+
+			keyIdent, keyOk := keyValue.Key.(*ast.Ident)
+			if !keyOk {
+				fmt.Fprintf(os.Stderr, "TRACE: WARNING: Skipping element in %s. Key is not *ast.Ident. Type: %T\n", category, keyValue.Key)
+				continue
+			}
+			fieldName := keyIdent.Name
 
 			if callExpr, ok := keyValue.Value.(*ast.CallExpr); ok {
 				if fun, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
-					// Check for calls to helper.GetEnv*
-					if fun.X.(*ast.Ident).Name == "helper" && strings.HasPrefix(fun.Sel.Name, "GetEnv") {
-						args := callExpr.Args
-
-						// Arg 0: Environment Variable Name
-						envVar := strings.Trim(args[0].(*ast.BasicLit).Value, "\"")
-
-						// Arg 1: Default Value (use the FileSet to print complex expressions)
-						defaultValue := extractDefaultValue(fset, args[1])
-
-						// Retrieve the metadata (description and validation tag)
-						metadata, found := fieldMetadata[fieldName]
-						description := "No documentation comment found."
-						validationTag := ""
-						if found {
-							description = metadata.Description
-							validationTag = metadata.ValidationTag
-						}
-
-						info := EnvVarInfo{
-							Name:          envVar,
-							Default:       defaultValue,
-							Category:      category,
-							Description:   description,
-							ValidationTag: validationTag, // Store the raw tag
-						}
-						envVars[envVar] = info
+					// SIMPLE CASE: Direct call (e.g., Server: helper.GetEnvString(...))
+					// Safety check for fun.X
+					if ident, ok := fun.X.(*ast.Ident); ok && ident.Name == "helper" && strings.HasPrefix(fun.Sel.Name, "GetEnv") {
+						processEnvCall(fset, fieldName, category, envVars, callExpr)
+						continue
 					}
+				}
+
+				// COMPLEX CASE: Anonymous function call (e.g., DefaultRecords: func() {...}())
+				if funcLit, ok := callExpr.Fun.(*ast.FuncLit); ok {
+					fmt.Fprintf(os.Stderr, "TRACE: Checking complex field %s\n", fieldName)
+
+					ast.Inspect(funcLit.Body, func(n ast.Node) bool {
+						if nestedCallExpr, ok := n.(*ast.CallExpr); ok {
+							if nestedFun, ok := nestedCallExpr.Fun.(*ast.SelectorExpr); ok {
+								// Safety check for nestedFun.X
+								if ident, ok := nestedFun.X.(*ast.Ident); ok && ident.Name == "helper" && nestedFun.Sel.Name == "GetEnvString" {
+									fmt.Fprintf(os.Stderr, "TRACE: Found ENV Var: %s\n", nestedCallExpr.Args[0].(*ast.BasicLit).Value)
+									processEnvCall(fset, fieldName, category, envVars, nestedCallExpr)
+									return false // Found it, stop inspecting this branch
+								}
+							}
+						}
+						return true
+					})
 				}
 			}
 		}
@@ -189,25 +264,24 @@ func extractNestedEnvVars(fset *token.FileSet, lit *ast.CompositeLit, category s
 func extractDefaultValue(fset *token.FileSet, expr ast.Expr) string {
 	switch v := expr.(type) {
 	case *ast.BasicLit:
-		// Basic literal (string, int, float)
 		return strings.Trim(v.Value, "\"")
 	case *ast.Ident:
-		// Identifier (e.g., constant or boolean 'true')
 		return v.Name
 	default:
-		// Use go/printer for complex expressions (like calculations or function calls)
 		var buf bytes.Buffer
 		if err := printer.Fprint(&buf, fset, expr); err == nil {
 			s := buf.String()
 
-			// Clean up type casts for display (e.g., int32(...) -> ...)
 			s = strings.TrimPrefix(s, "int32(")
 			s = strings.TrimPrefix(s, "uint64(")
 			s = strings.TrimSuffix(s, ")")
 
-			// Special handling for the DefaultTTLSeconds calculation
 			if strings.Contains(s, "time.Hour") {
 				return "31536000 (Calculated as 1 year)"
+			}
+
+			if s == "\"[]\"" {
+				return "[] (Empty JSON Array)"
 			}
 
 			return s
@@ -218,44 +292,61 @@ func extractDefaultValue(fset *token.FileSet, expr ast.Expr) string {
 
 // addDevModeEntry manually extracts the DYNAMIC_ZONES_API_MODE variable.
 func addDevModeEntry(fset *token.FileSet, node *ast.File, envVars map[string]EnvVarInfo) {
-	// We search the AST again specifically for the DevMode field initialization
 	ast.Inspect(node, func(n ast.Node) bool {
 		if funcDecl, ok := n.(*ast.FuncDecl); ok && funcDecl.Name.Name == "GetAppConfigFromEnvironment" {
-			// *** CRITICAL FIX: Look for the assignment statement (the first statement in the body) ***
-			if assignStmt, ok := funcDecl.Body.List[0].(*ast.AssignStmt); ok {
-				if lit, ok := assignStmt.Rhs[0].(*ast.CompositeLit); ok {
-					for _, element := range lit.Elts {
-						if keyValue, ok := element.(*ast.KeyValueExpr); ok {
-							if keyValue.Key.(*ast.Ident).Name == "DevMode" {
-								if binaryExpr, ok := keyValue.Value.(*ast.BinaryExpr); ok {
-									// The left side is the helper.GetEnvString(...) call
-									if callExpr, ok := binaryExpr.X.(*ast.CallExpr); ok {
-										args := callExpr.Args
 
-										// Arg 0: Environment Variable Name
-										envVar := strings.Trim(args[0].(*ast.BasicLit).Value, "\"")
+			var configLit *ast.CompositeLit
+			for _, stmt := range funcDecl.Body.List {
+				if assignStmt, ok := stmt.(*ast.AssignStmt); ok {
+					if len(assignStmt.Rhs) > 0 {
+						if lit, ok := assignStmt.Rhs[0].(*ast.CompositeLit); ok {
+							configLit = lit
+							break
+						}
+					}
+				}
+			}
 
-										// Arg 1: Default Value (which is 'production')
-										defaultValue := strings.Trim(args[1].(*ast.BasicLit).Value, "\"")
+			if configLit == nil {
+				return false
+			}
 
-										// Get description for DevMode (manual or lookup)
-										metadata := fieldMetadata["DevMode"]
-										desc := metadata.Description
-										if desc == "" {
-											desc = "Run mode; returns true if set to 'development'."
-										}
+			for _, element := range configLit.Elts {
+				if keyValue, ok := element.(*ast.KeyValueExpr); ok {
+					if keyValue.Key.(*ast.Ident).Name == "DevMode" {
+						if binaryExpr, ok := keyValue.Value.(*ast.BinaryExpr); ok {
+							if callExpr, ok := binaryExpr.X.(*ast.CallExpr); ok {
+								args := callExpr.Args
 
-										// DevMode has no direct validation on the env var itself.
-										validationTag := ""
+								var envVar, defaultValue string
 
-										envVars[envVar] = EnvVarInfo{
-											Name:          envVar,
-											Default:       fmt.Sprintf("'%s' (defaults to false)", defaultValue),
-											Description:   desc,
-											Category:      "General Settings",
-											ValidationTag: validationTag,
-										}
-									}
+								if basicLit, ok := args[0].(*ast.BasicLit); ok {
+									envVar = strings.Trim(basicLit.Value, "\"")
+								}
+
+								if basicLit, ok := args[1].(*ast.BasicLit); ok {
+									defaultValue = strings.Trim(basicLit.Value, "\"")
+								}
+
+								if envVar == "" || defaultValue == "" {
+									fmt.Fprintf(os.Stderr, "TRACE: WARNING: Skipping DevMode: Could not safely extract env var or default value.\n")
+									return true
+								}
+
+								metadata := fieldMetadata["DevMode"]
+								desc := metadata.Description
+								if desc == "" {
+									desc = "Run mode; returns true if set to 'development'."
+								}
+
+								validationTag := ""
+
+								envVars[envVar] = EnvVarInfo{
+									Name:          envVar,
+									Default:       fmt.Sprintf("'%s' (defaults to false)", defaultValue),
+									Description:   desc,
+									Category:      "General Settings",
+									ValidationTag: validationTag,
 								}
 							}
 						}
@@ -270,20 +361,18 @@ func addDevModeEntry(fset *token.FileSet, node *ast.File, envVars map[string]Env
 
 // generateMarkdown prints the final output table with intermediate bolded headers, including a validation column.
 func generateMarkdown(envVars map[string]EnvVarInfo) {
-	// A basic ordered list of categories for cleaner output
 	categoryOrder := map[string]string{
 		"UpstreamDns":      "Upstream DNS Updates",
 		"PowerDns":         "PowerDNS Configuration",
 		"Storage":          "Storage Configuration",
 		"WebServer":        "API Server Configuration",
 		"UserZoneProvider": "Zone Provider Settings",
-		"General Settings": "General Settings", // For DevMode
+		"General Settings": "General Settings",
 	}
 
 	fmt.Println("\n## ⚙️ Environment Variables Reference")
-	fmt.Println("") // Add a newline after the main header
+	fmt.Println("")
 
-	// Create a map to group variables by the user-friendly category name
 	grouped := make(map[string][]EnvVarInfo)
 	for _, info := range envVars {
 		catName := categoryOrder[info.Category]
@@ -293,20 +382,14 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 		grouped[catName] = append(grouped[catName], info)
 	}
 
-	// --- Start the single large table ---
-	// Using 4 columns
 	fmt.Println("| **Variable Name** | **Default Value** | **Validation** | **Description** |")
-	// Using uniform length delimiters for better column width suggestion and centered content where appropriate
 	fmt.Println("| :---: | :---: | :---: | :--- |")
 
-	// Print in the defined order
 	for _, catName := range categoryOrder {
 		if vars, ok := grouped[catName]; ok && len(vars) > 0 {
 
-			// 1. Print the category header row (bolded)
 			fmt.Printf("| **%s** | | | |\n", catName)
 
-			// 2. Print the environment variables for this category
 			for _, info := range vars {
 				desc := info.Description
 				if desc == "" {
@@ -318,15 +401,12 @@ func generateMarkdown(envVars map[string]EnvVarInfo) {
 					defaultValue = "''"
 				}
 
-				// Format the raw validation tag for display
 				validationReq := formatValidationTag(info.ValidationTag)
 
-				// Print the row with the new column
 				fmt.Printf("| `%s` | `%s` | %s | %s |\n", info.Name, defaultValue, validationReq, desc)
 			}
 		}
 	}
-	// --- Table ends implicitly here ---
 }
 
 // formatValidationTag converts the raw validate tag string into a human-readable format.
@@ -364,8 +444,6 @@ func formatValidationTag(tag string) string {
 			}
 		case "oneof":
 			if len(parts) == 2 {
-				// --- THIS IS THE CORRECT LOGIC ---
-				// It takes "sqlite postgres mysql" and converts it to "sqlite, postgres, mysql"
 				options := strings.ReplaceAll(parts[1], " ", ", ")
 				readableRules = append(readableRules, fmt.Sprintf("Must be one of: `%s`", options))
 			}
