@@ -102,6 +102,9 @@ type UserZoneProviderConfig struct {
 	WebhookUrl string `json:"webhook_url" validate:"required_if=Provider webhook,omitempty,url"`
 	// The webhook bearer token for zone provider "webhook"
 	WebhookBearerToken string `json:"webhook_bearer_token" validate:"required_if=Provider webhook"`
+
+	// The script path for zone provider "script"
+	ScriptPath string `json:"script_path" validate:"required_if=Provider script,omitempty"`
 }
 
 type AppConfig struct {
@@ -172,6 +175,8 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 
 			WebhookUrl:         helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
 			WebhookBearerToken: helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
+
+			ScriptPath: helper.GetEnvString("ZONE_PROVIDER_SCRIPT_PATH", ""),
 		},
 
 		DevMode: helper.GetEnvString("API_MODE", "production") == "development",

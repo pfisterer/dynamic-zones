@@ -9,13 +9,10 @@ import (
 )
 
 type FixedZoneProvider struct {
-	zone_suffixes    []string
-	zone_soa         []string
-	logger           *zap.Logger
-	log              *zap.SugaredLogger
-	adminTsigKeyName string
-	adminTsigKey     string
-	adminTsigAlg     string
+	zone_suffixes []string
+	zone_soa      []string
+	logger        *zap.Logger
+	log           *zap.SugaredLogger
 }
 
 func NewFixedZoneProvider(suffixes, soa string, logger *zap.Logger) *FixedZoneProvider {

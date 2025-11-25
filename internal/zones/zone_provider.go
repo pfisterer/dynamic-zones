@@ -28,6 +28,14 @@ func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZonePr
 	case "webhook":
 		return NewWebhookZoneProvider(c.WebhookUrl, c.WebhookBearerToken, logger)
 
+	case "script":
+		provider, err := NewZoneProviderJavaScript(&c, logger)
+		if err != nil {
+			logger.Fatal("zones.CreateUserZoneProvider: failed to initialize ZoneProviderJavaScript", // <-- RENAMED
+				zap.String("script_path", c.ScriptPath), zap.Error(err))
+		}
+		return provider
+
 	default:
 		logger.Fatal("zones.CreateUserZoneProvider: unknown UserZoneProvider type",
 			zap.String("type", appConfig.UserZoneProvider.Provider))
