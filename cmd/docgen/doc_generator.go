@@ -239,14 +239,14 @@ func extractNestedEnvVars(fset *token.FileSet, lit *ast.CompositeLit, category s
 
 				// COMPLEX CASE: Anonymous function call (e.g., DefaultRecords: func() {...}())
 				if funcLit, ok := callExpr.Fun.(*ast.FuncLit); ok {
-					fmt.Fprintf(os.Stderr, "TRACE: Checking complex field %s\n", fieldName)
+					//fmt.Fprintf(os.Stderr, "TRACE: Checking complex field %s\n", fieldName)
 
 					ast.Inspect(funcLit.Body, func(n ast.Node) bool {
 						if nestedCallExpr, ok := n.(*ast.CallExpr); ok {
 							if nestedFun, ok := nestedCallExpr.Fun.(*ast.SelectorExpr); ok {
 								// Safety check for nestedFun.X
 								if ident, ok := nestedFun.X.(*ast.Ident); ok && ident.Name == "helper" && nestedFun.Sel.Name == "GetEnvString" {
-									fmt.Fprintf(os.Stderr, "TRACE: Found ENV Var: %s\n", nestedCallExpr.Args[0].(*ast.BasicLit).Value)
+									//fmt.Fprintf(os.Stderr, "TRACE: Found ENV Var: %s\n", nestedCallExpr.Args[0].(*ast.BasicLit).Value)
 									processEnvCall(fset, fieldName, category, envVars, nestedCallExpr)
 									return false // Found it, stop inspecting this branch
 								}
