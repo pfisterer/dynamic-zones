@@ -91,7 +91,7 @@ type UserZoneProviderConfig struct {
 	DefaultAdminTsigAlg string `json:"default_admin_tsig_alg,omitempty" validate:"omitempty"`
 
 	// The type of zone provider
-	Provider string `json:"provider" validate:"oneof=fixed webhook"`
+	Provider string `json:"provider" validate:"oneof=fixed webhook script"`
 	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "test.example.com, example.example2.org")
 
 	FixedDomainSuffixes string `json:"fixed_domain_suffixes" validate:"required_if=Provider fixed"`

@@ -17,11 +17,25 @@ spec:
       labels:
         app: dynamic-zones
     spec:
+{% if zone_provider_type == "script" %}
+      volumes:
+        - name: script-provider
+          configMap:
+            name: dynamic-zones-script-provider
+{% endif %}          
       containers:
         - name: dynamic-zones
           image: ghcr.io/pfisterer/dynamic-zones:{{ dynamic_zones_version | default("latest") }}
           ports:
             - containerPort: 8082
+{% if zone_provider_type == "script" %}
+          volumeMounts:
+            - name: script-provider
+              mountPath: /app/zone-providers/zone_provider.js
+              subPath: zone_provider.js
+{% endif %}          
+
+
           env:
 {% if api_mode is defined %}
             - name: API_MODE
@@ -59,6 +73,11 @@ spec:
               value: "{{ zone_provider_webhook_url }}"
             - name: ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN
               value: "{{ zone_provider_webhook_bearer_token }}"
+{% endif %}
+
+{% if zone_provider_type == "script" %}
+            - name: ZONE_PROVIDER_SCRIPT_PATH
+              value: "/app/zone-providers/zone_provider.js"
 {% endif %}
 
             - name: DB_TYPE
@@ -110,6 +129,20 @@ spec:
               value: "60"
             - name: UPSTREAM_DNS_UPDATE_INTERVAL
               value: "300"
+
+{% if zone_provider_type == "script" %}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamic-zones-script-provider
+  namespace: default
+data:
+  zone_provider.js: |
+    {{ zone_provider_script_script | indent(4) }}
+
+{% endif %}
+
 
 ---
 apiVersion: v1

@@ -12,6 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// jsReturnType is a helper struct to parse the return values
+type jsReturnType struct {
+	IsAllowed    bool         `json:"isAllowed"`
+	ZoneResponse ZoneResponse `json:"zoneResponse"`
+	ErrorMessage string       `json:"errorMessage"`
+}
+
 // ZoneProviderJavaScript implements ZoneProvider by executing a user-provided JavaScript script.
 type ZoneProviderJavaScript struct {
 	vm                *goja.Runtime
@@ -92,10 +99,17 @@ func (m *ZoneProviderJavaScript) GetUserZones(user *auth.UserClaims) ([]ZoneResp
 		return nil, fmt.Errorf("error executing JavaScript getUserZones: %w", err)
 	}
 
-	// Convert the result back to Go slice
+	// Convert the result back
+	genericGoValue := jsResult.Export()
+	jsonBytes, err := json.Marshal(genericGoValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal generic Go value to JSON: %w", err)
+	}
+
+	// Unmarshal JSON into []ZoneResponse
 	var result []ZoneResponse
-	if err := m.vm.ExportTo(jsResult, &result); err != nil {
-		return nil, fmt.Errorf("error exporting result from JavaScript getUserZones: %w", err)
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON into []ZoneResponse: %w", err)
 	}
 
 	m.log.Debugf("zones.GetUserZones: returning zones for user %s: %v", user.PreferredUsername, result)
@@ -103,56 +117,39 @@ func (m *ZoneProviderJavaScript) GetUserZones(user *auth.UserClaims) ([]ZoneResp
 }
 
 func (m *ZoneProviderJavaScript) IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
-	// Marshal user to goja Value
 	jsUser, err := m.marshalToJS(user)
 	if err != nil {
 		return false, ZoneResponse{}, err
 	}
 
-	// Lock the VM for thread safety
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Invoke the JavaScript function to check if the zone is allowed
 	jsResult, err := m.isAllowedZoneFunc(goja.Undefined(), jsUser, m.vm.ToValue(zone))
 	if err != nil {
 		return false, ZoneResponse{}, fmt.Errorf("error executing JavaScript isAllowedZone: %w", err)
 	}
 
-	// Convert the result back to Go types
-	var rawResult []interface{}
-	if err := m.vm.ExportTo(jsResult, &rawResult); err != nil {
-		return false, ZoneResponse{}, fmt.Errorf("error exporting result from JavaScript isAllowedZone: %w", err)
+	genericGoValue := jsResult.Export()
+	jsonBytes, err := json.Marshal(genericGoValue)
+	if err != nil {
+		return false, ZoneResponse{}, fmt.Errorf("failed to marshal generic Go value to JSON: %w", err)
 	}
 
-	// Expecting [bool, ZoneResponse, error]
-	if len(rawResult) != 3 {
-		return false, ZoneResponse{}, fmt.Errorf("JavaScript isAllowedZone must return a 3-element array: [bool, ZoneResponse, error]")
+	// 3. Demarshall den JSON-Byte-Slice direkt in die Zielstruktur IsAllowedZoneResult
+	var result jsReturnType
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return false, ZoneResponse{}, fmt.Errorf("failed to unmarshal JSON into IsAllowedZoneResult: %w", err)
 	}
 
-	// Extract and validate the boolean indicating if the zone is allowed
-	isAllowed, ok := rawResult[0].(bool)
-	if !ok {
-		return false, ZoneResponse{}, fmt.Errorf("first return value must be a boolean")
-	}
-
-	// Extract the ZoneResponse
-	var zoneResponse ZoneResponse
-	jsonBytes, err := json.Marshal(rawResult[1])
-	if err == nil && len(jsonBytes) > 2 {
-		json.Unmarshal(jsonBytes, &zoneResponse)
-	}
-
-	// Extract the error message, if any
+	// Extrahieren des Skriptfehlers
 	var scriptErr error
-	if rawResult[2] != nil {
-		if errMsg, ok := rawResult[2].(string); ok && errMsg != "" {
-			scriptErr = fmt.Errorf("script error: %s", errMsg)
-		}
+	if result.ErrorMessage != "" {
+		scriptErr = fmt.Errorf("script error: %s", result.ErrorMessage)
 	}
 
-	// Return the results
-	return isAllowed, zoneResponse, scriptErr
+	// Rückgabe des Booleans und der ZoneResponse
+	return result.IsAllowed, result.ZoneResponse, scriptErr
 }
 
 // setupJsConsoleLogging creates a 'console' object in the VM and binds its methods

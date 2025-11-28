@@ -38,6 +38,47 @@ all:
             zone_provider_default_admin_tsig_alg: HMAC-SHA512
             zone_provider_default_records: "[]"
 
-            zone_provider_type: fixed
+            # Select zone provider to use
+            zone_provider_type: script
+
+            # Only used if zone_provider_type == fixed
             zone_provider_fixed_domain_suffixes: users.xxx.cloud
             zone_provider_fixed_domain_soa: users.xxx.cloud
+
+            # Only used if zone_provider_type == script
+            zone_provider_script_script: |
+                function getUserZones(user) {
+                    if (!user || !user.email) {
+                        console.warn("getUserZones called with missing user or email.");
+                        return [];
+                    }
+
+                    const email = user.email.toLowerCase();
+                    const dhbwRegExp = /@dhbw(-.*)?.de$/i; 
+
+                    let allowedZones = [{ zone: "no-valid-zone-available.example.com", 
+                                          zone_soa: "no-valid-zone-available.example.com" }];
+
+                    // User is part of a DHBW domain
+                    if (dhbwRegExp.test(email)) {
+                        const zone = makeDnsCompliantGo(email) + ".users.dhbw.cloud"
+                        allowedZones = [{ zone: zone, zone_soa: zone }];
+                    }
+
+                    console.log(`User ${email} allowed zones:`, allowedZones);
+                    return allowedZones;
+                }
+
+                function isAllowedZone(user, zone) {
+                    const allowedZones = getUserZones(user);
+                    const firstMatch = allowedZones.find(zr => zr.zone === zone);
+
+                    const retValue = {
+                        isAllowed: firstMatch != undefined,
+                        errorMessage: "",
+                        zoneResponse: firstMatch || {}
+                    }
+
+                    console.log(`isAllowedZone for user ${user.email} and zone ${zone}:`, retValue);
+                    return retValue;
+                }
