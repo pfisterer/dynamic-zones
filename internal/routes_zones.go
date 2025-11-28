@@ -94,18 +94,32 @@ func getZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		statusCode, returnValue, err := app.GetZone(ctx, user.PreferredUsername, zone, externalDnsVersion)
+
 		if err != nil {
-			app.Log.Warnf("getZone: zone '%s' does not exist: %w", zone, err)
+			app.Log.Warnf("getZone: zone '%s' error: %w", zone, err)
 		}
 
 		if format == "external-dns" && statusCode == http.StatusOK {
-			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML")
+			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML", zone)
 
-			yamlString, ok := returnValue.(map[string]any)["externalDnsValuesYaml"].(string)
-
+			returnMap, ok := returnValue.(map[string]any)
 			if !ok {
-				app.Log.Errorf("getZone: Failed to cast externalDnsConfig to string")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error"})
+				app.Log.Errorf("getZone: Failed to cast success returnValue (%T) to map[string]any", returnValue)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: Invalid response format from GetZone"})
+				return
+			}
+
+			yamlValue, exists := returnMap["externalDnsValuesYaml"]
+			if !exists {
+				app.Log.Errorf("getZone: Key 'externalDnsValuesYaml' missing from successful response map")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: Missing external-dns data in response"})
+				return
+			}
+
+			yamlString, ok := yamlValue.(string)
+			if !ok {
+				app.Log.Errorf("getZone: Failed to cast externalDnsValuesYaml value (%T) to string", yamlValue)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: external-dns data is not a string"})
 				return
 			}
 
@@ -113,6 +127,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 			return
 		}
 
+		// Default return for JSON format or any non-200 status code
 		app.Log.Debug("🟢 getZoneReturning zone with status ", statusCode)
 		c.JSON(statusCode, returnValue)
 	}
