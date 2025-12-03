@@ -1,10 +1,9 @@
 PROJECT_NAME := dynamic-zones
 BINARY_NAME := $(PROJECT_NAME)
 SRC_DIR := ./cmd
-DOC_DIR := docs
+DOC_DIR := build/gen
 BUILD_DIR := build
 GO_MOD := go.mod
-WEB_UI_DIR := web-ui
 
 SWAGGER_JSON := $(DOC_DIR)/swagger.json
 OPENAPI_YAML := $(DOC_DIR)/openapi3.json
@@ -20,9 +19,9 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build doc-env
+.PHONY: all build clean doc convert client bundle check swag run help install-npm docker docker-login docker-build multi-arch-build doc-env
 
-all: bundle build bundle-deps doc-env
+all: bundle build doc-env
 
 install-npm:
 	@echo "⬇️ Installing npm dependencies..."
@@ -58,12 +57,6 @@ bundle: client install-npm
 	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=esm --out-extension:.js=".mjs" --sourcemap
 	npx esbuild "$(CLIENT_TS)" "$(CLIENT_SDK)" --bundle --outdir="$(DIST_DIR)" --format=cjs --sourcemap
 	@echo "✅ Bundled JS in $(DIST_DIR)/"
-
-bundle-deps: install-npm
-	@echo "📦 Bundling web UI dependencies with esbuild..."
-	@mkdir -p $(WEB_UI_DIR)/dist
-	@node esbuild-config.js
-	@echo "✅ Dependencies bundled into $(WEB_UI_DIR)/dist/deps.mjs"
 
 build: check-modules
 	@echo "🔨 Building Go binary..."
@@ -116,7 +109,6 @@ help:
 	@echo "  convert   → Convert swagger.json → openapi.json"
 	@echo "  client    → Generate TypeScript client"
 	@echo "  bundle    → Bundle client into JS"
-	@echo "  bundle-deps → Bundle web UI dependencies"
 	@echo "  build     → Compile Go binary"
 	@echo "  clean     → Remove build artifacts"
 	@echo "  run       → Run Go app"

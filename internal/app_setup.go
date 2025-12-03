@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
 	"github.com/farberg/dynamic-zones/internal/config"
@@ -119,13 +120,13 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 
 	//Create router group for  API routes for v1
 	apiV1Group := router.Group("/v1")
-
-	// Set CORS configuration
 	router.Use(cors.Default())
 
 	if app.Config.DevMode {
 		app.Log.Debugf("Completely disabling caching in development mode.")
 		router.Use(disableCachingMiddleware())
+		app.Log.Debugf("Enabling CORS origin reflection in development mode.")
+		enableCorsOriginReflectionConfig(apiV1Group)
 	}
 
 	// Direct Gin's standard and error output streams to our custom Zap writer
@@ -134,17 +135,13 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	gin.DefaultErrorWriter = ginLogWriter
 	router.Use(ginzap.RecoveryWithZap(app.Logger, true))
 
-	// Render an index page for human consumption
-	router.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusTemporaryRedirect, "/ui/index.html")
-	})
-
-	router.Static("/ui", "./web-ui")
-	router.Static("/client/dist", "./docs/client-dist")
-	router.Static("/client/typescript", "./docs/client-typescript")
-
-	// Swagger UI
-	router.StaticFile("/swagger.json", "./docs/swagger.json")
+	// Expose index.html, client SDK and Swagger UI
+	index_html := "./web/index.html"
+	router.StaticFile("/", index_html)
+	router.StaticFile("/index.html", index_html)
+	router.Static("/client/dist", "./build/gen/client-dist")
+	router.StaticFile("/swagger-index.html", "./web/swagger-index.html")
+	router.StaticFile("/swagger.json", "./build/gen/swagger.json")
 
 	// Inject authentication data into the context
 	switch app.Config.WebServer.AuthProvider {
@@ -179,25 +176,19 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 			"auth_provider": "oidc",
 			"issuer_url":    oidcConfig.IssuerURL,
 			"client_id":     oidcConfig.ClientID,
-			"redirect_uri":  fmt.Sprintf("%s/ui/index.html", app.Config.WebServer.WebserverBaseUrl),
-			"logout_uri":    fmt.Sprintf("%s/ui/index.html", app.Config.WebServer.WebserverBaseUrl),
 		}
 
 	default:
 		app.Log.Fatalf("Unknown authentication provider '%s'. Supported providers: fake, oidc.", app.Config.WebServer.AuthProvider)
 	}
 
-	// Expose authorization config to the frontend
-	router.GET(("/auth_config.json"), func(c *gin.Context) {
-		c.JSON(http.StatusOK, auth_config)
-	})
-
 	// Expose DNS server configuration
-	router.GET(("/app_config.json"), func(c *gin.Context) {
+	router.GET(("/config.json"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"dns_server_address": app.Config.PowerDns.DnsServerAddress,
 			"dns_server_port":    app.Config.PowerDns.DnsServerPort,
 			"version":            helper.AppVersion,
+			"auth":               auth_config,
 		})
 	})
 
@@ -242,4 +233,34 @@ func disableCachingMiddleware() gin.HandlerFunc {
 		// Continue to the next middleware or handler
 		c.Next()
 	}
+}
+
+func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
+
+	corsConfig := cors.Config{
+		AllowOriginFunc: func(origin string) bool {
+			fmt.Printf("CORS origin reflection: allowing origin: %s\n", origin)
+			return true
+		},
+		AllowCredentials: true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		MaxAge:           1 * time.Hour,
+		AllowWildcard:    true,
+	}
+
+	router.Use(cors.New(corsConfig))
+
+	router.OPTIONS("/*path", func(c *gin.Context) {
+		origin := c.Request.Header.Get("Origin")
+		if origin != "" {
+			c.Header("Access-Control-Allow-Origin", origin)
+		}
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Max-Age", fmt.Sprint(int(time.Hour.Seconds())))
+		c.Status(http.StatusNoContent)
+	})
+
 }
