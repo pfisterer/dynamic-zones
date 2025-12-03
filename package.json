@@ -18,14 +18,5 @@
     "esbuild-plugin-alias-path": "^2.0.2",
     "swagger2openapi": "^7.0.8",
     "typescript": "^5.9.2"
-  },
-  "dependencies": {
-    "@preact/compat": "^18.3.1",
-    "@preact/signals": "^2.3.1",
-    "bulma": "^1.0.4",
-    "htm": "^3.1.1",
-    "oidc-client-ts": "^3.3.0",
-    "preact": "^10.27.1",
-    "wouter-preact": "^3.7.1"
   }
 }
