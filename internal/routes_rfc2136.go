@@ -52,6 +52,7 @@ func CreateRfc2136ClientApiGroup(v1 *gin.RouterGroup, app *AppData) *gin.RouterG
 	v1.GET("/dns/records", listDNSRecords(app))
 	v1.POST("/dns/records/create", createDNSRecord(app))
 	v1.POST("/dns/records/delete", deleteDNSRecord(app))
+
 	return v1
 }
 

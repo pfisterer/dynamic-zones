@@ -126,7 +126,6 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 		app.Log.Debugf("Completely disabling caching in development mode.")
 		router.Use(disableCachingMiddleware())
 		app.Log.Debugf("Enabling CORS origin reflection in development mode.")
-		enableCorsOriginReflectionConfig(apiV1Group)
 	}
 
 	// Direct Gin's standard and error output streams to our custom Zap writer
@@ -193,7 +192,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	})
 
 	// Create the API routes for v1
-	CreateApiV1Group(apiV1Group, app)
+	enableCorsOriginReflectionConfig(apiV1Group)
+	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
 
@@ -244,9 +244,8 @@ func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
 		},
 		AllowCredentials: true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key"},
 		MaxAge:           1 * time.Hour,
-		AllowWildcard:    true,
 	}
 
 	router.Use(cors.New(corsConfig))

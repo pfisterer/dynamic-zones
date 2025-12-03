@@ -12,6 +12,15 @@ import (
 func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *storage.Storage, log *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+
+		// Allow preflight OPTIONS requests without authentication
+		if c.Request.Method == http.MethodOptions && c.GetHeader("Access-Control-Request-Headers") != "" {
+			log.Infof("Allowing pre-flight request without authentication")
+			c.Next()
+			return
+		}
+
+		// Get the Authorization header
 		authHeader := c.GetHeader("Authorization")
 
 		// Remove the bearer prefix from the Authorization header (if present)

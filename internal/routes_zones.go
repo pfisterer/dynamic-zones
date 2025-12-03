@@ -7,9 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func CreateApiV1Group(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
+func CreateApiV1Zones(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 	v1.GET("/zones/", getZones(app))
-	v1.GET("/zones/:zone/", getZone(app))
+	v1.GET("/zones/:zone", getZone(app))
 	v1.POST("/zones/:zone", postZone(app))
 	v1.DELETE("/zones/:zone", deleteZone(app))
 
@@ -102,9 +102,14 @@ func getZone(app *AppData) gin.HandlerFunc {
 		if format == "external-dns" && statusCode == http.StatusOK {
 			app.Log.Debugf("getZone: format=external-dns for part '%s' requested, transforming response to plain YAML", zone)
 
-			returnMap, ok := returnValue.(map[string]any)
-			if !ok {
-				app.Log.Errorf("getZone: Failed to cast success returnValue (%T) to map[string]any", returnValue)
+			var returnMap map[string]any
+
+			if hMap, ok := returnValue.(gin.H); ok {
+				returnMap = map[string]any(hMap)
+			} else if genericMap, ok := returnValue.(map[string]any); ok {
+				returnMap = genericMap
+			} else {
+				app.Log.Errorf("getZone: Failed to cast success returnValue (%T) to map[string]any or gin.H", returnValue)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: Invalid response format from GetZone"})
 				return
 			}
