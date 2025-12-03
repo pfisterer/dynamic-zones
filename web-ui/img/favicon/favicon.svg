@@ -1,9 +1,0 @@
-<svg width="256" height="256" viewBox="0 0 256 256" fill="none"
-    xmlns="http://www.w3.org/2000/svg">
-    <rect width="256" height="256" fill="white" fill-opacity="0"/>
-    <circle cx="128" cy="128" r="120" fill="#E53935"/>
-    <path d="M128 8C194.27 8 248 61.73 248 128C248 194.27 194.27 248 128 248C61.73 248 8 194.27 8 128C8 61.73 61.73 8 128 8Z" fill="#757575"/>
-    <path d="M128 8L8 128L128 248L248 128L128 8Z" fill="#E53935"/>
-    <text x="60" y="160" font-family="Arial, sans-serif" font-size="100" font-weight="bold" fill="white">D</text>
-    <text x="125" y="160" font-family="Arial, sans-serif" font-size="100" font-weight="bold" fill="white">Z</text>
-</svg>
