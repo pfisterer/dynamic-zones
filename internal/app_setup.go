@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/auth"
@@ -236,6 +237,7 @@ func disableCachingMiddleware() gin.HandlerFunc {
 }
 
 func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
+	allowedHeaders := []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key"}
 
 	corsConfig := cors.Config{
 		AllowOriginFunc: func(origin string) bool {
@@ -244,7 +246,7 @@ func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
 		},
 		AllowCredentials: true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key"},
+		AllowHeaders:     allowedHeaders,
 		MaxAge:           1 * time.Hour,
 	}
 
@@ -256,7 +258,7 @@ func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		c.Header("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", fmt.Sprint(int(time.Hour.Seconds())))
 		c.Status(http.StatusNoContent)
