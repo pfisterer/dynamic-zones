@@ -26,6 +26,7 @@ spec:
       containers:
         - name: dynamic-zones
           image: ghcr.io/pfisterer/dynamic-zones:{{ dynamic_zones_version | default("latest") }}
+          imagePullPolicy: Always
           ports:
             - containerPort: 8082
 {% if zone_provider_type == "script" %}
@@ -106,7 +107,7 @@ spec:
               value: "{{ api_bind_string }}"
 {% endif %}
             - name: API_BASE_URL
-              value: "https://{{ app_hostname }}"
+              value: "https://{{ dynamic_zones_hostname }}"
 
             - name: API_TOKEN_TTL_HOURS
               value: "{{ api_token_ttl_hours }}"
@@ -174,7 +175,7 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   rules:
-    - host: "{{ app_hostname }}"
+    - host: "{{ dynamic_zones_hostname }}"
       http:
         paths:
           - path: /
@@ -186,5 +187,5 @@ spec:
                   number: 8082
   tls:
     - hosts:
-        - "{{ app_hostname }}"
+        - "{{ dynamic_zones_hostname }}"
       secretName: dyndns-dhbw-cloud-tls
