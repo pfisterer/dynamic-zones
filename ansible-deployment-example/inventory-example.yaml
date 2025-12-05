@@ -4,8 +4,10 @@ all:
             ip_family: ipv4
             ansible_user: root
 
-            dynamic_zones_version: 0.1.4-alpha
-            app_hostname: dyndns.xxx.cloud
+            self_service_ui_version: 0.1.0-alpha
+            self_service_ui_hostname: dyndns.dhbw.cloud
+            dynamic_zones_version: 0.2.0-alpha
+            dynamic_zones_hostname: dyndnsapi.dhbw.cloud
             cert_manager_email: xxx.yyy@zzz.de
             #external_dns_image_version: ""
 
@@ -16,13 +18,15 @@ all:
             oidc_client_id: xxx-cloud-dns
 
             powerdns_url: "http://powerdns-api:8080"
-            powerdns_server_ip: "141.72.5.244"
+            powerdns_server_ip: "141.1.2.3"
             powerdns_server_port: 53
             powerdns_vhost: localhost
             powerdns_api_key: my-api-key
 
             database_type: "postgres"
+            pg_username_root: root
             pg_password_root: xxx
+            pg_username: dynamic_zones
             pg_password_dynamic_zones: xxx
             database_connection_string: "host=postgresdb-rw user=dynamic_zones password={{ pg_password_dynamic_zones }} dbname=dynamic_zones port=5432 sslmode=disable"
 
