@@ -19,9 +19,12 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm docker docker-login docker-build multi-arch-build doc-env
+.PHONY: all build clean doc convert client bundle check swag run help install-npm docker docker-login docker-build multi-arch-build doc-env dev
 
 all: bundle build doc-env
+
+dev:
+	air
 
 install-npm:
 	@echo "⬇️ Installing npm dependencies..."
@@ -80,7 +83,7 @@ docker: docker-build docker-login multi-arch-build
 
 docker-build:
 	@echo "🏗️ Building Docker image $(DOCKER_REPO):$(DOCKER_TAG)..."
-	docker build --progress=plain -t "$(DOCKER_REPO):$(DOCKER_TAG)" .
+	docker build --progress=plain -t "$(DOCKER_REPO):$(DOCKER_TAG)" -t "$(DOCKER_REPO):latest" .
 	@echo "✅ Docker image $(DOCKER_REPO):$(DOCKER_TAG) built."
 	@echo "You can push it with: docker push $(DOCKER_REPO):$(DOCKER_TAG)"
 
@@ -103,6 +106,7 @@ doc-env: check-modules
 help:
 	@echo "Usage: make <target>"
 	@echo "  all       → Build and generate everything"
+	@echo "  dev       → Start development server with live reload"
 	@echo "  install-npm → Install npm dependencies from package.json"
 	@echo "  doc       → Generate swagger.json"
 	@echo "  doc-env   → Generate and insert environment variable docs into README.md"
