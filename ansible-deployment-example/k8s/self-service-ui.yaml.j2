@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: self-service-ui
+  namespace: default
+  annotations:
+    keel.sh/policy: all
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 60m"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: self-service-ui
+  template:
+    metadata:
+      labels:
+        app: self-service-ui
+    spec:
+      containers:
+        - name: self-service-ui
+          image: ghcr.io/pfisterer/self-service-ui:{{ self_service_ui_version | default("latest") }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DYNAMIC_ZONE_BASE_URL
+              value: "https://{{ dynamic_zones_hostname }}"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: self-service-ui
+  namespace: default
+spec:
+  selector:
+    app: self-service-ui
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: self-service-ui
+  namespace: default
+  annotations:
+{% if cert_manager_email %}
+    # cert-manager annotations to request a certificate
+    cert-manager.io/cluster-issuer: letsencrypt-production
+{% endif %}
+    # NGINX Ingress Controller annotations for HTTP to HTTPS redirection
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+    - host: "{{ self_service_ui_hostname }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: self-service-ui
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - "{{ self_service_ui_hostname }}"
+      secretName: self-service-ui-dhbw-cloud-tls
