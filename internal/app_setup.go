@@ -135,12 +135,13 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	gin.DefaultErrorWriter = ginLogWriter
 	router.Use(ginzap.RecoveryWithZap(app.Logger, true))
 
-	// Expose index.html, client SDK and Swagger UI
-	index_html := "./web/index.html"
-	router.StaticFile("/", index_html)
-	router.StaticFile("/index.html", index_html)
-	router.Static("/client/dist", "./build/gen/client-dist")
-	router.StaticFile("/swagger-index.html", "./web/swagger-index.html")
+	// Serve the index.html file from the embedded string
+	router.GET("/", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(helper.IndexHTML))
+	})
+
+	// Expose generated static files
+	router.Static("/client", "./build/gen/client-dist")
 	router.StaticFile("/swagger.json", "./build/gen/swagger.json")
 
 	// Inject authentication data into the context
