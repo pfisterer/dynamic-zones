@@ -381,6 +381,7 @@
         - pdns-deployment.yaml
         - postgres-deployment.yaml
         - dynamic-zones-deployment.yaml
+        - self-service-ui.yaml
       tags: [apply_manifests]
 
     # -----------------------------------------------------------------
@@ -396,4 +397,5 @@
         - pdns-deployment.yaml
         - postgres-deployment.yaml
         - dynamic-zones-deployment.yaml
+        - self-service-ui.yaml
       tags: [apply_manifests]
