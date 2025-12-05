@@ -25,8 +25,7 @@ WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/build/dynamic-zones /app/
-COPY --from=builder /app/build/gen /app/docs
-COPY --from=builder /app/web /app/web
+COPY --from=builder /app/build/gen/ /app/build/gen/
 
 # Expose port
 EXPOSE 8082
