@@ -43,7 +43,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		userZones, err := app.ZoneProvider.GetUserZones(user)
+		userZones, err := app.ZoneProvider.GetUserZones(c.Request.Context(), user)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
@@ -164,7 +164,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Ensure the user is allowed to create the zone
-		isAllowed, zoneDef, err := app.ZoneProvider.IsAllowedZone(user, zone)
+		isAllowed, zoneDef, err := app.ZoneProvider.IsAllowedZone(ctx, user, zone)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
@@ -210,7 +210,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Check if the user is allowed to delete the zone
-		isAllowed, _, err := app.ZoneProvider.IsAllowedZone(user, zone)
+		isAllowed, _, err := app.ZoneProvider.IsAllowedZone(ctx, user, zone)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})

@@ -242,7 +242,6 @@ func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
 
 	corsConfig := cors.Config{
 		AllowOriginFunc: func(origin string) bool {
-			fmt.Printf("CORS origin reflection: allowing origin: %s\n", origin)
 			return true
 		},
 		AllowCredentials: true,
