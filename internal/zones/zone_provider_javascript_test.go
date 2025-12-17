@@ -64,7 +64,7 @@ func TestZoneProviderJavaScript_GetUserZones(t *testing.T) {
 		PreferredUsername: "testuser",
 	}
 
-	zones, err := provider.GetUserZones(user)
+	zones, err := provider.GetUserZones(t.Context(), user)
 	assert.NoError(t, err)
 	assert.Len(t, zones, 1)
 	assert.Equal(t, "", zones[0].Zone)
@@ -73,7 +73,7 @@ func TestZoneProviderJavaScript_GetUserZones(t *testing.T) {
 		PreferredUsername: "anotheruser",
 	}
 
-	zones, err = provider.GetUserZones(user)
+	zones, err = provider.GetUserZones(t.Context(), user)
 	assert.NoError(t, err)
 	assert.Len(t, zones, 0)
 }

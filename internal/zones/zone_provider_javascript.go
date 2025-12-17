@@ -1,6 +1,7 @@
 package zones
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,7 +83,7 @@ func NewZoneProviderJavaScript(c *config.UserZoneProviderConfig, logger *zap.Log
 	}, nil
 }
 
-func (m *ZoneProviderJavaScript) GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *ZoneProviderJavaScript) GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
 	// Marshal user to goja Value
 	jsUser, err := m.marshalToJS(user)
 	if err != nil {
@@ -116,7 +117,7 @@ func (m *ZoneProviderJavaScript) GetUserZones(user *auth.UserClaims) ([]ZoneResp
 	return result, nil
 }
 
-func (m *ZoneProviderJavaScript) IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
+func (m *ZoneProviderJavaScript) IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
 	jsUser, err := m.marshalToJS(user)
 	if err != nil {
 		return false, ZoneResponse{}, err

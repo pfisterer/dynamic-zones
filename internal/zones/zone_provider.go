@@ -1,6 +1,8 @@
 package zones
 
 import (
+	"context"
+
 	"github.com/farberg/dynamic-zones/internal/auth"
 	"github.com/farberg/dynamic-zones/internal/config"
 	"go.uber.org/zap"
@@ -14,8 +16,8 @@ type ZoneResponse struct {
 }
 
 type ZoneProvider interface {
-	GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error)
-	IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error)
+	GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error)
+	IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error)
 }
 
 func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZoneProvider {

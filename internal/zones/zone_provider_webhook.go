@@ -2,6 +2,7 @@ package zones
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,10 +19,10 @@ type ZoneProviderWebhook struct {
 	cache       *ttlcache.Cache[string, []ZoneResponse]
 	logger      *zap.Logger
 	log         *zap.SugaredLogger
+	httpClient  *http.Client
 }
 
 func NewWebhookZoneProvider(url string, bearerToken string, logger *zap.Logger) *ZoneProviderWebhook {
-
 	cache := ttlcache.New(
 		ttlcache.WithTTL[string, []ZoneResponse](5*time.Minute),
 		ttlcache.WithCapacity[string, []ZoneResponse](500),
@@ -35,86 +36,105 @@ func NewWebhookZoneProvider(url string, bearerToken string, logger *zap.Logger) 
 		cache:       cache,
 		logger:      logger,
 		log:         logger.Sugar(),
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConnsPerHost: 20,
+			},
+		},
 	}
 }
 
-func (m *ZoneProviderWebhook) GetUserZones(user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *ZoneProviderWebhook) GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+	cacheKey := user.PreferredUsername
+	if cacheKey == "" {
+		m.log.Error("user claims missing preferred username")
+		return nil, fmt.Errorf("invalid user claims: missing username")
+	}
 
 	// Check cache first
-	cacheKey := user.PreferredUsername
 	cachedItem := m.cache.Get(cacheKey)
 	if cachedItem != nil {
-		m.log.Debugf("zones.GetUserZones: cache hit for user %s", user.PreferredUsername)
+		m.log.Debug("cache hit for user zones", zap.String("user", cacheKey))
 		return cachedItem.Value(), nil
 	}
 
-	// Not in cache, make webhook request
-	m.log.Debugf("zones.GetUserZones: cache miss, making webhook request for user %s", user.PreferredUsername)
-
-	result, err := m.fetchZonesFromWebhook(m.url, m.bearerToken, user)
+	// Fetch from webhook
+	result, err := m.fetchZonesFromWebhook(ctx, user)
 	if err != nil {
-		m.log.Errorf("zones.GetUserZones: error fetching zones from webhook for user %s: %v", user.PreferredUsername, err)
-		return []ZoneResponse{}, err
+		m.log.Errorf("failed to fetch zones from webhook (%s) for user %s: %v", m.url, cacheKey, err)
+		return nil, err
 	}
 
 	// Store in cache
+	m.log.Debugf("caching user zones for user %s: %v+", cacheKey, result)
 	m.cache.Set(cacheKey, result, ttlcache.DefaultTTL)
 	return result, nil
 }
 
-func (m *ZoneProviderWebhook) IsAllowedZone(user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
-	userZones, err := m.GetUserZones(user)
+func (m *ZoneProviderWebhook) IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
+	userZones, err := m.GetUserZones(ctx, user)
+
+	//Return on error fetching zones
 	if err != nil {
 		return false, ZoneResponse{}, err
 	}
 
+	// Check if the zone is in the user's allowed zones
 	for _, uz := range userZones {
 		if uz.Zone == zone {
 			return true, uz, nil
 		}
 	}
+
 	return false, ZoneResponse{}, nil
 }
 
-func (m *ZoneProviderWebhook) fetchZonesFromWebhook(url string, bearerToken string, user *auth.UserClaims) ([]ZoneResponse, error) {
-	// Marshal the user object to JSON
+func (m *ZoneProviderWebhook) fetchZonesFromWebhook(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+	// Create JSON payload
 	userJSON, err := json.Marshal(user)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling user to JSON: %w", err)
+		return nil, fmt.Errorf("marshaling user: %w", err)
 	}
 
-	// Create HTTP request
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(userJSON))
+	// Create request with context for cancellation/timeout support
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.url, bytes.NewReader(userJSON))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	// Set headers
+	// Set headers and bearer token if provided
 	req.Header.Set("Content-Type", "application/json")
-
-	if bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	req.Header.Set("Accept", "application/json")
+	if m.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+m.bearerToken)
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	// Execute request
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("performing request: %w", err)
+		return nil, fmt.Errorf("webhook request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Check for non-200 status codes
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("webhook returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("webhook returned unexpected status: %d", resp.StatusCode)
 	}
 
 	var zones []ZoneResponse
-	if err := json.NewDecoder(resp.Body).Decode(&zones); err != nil {
+	one_megabyte_limit := int64(1048576)
+	limitReader := http.MaxBytesReader(nil, resp.Body, one_megabyte_limit)
+	if err := json.NewDecoder(limitReader).Decode(&zones); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
-	m.log.Debugf("fetchZonesFromWebhook: fetched zones for user %s, count %d", user.PreferredUsername, len(zones))
 	return zones, nil
+}
+
+// Close gracefully stops the cache background worker
+func (m *ZoneProviderWebhook) Close() {
+	m.cache.Stop()
 }
