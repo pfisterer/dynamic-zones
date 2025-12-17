@@ -1,0 +1,2 @@
+- name: k3s-dhbw-cloud-role
+  source: https://github.com/pfisterer/k3s-dhbw-cloud-role.git
