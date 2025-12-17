@@ -1,250 +1,22 @@
-#! ANSIBLE_STDOUT_CALLBACK=yaml ANSIBLE_LOAD_CALLBACK_PLUGINS=1 ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i ansible-deployment-example/inventory.yaml
-# --tags jupyterhub
-# --tags copy
-# --tags k3s
-# --tags addons
-# --tags postgresql
-# --tags apply_manifests
+#! ANSIBLE_STDOUT_CALLBACK=yaml ANSIBLE_LOAD_CALLBACK_PLUGINS=1 ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_ROLES_PATH=~/Desktop/k8s/ansible-roles/ ansible-playbook -i ansible-deployment-example/inventory.yaml --tags=helm_deploy
+# --tags helm_deploy
+
 ---
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# Pre-flight check and minimal Python 3 installation
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-- name: Ensure Python 3 and pip3 are present for Ansible execution
+# ---
+# -----------------------------------------------------------------
+- name: Deploy k3s via external role
   hosts: all
-  become: true
-  gather_facts: false
-  tags: [preflight, python]
-  tasks:
-    - name: Ensure Python 3 and pip3 are installed
-      ansible.builtin.apt:
-        name:
-          - python3
-        state: present
-        update_cache: true
-
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# Basic setup of packages and tools
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-- name: Bootstrap system and install dependencies
-  hosts: all
-  become: true
-  tags: [bootstrap]
-  tasks:
-    # ----------------------------------------------------------------------
-    # Install APT packages and tools
-    # ----------------------------------------------------------------------
-    - name: Ensure apt packages installed
-      ansible.builtin.apt:
-        name:
-          - curl
-          - python3
-          - python3-kubernetes
-        state: present
-        update_cache: true
-        cache_valid_time: 86400
-
-    # ----------------------------------------------------------------------
-    # Helm
-    # ----------------------------------------------------------------------
-    - name: Ensure Helm is installed
-      ansible.builtin.shell: |
-        [ -x /usr/local/bin/helm ] || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      args:
-        executable: /bin/bash
-      changed_when: false
-      tags:
-        - skip_ansible_lint
-        - "ansible-lint:command-instead-of-shell"
-
-    # ----------------------------------------------------------------------
-    # Skaffold
-    # ----------------------------------------------------------------------
-    - name: Ensure Skaffold is installed
-      ansible.builtin.shell: |
-        [ -x /usr/local/bin/skaffold ] || ( \
-          curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && \
-          install skaffold /usr/local/bin/ && \
-          rm skaffold \
-        )
-      args:
-        executable: /bin/bash
-      changed_when: false
-      tags:
-        - skip_ansible_lint
-        - "ansible-lint:command-instead-of-shell"
-
-    # ----------------------------------------------------------------------
-    # Kubectl
-    # ----------------------------------------------------------------------
-    - name: Ensure kubectl is installed
-      ansible.builtin.shell: |
-        [ -x /usr/local/bin/kubectl ] || ( \
-          curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
-          install -m 755 kubectl /usr/local/bin/kubectl && \
-          rm kubectl \
-        )
-      args:
-        executable: /bin/bash
-      changed_when: false
-      tags:
-        - skip_ansible_lint
-        - "ansible-lint:command-instead-of-shell"
-
-    # ----------------------------------------------------------------------
-    # k alias for kubectl and other shell enhancements
-    # ----------------------------------------------------------------------
-    - name: Ensure 'k' alias for 'kubectl' is configured system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/kubectl_alias.sh
-        content: |
-          alias k='/usr/local/bin/kubectl'
-        owner: root
-        group: root
-        mode: "0755"
-    - name: Ensure 'watch' alias is configured to enable recursive alias expansion system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/watch_alias.sh
-        content: |
-          alias watch='watch '
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Ensure KUBECONFIG variable is set system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/kubeconfig.sh
-        content: |
-          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Ensure Helm bash completion is configured system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/helm_completion.sh
-        content: |
-          if [ -x /usr/local/bin/helm ]; then
-            source <(/usr/local/bin/helm completion bash)
-          fi
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Ensure kubectl bash completion is configured system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/kubectl_completion.sh
-        content: |
-          if [ -x /usr/local/bin/kubectl ]; then
-            source <(/usr/local/bin/kubectl completion bash)
-          fi
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Ensure code completion for 'k' alias system-wide
-      ansible.builtin.copy:
-        dest: /etc/profile.d/kubectl_k_completion.sh
-        content: |
-          complete -F __start_kubectl k
-        owner: root
-        group: root
-        mode: "0755"
-
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# K3s installation and Kubernetes basic setup
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-- name: K3s installation and kubeconfig setup
-  hosts: all
-  become: true
   tags: [k3s]
-  vars:
-    kubeconfig_root: /etc/rancher/k3s/k3s.yaml
-    ansible_target_ip: >-
-      {% if ip_family == 'ipv4' %}
-      {{ ansible_default_ipv4.address }}
-      {% elif ip_family == 'ipv6' %}
-      {{ ansible_default_ipv6.address }}
-      {% endif %}
-    k3s_exec_args: "--disable=traefik --tls-san={{ ansible_target_ip }}"
-    kubeconfig_url: >-
-      {% if ip_family == 'ipv4' %}
-      https://{{ ansible_default_ipv4.address }}:6443
-      {% elif ip_family == 'ipv6' %}
-      https://[{{ ansible_default_ipv6.address }}]:6443
-      {% endif %}
-  tasks:
-    # ----------------------------------------------------------------------
-    # k3s Installation
-    # ----------------------------------------------------------------------
-    - name: Install K3s server with custom arguments
-      ansible.builtin.shell:
-        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='{{ k3s_exec_args }}' sh -"
-        creates: /usr/local/bin/k3s
-      tags:
-        - skip_ansible_lint
-        - "ansible-lint:command-instead-of-shell"
-
-    - name: Wait for K3s kubeconfig to appear
-      ansible.builtin.wait_for:
-        path: "{{ kubeconfig_root }}"
-        timeout: 180
-    # ----------------------------------------------------------------------
-    # Kubeconfig adaptation and distribution
-    # ----------------------------------------------------------------------
-
-    - name: Replace localhost with actual node IP if present
-      ansible.builtin.replace:
-        path: "{{ kubeconfig_root }}"
-        regexp: '^(\s*server:\s+)https://127\.0\.0\.1:6443'
-        replace: '\1{{ kubeconfig_url }}'
-
-    - name: Copy kubeconfig to localhost
-      ansible.builtin.fetch:
-        src: "{{ kubeconfig_root }}"
-        dest: "./kubeconfig-{{ inventory_hostname }}.yaml"
-        flat: true
-
-    # ----------------------------------------------------------------------
-    # Wait for server to be ready
-    # ----------------------------------------------------------------------
-    - name: Wait for node to be ready
-      ansible.builtin.shell: /usr/local/bin/kubectl get nodes
-      environment:
-        KUBECONFIG: "{{ kubeconfig_root }}"
-      register: kubectl_check
-      until: kubectl_check.rc == 0 and 'Ready' in kubectl_check.stdout
-      retries: 24
-      delay: 5
-      changed_when: false
-      tags:
-        - skip_ansible_lint
-        - "ansible-lint:command-instead-of-shell"
-
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# Deploy add-ons
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-- name: Deploy add-ons via Helm
-  tags: [addons]
-  hosts: all
   become: true
-  vars:
-    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
+  # --- This defines the kubeconfig_root variable
+  # -----------------------------------------------------------------
+  # --- install k8s and configure the cluster
+  # --- using https://github.com/pfisterer/k3s-dhbw-cloud-role
+  roles:
+    - role: k3s-dhbw-cloud-role
+    
   tasks:
-    - name: Remove conflicting helm-diff plugin directory
-      ansible.builtin.file:
-        path: /root/.local/share/helm/plugins/helm-diff
-        state: absent
-      become: true
-
     # -----------------------------------------------------------------
     # ClusterRoleBinding for ServiceAccount (rds-admin-binding)
     # -----------------------------------------------------------------
@@ -265,7 +37,7 @@
             kind: ClusterRole
             name: cluster-admin # The highest level of access
             apiGroup: rbac.authorization.k8s.io
-        kubeconfig: "{{ kubeconfig_path }}"
+        kubeconfig: "{{ kubeconfig_root }}"
 
     # -----------------------------------------------------------------
     # Add helm repos
@@ -277,66 +49,8 @@
         repo_url: "{{ item.url }}"
         state: present
       loop:
-        - { name: ingress-nginx, url: https://kubernetes.github.io/ingress-nginx/}
-        - { name: metallb, url: https://metallb.github.io/metallb }
-        - { name: jetstack, url: https://charts.jetstack.io }
         - { name: keel, url: https://charts.keel.sh }
         - { name: cloudnative-pg, url: https://cloudnative-pg.io/charts }
-
-    # -----------------------------------------------------------------
-    # --- Ingress-NGINX Controller Deployment via Helm ---
-    # -----------------------------------------------------------------
-    - name: Ensure ingress-nginx namespace exists
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: ingress-nginx
-        kubeconfig: "{{ kubeconfig_path }}"
-
-    - name: Install or upgrade NGINX Ingress Controller
-      kubernetes.core.helm:
-        name: ingress-nginx
-        chart_ref: ingress-nginx/ingress-nginx
-        release_namespace: ingress-nginx
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        values:
-          controller:
-            service:
-              type: LoadBalancer
-            watchIngressWithoutClass: true
-            config:
-              strict-validate-path-type: false
-        wait: true
-        atomic: true
-
-    # -----------------------------------------------------------------
-    # --- Cert Manager
-    # -----------------------------------------------------------------
-    - name: Ensure cert-manager namespace exists
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: cert-manager
-        kubeconfig: "{{ kubeconfig_path }}"
-
-    - name: Install or upgrade Cert-Manager
-      kubernetes.core.helm:
-        name: cert-manager
-        chart_ref: jetstack/cert-manager
-        release_namespace: cert-manager
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        values:
-          installCRDs: true
-        wait: true
-        atomic: true
 
     # -----------------------------------------------------------------
     # --- Postgres Operator
@@ -344,7 +58,7 @@
 
     - name: Install or upgrade CloudNativePG Operator
       kubernetes.core.helm:
-        kubeconfig: "{{ kubeconfig_path }}"
+        kubeconfig: "{{ kubeconfig_root }}"
         name: cloudnative-pg
         chart_ref: cloudnative-pg/cloudnative-pg
         release_namespace: default
@@ -361,41 +75,47 @@
         name: keel
         chart_ref: keel/keel
         release_namespace: default
-        kubeconfig: "{{ kubeconfig_path }}"
+        kubeconfig: "{{ kubeconfig_root }}"
         state: present
         wait: true
         atomic: true
 
     # -----------------------------------------------------------------
-    # --- Template and Copy Kubernetes YAML Files
+    # --- Copy Helm Chart to Remote
     # -----------------------------------------------------------------
-    - name: Template and copy Kubernetes deployment files to remote
+    - name: Copy Helm chart directory to remote
+      ansible.posix.synchronize:
+        src: "helm-chart"
+        dest: "/root/"
+        archive: true
+        delete: true
+        rsync_opts:
+          - "--chown=root:root"
+      tags: [helm_deploy]
+
+    # -----------------------------------------------------------------
+    # --- Create Helm Values File from Ansible Variables
+    # -----------------------------------------------------------------
+    - name: Create Helm values file from template
       ansible.builtin.template:
-        src: "k8s/{{ item }}.j2"
-        dest: "/root/{{ item }}"
+        src: helm-values.yaml.j2
+        dest: "/root/helm-values.yaml"
         owner: root
         group: root
         mode: "0644"
-      loop:
-        - letsencrypt-issuer.yaml
-        - pdns-deployment.yaml
-        - postgres-deployment.yaml
-        - dynamic-zones-deployment.yaml
-        - self-service-ui.yaml
-      tags: [apply_manifests]
+      tags: [helm_deploy]
 
     # -----------------------------------------------------------------
-    # --- Apply Kubernetes Manifests using the k8s module ---
+    # --- Deploy with Helm Chart
     # -----------------------------------------------------------------
-    - name: Apply templated Kubernetes manifests via k8s module
-      kubernetes.core.k8s:
+    - name: Deploy pdns-cloud Helm chart
+      kubernetes.core.helm:
+        name: cloud-self-service
+        chart_ref: /root/helm-chart
+        release_namespace: default
+        kubeconfig: "{{ kubeconfig_root }}"
+        values_files:
+          - /root/helm-values.yaml
         state: present
-        src: "/root/{{ item }}"
-        kubeconfig: "{{ kubeconfig_path }}"
-      loop:
-        - letsencrypt-issuer.yaml
-        - pdns-deployment.yaml
-        - postgres-deployment.yaml
-        - dynamic-zones-deployment.yaml
-        - self-service-ui.yaml
-      tags: [apply_manifests]
+        atomic: true
+      tags: [helm_deploy]
