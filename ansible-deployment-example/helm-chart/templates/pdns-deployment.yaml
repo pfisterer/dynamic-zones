@@ -106,6 +106,8 @@ spec:
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
+annotations:
+  helm.sh/resource-policy: keep
 metadata:
   name: {{ $pvcName }}
   namespace: {{ .Release.Namespace }}
@@ -114,7 +116,6 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  reclaimPolicy: Retain
   resources:
     requests:
       storage: {{ .Values.powerDNS.persistence.size }}

@@ -64,7 +64,9 @@ spec:
   storage:
     size: {{ .Values.database.persistence.size }}
     storageClass: {{ .Values.database.persistence.storageClass }}
-  
+    pvcRetention:
+      onClusterDeletion: "retain" 
+      onInstanceDeletion: "retain"  
   # Admin credentials
   superuserSecret:
     name: {{ $adminSecretName }}
