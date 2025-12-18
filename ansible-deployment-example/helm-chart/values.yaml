@@ -1,0 +1,135 @@
+# Self-Service UI Configuration
+selfServiceUI:
+  version: "latest"
+  hostname: "self-service-ui.example.com"
+  replicas: 1
+  imagePullPolicy: "Always"
+  image: "ghcr.io/pfisterer/self-service-ui"
+
+# Dynamic Zones API Configuration
+dynamicZonesAPI:
+  version: "latest"
+  hostname: "dyndnsapi.example.com"
+  replicas: 1
+  imagePullPolicy: "Always"
+  image: "ghcr.io/pfisterer/dynamic-zones"
+  apiMode: "development"
+  apiTokenTtlHours: 8760 # 1 year
+  apiBindString: "" # Optional
+  apiBaseUrl: "" # Will default to https://<hostname>
+  # Database configuration for this API
+  database:
+    type: "postgres"
+  # Upstream DNS Configuration (RFC 2136 Updates)
+  upstreamDNS:
+    server: "ns.example.de"
+    port: 53
+    tsigName: "cloud-ns.example.de"
+    tsigAlgorithm: "hmac-sha256"
+    tsigSecret: "some-base64-secret"
+    zone: "cloud-ns.example.de"
+    name: "ns"
+    ttl: 60
+    updateInterval: 300
+  # Zone Provider Configuration
+  zoneProvider:
+    type: "script" # "fixed" or "script" or "webhook"
+    defaultAdminTsigName: ""
+    defaultAdminTsigKey: ""
+    defaultAdminTsigAlgorithm: ""
+    defaultRecords: ""
+    # Only used if type == fixed
+    fixed:
+      domainSuffixes: "users.example.cloud"
+      domainSoa: "users.example.cloud"
+    # Only used if type == webhook
+    webhook:
+      url: ""
+      bearerToken: ""
+    # Only used if type == script
+    script: |
+      function getUserZones(user) {
+          if (!user || !user.email) {
+              console.warn("getUserZones called with missing user or email.");
+              return [];
+          }
+
+          const email = user.email.toLowerCase();
+          const dhbwRegExp = /@dhbw(-.*)?.de$/i;
+
+          let allowedZones = [{ zone: "no-valid-zone-available.example.com",
+                                zone_soa: "no-valid-zone-available.example.com" }];
+
+          // User is part of a DHBW domain
+          if (dhbwRegExp.test(email)) {
+              const zone = makeDnsCompliantGo(email) + ".users.dhbw.cloud"
+              allowedZones = [{ zone: zone, zone_soa: zone }];
+          }
+
+          console.log(`User ${email} allowed zones:`, allowedZones);
+          return allowedZones;
+      }
+
+      function isAllowedZone(user, zone) {
+          const allowedZones = getUserZones(user);
+          const firstMatch = allowedZones.find(zr => zr.zone === zone);
+
+          const retValue = {
+              isAllowed: firstMatch != undefined,
+              errorMessage: "",
+              zoneResponse: firstMatch || {}
+          }
+
+          console.log(`isAllowedZone for user ${user.email} and zone ${zone}:`, retValue);
+          return retValue;
+      }
+
+# PowerDNS Configuration
+powerDNS:
+  apiKey: "my-api-key"
+  vhost: "localhost"
+  logLevel: 7
+  # Server configuration
+  server:
+    ip: "141.1.2.3"
+    port: 53
+  persistence:
+    storageClass: "local-path"
+    size: 10Gi
+
+# Database Configuration (PostgreSQL via CloudNativePG)
+database:
+  name: "dynamic_zones"
+  username: "dynamic_zones"
+  password: "changeme"
+  adminUsername: "root"
+  adminPassword: "changeme"
+  persistence:
+    storageClass: "local-path"
+    size: 20Gi
+
+# OIDC/Auth Configuration
+auth:
+  provider: "oidc" # or 'none'
+  oidc:
+    issuerUrl: "https://sso.example.cloud/realms/example"
+    clientId: "example-cloud-dns"
+
+# Cert Manager Configuration
+certManager:
+  enabled: true
+  email: "admin@example.com"
+  clusterIssuer: "letsencrypt-production"
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+# External DNS Configuration (optional)
+externalDNS:
+  imageVersion: ""

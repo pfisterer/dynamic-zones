@@ -1,0 +1,212 @@
+{{- /* 1. Scope Variables: Define shared dynamic-zones context */ -}}
+{{- $comp := dict "context" . "component" "dynamic-zones" -}}
+{{- $name := include "cloud-self-service.componentName" $comp -}}
+{{- $labels := include "cloud-self-service.labels" $comp -}}
+{{- $selectors := include "cloud-self-service.selectorLabels" $comp -}}
+
+{{- /* 2. Resource Name Lookups */ -}}
+{{- $scriptConfigName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "script-provider") -}}
+{{- $tlsSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "tls") -}}
+{{- $pdnsSvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "api") -}}
+
+{{- /* 3. Database Connection Logic */ -}}
+{{- $pgComp := dict "context" . "component" "postgres" -}}
+{{- $pgBaseName := include "cloud-self-service.componentName" $pgComp -}}
+{{- $pgHost := printf "%s-rw" $pgBaseName -}}
+{{- $pgUser := .Values.database.username -}}
+{{- $pgPass := .Values.database.password -}}
+{{- $pgDB := .Values.database.name -}}
+{{- $defaultConn := printf "host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable" $pgHost $pgUser $pgPass $pgDB -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- include "cloud-self-service.rolloutAnnotations" . | nindent 4 }}
+    keel.sh/policy: all
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 60m"
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  replicas: {{ .Values.dynamicZonesAPI.replicas }}
+  selector:
+    matchLabels:
+      {{- $selectors | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "cloud-self-service.rolloutAnnotations" . | nindent 8 }}
+      labels:
+        {{- $selectors | nindent 8 }}
+    spec:
+      {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+      volumes:
+        - name: script-provider
+          configMap:
+            name: {{ $scriptConfigName }}
+      {{- end }}
+      containers:
+        - name: dynamic-zones
+          image: {{ .Values.dynamicZonesAPI.image }}:{{ .Values.dynamicZonesAPI.version }}
+          imagePullPolicy: {{ .Values.dynamicZonesAPI.imagePullPolicy | default "Always" }}
+          ports:
+            - containerPort: 8082
+          {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+          volumeMounts:
+            - name: script-provider
+              mountPath: /app/zone-providers/zone_provider.js
+              subPath: zone_provider.js
+          {{- end }}
+          env:
+            {{- if .Values.dynamicZonesAPI.apiMode }}
+            - name: API_MODE
+              value: {{ .Values.dynamicZonesAPI.apiMode | quote }}
+            {{- end }}
+            
+            # Auth Configuration
+            {{- if eq .Values.auth.provider "oidc" }}
+            - name: API_AUTH_PROVIDER
+              value: "oidc"
+            - name: OIDC_ISSUER_URL
+              value: {{ .Values.auth.oidc.issuerUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            {{- end }}
+
+            # Zone Provider Settings
+            - name: ZONE_PROVIDER_TYPE
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.type | quote }}
+            {{- if .Values.dynamicZonesAPI.zoneProvider.defaultRecords }}
+            - name: ZONE_PROVIDER_DEFAULT_RECORDS
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultRecords | quote }}
+            {{- end }}
+
+            {{- if .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigName }}
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigName | quote }}
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigKey | quote }}
+            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_ALG
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigAlgorithm | quote }}
+            {{- end }}
+
+            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "fixed" }}
+            - name: ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.fixed.domainSuffixes | quote }}
+            - name: ZONE_PROVIDER_FIXED_DOMAIN_SOA
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.fixed.domainSoa | quote }}
+            {{- end }}
+
+            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "webhook" }}
+            - name: ZONE_PROVIDER_WEBHOOK_URL
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.webhook.url | quote }}
+            - name: ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN
+              value: {{ .Values.dynamicZonesAPI.zoneProvider.webhook.bearerToken | quote }}
+            {{- end }}
+
+            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+            - name: ZONE_PROVIDER_SCRIPT_PATH
+              value: "/app/zone-providers/zone_provider.js"
+            {{- end }}
+
+            # Database Connection
+            - name: DB_TYPE
+              value: {{ .Values.dynamicZonesAPI.database.type | default "postgres" | quote }}
+            - name: DB_CONNECTION_STRING
+              value: {{ default $defaultConn .Values.dynamicZonesAPI.database.connectionString | quote }}
+
+            # PowerDNS Integration
+            - name: PDNS_URL
+              value: {{ printf "http://%s:8080" $pdnsSvcName | quote }}
+            - name: PDNS_VHOST
+              value: {{ .Values.powerDNS.vhost | quote }}
+            - name: PDNS_API_KEY
+              value: "{{ .Values.powerDNS.apiKey | trim }}"
+            - name: PDNS_SERVER_ADDRESS
+              value: {{ .Values.powerDNS.server.ip | quote }}
+            - name: PDNS_SERVER_PORT
+              value: {{ .Values.powerDNS.server.port | quote }}
+            - name: PDNS_SERVER_DEFAULT_TTL
+              value: "60"
+
+            - name: EXTERNAL_DNS_IMAGE_VERSION
+              value: {{ .Values.externalDNS.imageVersion | quote }}
+            - name: API_BASE_URL
+              value: {{ printf "https://%s" .Values.dynamicZonesAPI.hostname | quote }}
+            - name: API_TOKEN_TTL_HOURS
+              value: {{ .Values.dynamicZonesAPI.apiTokenTtlHours | default "24" | quote }}
+
+            {{- if .Values.dynamicZonesAPI.upstreamDNS.server }}
+            # Upstream DNS
+            - name: UPSTREAM_DNS_SERVER
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.server | quote }}
+            - name: UPSTREAM_DNS_PORT
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.port | default "53" | quote }}
+            - name: UPSTREAM_DNS_ZONE
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.zone | quote }}
+            - name: UPSTREAM_DNS_NAME
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.name | quote }}
+            {{- end }}
+
+---
+{{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $scriptConfigName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+data:
+  zone_provider.js: |
+{{ .Values.dynamicZonesAPI.zoneProvider.script | indent 4 }}
+---
+{{- end }}
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  selector:
+    {{- $selectors | nindent 4 }}
+  ports:
+    - protocol: TCP
+      port: 8082
+      targetPort: 8082
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.dynamicZonesAPI.hostname | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: 8082
+  tls:
+    - hosts:
+        - {{ .Values.dynamicZonesAPI.hostname | quote }}
+      secretName: {{ $tlsSecretName }}

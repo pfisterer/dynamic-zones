@@ -18,6 +18,15 @@
     
   tasks:
     # -----------------------------------------------------------------
+    # --- Install helm-diff plugin
+    # -----------------------------------------------------------------
+    - name: Install helm diff plugin
+      kubernetes.core.helm_plugin:
+        plugin_path: https://github.com/databus23/helm-diff
+        state: present
+      tags: [prerequisites]  
+
+    # -----------------------------------------------------------------
     # ClusterRoleBinding for ServiceAccount (rds-admin-binding)
     # -----------------------------------------------------------------
     - name: Ensure rds-admin-binding ClusterRoleBinding exists
@@ -81,6 +90,27 @@
         atomic: true
 
     # -----------------------------------------------------------------
+    # --- Clean up stuck Helm release
+    # -----------------------------------------------------------------
+    - name: Clean up stuck Helm release
+      block:
+        - name: Check Helm release status
+          ansible.builtin.shell: | 
+            helm status cloud-self-service -n default --kubeconfig "{{ kubeconfig_root }}"
+          register: helm_status
+          failed_when: false
+          changed_when: "'pending' in helm_status.stderr or 'pending' in helm_status.stdout"
+
+        - name: Remove stuck pending release
+          ansible.builtin.shell: |
+            # Find the highest numbered secret for this release and delete it
+            SECRET=$(kubectl get secret  --kubeconfig "{{ kubeconfig_root }}" -n default -l owner=helm,name=cloud-self-service --sort-by=.metadata.creationTimestamp -o name | tail -n 1)
+            kubectl delete $SECRET -n default  --kubeconfig "{{ kubeconfig_root }}"
+          when: "'pending' in helm_status.stderr or 'pending' in helm_status.stdout"
+      tags: [helm_deploy]
+
+
+    # -----------------------------------------------------------------
     # --- Copy Helm Chart to Remote
     # -----------------------------------------------------------------
     - name: Copy Helm chart directory to remote
@@ -92,30 +122,51 @@
         rsync_opts:
           - "--chown=root:root"
       tags: [helm_deploy]
+      register: chart_copy
 
     # -----------------------------------------------------------------
     # --- Create Helm Values File from Ansible Variables
     # -----------------------------------------------------------------
-    - name: Create Helm values file from template
-      ansible.builtin.template:
-        src: helm-values.yaml.j2
-        dest: "/root/helm-values.yaml"
+    - name: Generate configuration from variable
+      ansible.builtin.copy:
+        content: "{{ helm_values | to_nice_yaml }}"
+        dest: /root/helm-values.yaml
         owner: root
-        group: root
-        mode: "0644"
+        group: root 
+        mode: '0644'
       tags: [helm_deploy]
+      register: values_copy
 
     # -----------------------------------------------------------------
     # --- Deploy with Helm Chart
     # -----------------------------------------------------------------
     - name: Deploy pdns-cloud Helm chart
       kubernetes.core.helm:
-        name: cloud-self-service
+        name: dhbwcloud
         chart_ref: /root/helm-chart
         release_namespace: default
         kubeconfig: "{{ kubeconfig_root }}"
         values_files:
           - /root/helm-values.yaml
         state: present
+        wait: true
         atomic: true
+      register: helm_deploy_result
       tags: [helm_deploy]
+
+    # -----------------------------------------------------------------
+    # --- Enforce restart if files changed but Helm had no changes
+    # -----------------------------------------------------------------
+    - name: Force restart release when chart/values changed but Helm no-op
+      ansible.builtin.shell: |
+        set -e
+        kubectl rollout restart deploy -l app.kubernetes.io/instance=dhbwcloud -n default --kubeconfig "{{ kubeconfig_root }}" || true
+        kubectl rollout restart statefulset -l app.kubernetes.io/instance=dhbwcloud -n default --kubeconfig "{{ kubeconfig_root }}" || true
+        kubectl rollout restart daemonset -l app.kubernetes.io/instance=dhbwcloud -n default --kubeconfig "{{ kubeconfig_root }}" || true
+      when:
+        - not helm_deploy_result.changed
+        - chart_copy.changed or values_copy.changed
+      changed_when: true
+      tags: [helm_deploy]
+
+

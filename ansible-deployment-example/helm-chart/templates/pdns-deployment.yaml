@@ -1,0 +1,162 @@
+{{- /* 1. Scope Variables: Define shared powerdns context */ -}}
+{{- $comp := dict "context" . "component" "powerdns" -}}
+{{- $pdnsName := include "cloud-self-service.componentName" $comp -}}
+{{- $labels := include "cloud-self-service.labels" $comp -}}
+{{- $selectors := include "cloud-self-service.selectorLabels" $comp -}}
+
+{{- /* Pre-calculate resource names for the various PDNS sub-components */ -}}
+{{- $configName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "config") -}}
+{{- $pvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "data-pvc") -}}
+{{- $apiSvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "api") -}}
+{{- $dnsSvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "dns") -}}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $configName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+data:
+  pdns.conf: |
+    # PowerDNS configuration file
+    local-address=0.0.0.0
+    local-port=53
+    loglevel={{ .Values.powerDNS.logLevel | default 4 }}
+
+    # SQLite3
+    launch=gsqlite3
+    gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+
+    # API
+    webserver-address=0.0.0.0
+    webserver-port=8080
+    webserver-allow-from=0.0.0.0/0
+    webserver-loglevel=normal
+    api=yes
+    api-key={{ .Values.powerDNS.apiKey | trim }}
+
+    # DNS Update
+    dnsupdate=yes
+    allow-dnsupdate-from=
+    dnsupdate-require-tsig=true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $pdnsName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # Required because of SQLite RWO volume
+  selector:
+    matchLabels:
+      {{- $selectors | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "cloud-self-service.rolloutAnnotations" . | nindent 8 }}
+      labels:
+        {{- $selectors | nindent 8 }}
+    spec:
+      initContainers:
+        - name: copy-sqlite
+          image: powerdns/pdns-auth-master
+          command: ["sh", "-c"]
+          args:
+            - |
+              if [ ! -f /mnt/pdns.sqlite3 ]; then
+                cp /var/lib/powerdns/pdns.sqlite3 /mnt/
+              fi
+          volumeMounts:
+            - name: pdns-data
+              mountPath: /mnt
+      containers:
+        - name: powerdns
+          image: powerdns/pdns-auth-master
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api-http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: pdns-conf
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+            - name: pdns-data
+              mountPath: /var/lib/powerdns
+      volumes:
+        - name: pdns-conf
+          configMap:
+            name: {{ $configName }}
+        - name: pdns-data
+          persistentVolumeClaim:
+            claimName: {{ $pvcName }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $pvcName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  reclaimPolicy: Retain
+  resources:
+    requests:
+      storage: {{ .Values.powerDNS.persistence.size }}
+  {{- if .Values.powerDNS.persistence.storageClass }}
+  storageClassName: {{ .Values.powerDNS.persistence.storageClass }}
+  {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $apiSvcName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  selector:
+    {{- $selectors | nindent 4 }}
+  ports:
+    - name: api
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $dnsSvcName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  selector:
+    {{- $selectors | nindent 4 }}
+  type: LoadBalancer
+  ports:
+    - name: dns-udp
+      protocol: UDP
+      port: 53
+      targetPort: 53
+    - name: dns-tcp
+      protocol: TCP
+      port: 53
+      targetPort: 53

@@ -1,0 +1,77 @@
+{{- /* 1. Scope Variables: Define shared postgres context */ -}}
+{{- $comp := dict "context" . "component" "postgres" -}}
+{{- $postgresName := include "cloud-self-service.componentName" $comp -}}
+{{- $labels := include "cloud-self-service.labels" $comp -}}
+
+{{- /* Pre-calculate Secret and Database names for readability */ -}}
+{{- $adminSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-admin") -}}
+{{- $userSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-user") -}}
+{{- $dbResourceName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "database") -}}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $adminSecretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+type: Opaque
+data:
+  username: {{ .Values.database.adminUsername | b64enc | quote }}
+  password: {{ .Values.database.adminPassword | b64enc | quote }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $userSecretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+type: Opaque
+data:
+  username: {{ .Values.database.username | b64enc | quote }}
+  password: {{ .Values.database.password | b64enc | quote }}
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $postgresName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  instances: 1
+  storage:
+    size: {{ .Values.database.persistence.size }}
+    storageClass: {{ .Values.database.persistence.storageClass }}
+  
+  # Admin credentials
+  superuserSecret:
+    name: {{ $adminSecretName }}
+
+  # Managed Roles: CNPG creates the user/role before the database
+  managed:
+    roles:
+      - name: {{ .Values.database.username | quote }}
+        login: true
+        passwordSecret:
+          name: {{ $userSecretName }}
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $dbResourceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  cluster:
+    name: {{ $postgresName }}
+  name: "{{ .Values.database.name }}"
+  owner: "{{ .Values.database.username }}"
+  secretRef:
+    name: {{ $userSecretName }}
