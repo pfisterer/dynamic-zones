@@ -13,11 +13,12 @@
 {{- $pgComp := dict "context" . "component" "postgres" -}}
 {{- $pgBaseName := include "cloud-self-service.componentName" $pgComp -}}
 {{- $pgHost := printf "%s-rw" $pgBaseName -}}
-{{- $pgUser := .Values.database.username -}}
-{{- $pgPass := .Values.database.password -}}
-{{- $pgDB := .Values.database.name -}}
+{{- $pgUser := .Values.dynamicZonesAPI.database.username -}}
+{{- $pgPass := .Values.dynamicZonesAPI.database.password -}}
+{{- $pgDB := .Values.dynamicZonesAPI.database.name -}}
 {{- $defaultConn := printf "host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable" $pgHost $pgUser $pgPass $pgDB -}}
 
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,7 +30,7 @@ metadata:
     keel.sh/trigger: poll
     keel.sh/pollSchedule: "@every 60m"
   labels:
-    {{- $labels | nindent 4 }}
+    {{ $labels | nindent 4 }}
 spec:
   replicas: {{ .Values.dynamicZonesAPI.replicas }}
   selector:
@@ -65,7 +66,7 @@ spec:
             - name: API_MODE
               value: {{ .Values.dynamicZonesAPI.apiMode | quote }}
             {{- end }}
-            
+
             # Auth Configuration
             {{- if eq .Values.auth.provider "oidc" }}
             - name: API_AUTH_PROVIDER
@@ -79,6 +80,7 @@ spec:
             # Zone Provider Settings
             - name: ZONE_PROVIDER_TYPE
               value: {{ .Values.dynamicZonesAPI.zoneProvider.type | quote }}
+
             {{- if .Values.dynamicZonesAPI.zoneProvider.defaultRecords }}
             - name: ZONE_PROVIDER_DEFAULT_RECORDS
               value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultRecords | quote }}
@@ -101,10 +103,13 @@ spec:
             {{- end }}
 
             {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "webhook" }}
+            {{- $selfServiceComp := dict "context" . "component" "self-service-api" -}}
+            {{- $selfServiceName := include "cloud-self-service.componentName" $selfServiceComp -}}
+            {{- $webhookUrl := .Values.selfServiceAPI.dnsPolicy.webhookApiUrl | default (printf "http://%s:8083/v1/webhook/dns-policy" $selfServiceName) }}
             - name: ZONE_PROVIDER_WEBHOOK_URL
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.webhook.url | quote }}
+              value: {{ $webhookUrl | quote }}
             - name: ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.webhook.bearerToken | quote }}
+              value: {{ .Values.selfServiceAPI.dnsPolicy.webhookApiKey | quote }}
             {{- end }}
 
             {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
@@ -114,7 +119,7 @@ spec:
 
             # Database Connection
             - name: DB_TYPE
-              value: {{ .Values.dynamicZonesAPI.database.type | default "postgres" | quote }}
+              value: {{ .Values.dynamicZonesAPI.database.type | quote }}
             - name: DB_CONNECTION_STRING
               value: {{ default $defaultConn .Values.dynamicZonesAPI.database.connectionString | quote }}
 
@@ -124,7 +129,7 @@ spec:
             - name: PDNS_VHOST
               value: {{ .Values.powerDNS.vhost | quote }}
             - name: PDNS_API_KEY
-              value: "{{ .Values.powerDNS.apiKey | trim }}"
+              value: {{ .Values.powerDNS.apiKey | trim | quote }}
             - name: PDNS_SERVER_ADDRESS
               value: {{ .Values.powerDNS.server.ip | quote }}
             - name: PDNS_SERVER_PORT
@@ -132,8 +137,6 @@ spec:
             - name: PDNS_SERVER_DEFAULT_TTL
               value: "60"
 
-            - name: EXTERNAL_DNS_IMAGE_VERSION
-              value: {{ .Values.externalDNS.imageVersion | quote }}
             - name: API_BASE_URL
               value: {{ printf "https://%s" .Values.dynamicZonesAPI.hostname | quote }}
             - name: API_TOKEN_TTL_HOURS
@@ -162,7 +165,7 @@ metadata:
     {{- $labels | nindent 4 }}
 data:
   zone_provider.js: |
-{{ .Values.dynamicZonesAPI.zoneProvider.script | indent 4 }}
+    {{ .Values.dynamicZonesAPI.zoneProvider.script | indent 4 }}
 ---
 {{- end }}
 

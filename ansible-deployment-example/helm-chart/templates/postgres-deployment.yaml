@@ -5,8 +5,12 @@
 
 {{- /* Pre-calculate Secret and Database names for readability */ -}}
 {{- $adminSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-admin") -}}
-{{- $userSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-user") -}}
-{{- $dbResourceName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "database") -}}
+
+{{- $dynDnsUserSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-dyndns-user") -}}
+{{- $dynDnsDbResourceName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "dyndns-database") -}}
+
+{{- $selfServiceUserSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "db-credentials-selfservice-user") -}}
+{{- $selfServiceDbResourceName := include "cloud-self-service.resourceName" (dict "context" . "component" "postgres" "name" "selfservice-database") -}}
 
 ---
 apiVersion: v1
@@ -25,14 +29,27 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ $userSecretName }}
+  name: {{ $dynDnsUserSecretName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- $labels | nindent 4 }}
 type: Opaque
 data:
-  username: {{ .Values.database.username | b64enc | quote }}
-  password: {{ .Values.database.password | b64enc | quote }}
+  username: {{ .Values.dynamicZonesAPI.database.username | b64enc | quote }}
+  password: {{ .Values.dynamicZonesAPI.database.password | b64enc | quote }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $selfServiceUserSecretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+type: Opaque
+data:
+  username: {{ .Values.selfServiceAPI.database.username | b64enc | quote }}
+  password: {{ .Values.selfServiceAPI.database.password | b64enc | quote }}
 
 ---
 apiVersion: postgresql.cnpg.io/v1
@@ -55,23 +72,44 @@ spec:
   # Managed Roles: CNPG creates the user/role before the database
   managed:
     roles:
-      - name: {{ .Values.database.username | quote }}
+      - name: {{ .Values.dynamicZonesAPI.database.username | quote }}
         login: true
         passwordSecret:
-          name: {{ $userSecretName }}
+          name: {{ $dynDnsUserSecretName }}
+          
+      - name: {{ .Values.selfServiceAPI.database.username | quote }}
+        login: true
+        passwordSecret:
+          name: {{ $selfServiceUserSecretName }}
 
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
-  name: {{ $dbResourceName }}
+  name: {{ $dynDnsDbResourceName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- $labels | nindent 4 }}
 spec:
   cluster:
     name: {{ $postgresName }}
-  name: "{{ .Values.database.name }}"
-  owner: "{{ .Values.database.username }}"
+  name: "{{ .Values.dynamicZonesAPI.database.name }}"
+  owner: "{{ .Values.dynamicZonesAPI.database.username }}"
   secretRef:
-    name: {{ $userSecretName }}
+    name: {{ $dynDnsUserSecretName }}
+    
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $selfServiceDbResourceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  cluster:
+    name: {{ $postgresName }}
+  name: "{{ .Values.selfServiceAPI.database.name }}"
+  owner: "{{ .Values.selfServiceAPI.database.username }}"
+  secretRef:
+    name: {{ $selfServiceUserSecretName }}
