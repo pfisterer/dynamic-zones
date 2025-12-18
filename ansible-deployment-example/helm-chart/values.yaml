@@ -1,34 +1,63 @@
+---
+#------------------------------------
 # Self-Service UI Configuration
+#------------------------------------
 selfServiceUI:
-  version: "latest"
   hostname: "self-service-ui.example.com"
   replicas: 1
   imagePullPolicy: "Always"
   image: "ghcr.io/pfisterer/self-service-ui"
+  version: "latest"
 
+#------------------------------------
+# Cloud Self-Service API Configuration
+#------------------------------------
+selfServiceAPI:
+  apiMode: "development"
+  hostname: "example.local"
+  replicas: 1
+  imagePullPolicy: "Always"
+  image: "ghcr.io/pfisterer/self-service-api"
+  version: latest
+
+  database:
+    type: "postgres"
+    name: "cloud_self_service"
+    username: "cloud_self_service"
+    password: "changeme"
+
+  dnsPolicy:
+    superAdminEmails: your_mail@example.com, second_mail@example.com
+    webhookApiKey: supersecret
+
+#------------------------------------
 # Dynamic Zones API Configuration
+#------------------------------------
 dynamicZonesAPI:
+  image: ghcr.io/pfisterer/dynamic-zones
+  imagePullPolicy: Always
   version: "latest"
   hostname: "dyndnsapi.example.com"
   replicas: 1
-  imagePullPolicy: "Always"
-  image: "ghcr.io/pfisterer/dynamic-zones"
-  apiMode: "development"
+  apiMode: production
   apiTokenTtlHours: 8760 # 1 year
   apiBindString: "" # Optional
   apiBaseUrl: "" # Will default to https://<hostname>
   # Database configuration for this API
   database:
-    type: "postgres"
+    type: postgres
+    name: dynamic_zones
+    username: dynamic_zones
+    password: changeme
   # Upstream DNS Configuration (RFC 2136 Updates)
   upstreamDNS:
-    server: "ns.example.de"
+    server: ns.example.de
     port: 53
-    tsigName: "cloud-ns.example.de"
-    tsigAlgorithm: "hmac-sha256"
-    tsigSecret: "some-base64-secret"
-    zone: "cloud-ns.example.de"
-    name: "ns"
+    tsigName: cloud-ns.example.de
+    tsigAlgorithm: hmac-sha256
+    tsigSecret: some-base64-secret
+    zone: cloud-ns.example.de
+    name: ns
     ttl: 60
     updateInterval: 300
   # Zone Provider Configuration
@@ -84,52 +113,55 @@ dynamicZonesAPI:
           return retValue;
       }
 
+#------------------------------------
 # PowerDNS Configuration
+#------------------------------------
 powerDNS:
-  apiKey: "my-api-key"
-  vhost: "localhost"
+  apiKey: my-api-key
+  vhost: localhost
   logLevel: 7
   # Server configuration
   server:
     ip: "141.1.2.3"
     port: 53
   persistence:
-    storageClass: "local-path"
+    storageClass: local-path
     size: 10Gi
 
+#------------------------------------
 # Database Configuration (PostgreSQL via CloudNativePG)
+#------------------------------------
 database:
-  name: "dynamic_zones"
-  username: "dynamic_zones"
-  password: "changeme"
-  adminUsername: "root"
-  adminPassword: "changeme"
+  adminUsername: root
+  adminPassword: changeme
   persistence:
-    storageClass: "local-path"
+    storageClass: local-path
     size: 20Gi
 
+#------------------------------------
 # OIDC/Auth Configuration
+#------------------------------------
 auth:
   provider: "oidc" # or 'none'
   oidc:
-    issuerUrl: "https://sso.example.cloud/realms/example"
-    clientId: "example-cloud-dns"
+    issuerUrl: https://sso.example.cloud/realms/example
+    clientId: example-cloud-dns
 
+#------------------------------------
 # Cert Manager Configuration
+#------------------------------------
 certManager:
   enabled: true
-  email: "admin@example.com"
-  clusterIssuer: "letsencrypt-production"
+  email: admin@example.com
+  clusterIssuer: letsencrypt-production
 
+#------------------------------------
 # Ingress Configuration
+#------------------------------------
 ingress:
   enabled: true
-  className: "nginx"
+  className: nginx
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-production"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-
-# External DNS Configuration (optional)
-externalDNS:
-  imageVersion: ""
