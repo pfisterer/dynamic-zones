@@ -17,7 +17,7 @@ selfServiceAPI:
   hostname: "example.local"
   replicas: 1
   imagePullPolicy: "Always"
-  image: "ghcr.io/pfisterer/self-service-api"
+  image: "ghcr.io/pfisterer/cloud-self-service-api"
   version: latest
 
   database:
