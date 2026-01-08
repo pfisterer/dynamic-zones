@@ -13,4 +13,4 @@ node_modules/
 __*
 ansible-deployment-example/inventory.yaml
 kubeconfig-*.yaml
-gen/
+internal/generated_docs/

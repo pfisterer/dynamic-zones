@@ -24,8 +24,7 @@ FROM alpine:latest AS final
 WORKDIR /app
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/build/dynamic-zones /app/
-COPY --from=builder /app/build/gen/ /app/build/gen/
+COPY --from=builder /app/tmp/build/dynamic-zones /app/
 
 # Expose port
 EXPOSE 8082

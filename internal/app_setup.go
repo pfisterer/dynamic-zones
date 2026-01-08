@@ -61,8 +61,7 @@ func RunApplication() {
 	logger, log := CreateAppLogger(appConfig)
 	defer logger.Sync()
 
-	// Create components
-
+	// Powerds client
 	thisNsServer := fmt.Sprintf("%s.%s", appConfig.UpstreamDns.Name, appConfig.UpstreamDns.Zone)
 
 	pdns, err := zones.NewPowerDnsClient(
@@ -76,13 +75,24 @@ func RunApplication() {
 		log.Fatalf("Failed to create PowerDNS client: %v", err)
 	}
 
+	// Create storage component
 	db, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
+	// If requested, insert dummy data into the database
+	if appConfig.DnsPolicyConfig.AddDummyData {
+		err = db.PolicyInsertDummyData()
+		if err != nil {
+			log.Fatalf("Failed to insert dummy data into the database: %v", err)
+		}
+	}
+
+	// Zone Provider
 	zoneProvider := zones.NewUserZoneProvider(&appConfig, logger)
 
+	// Prepare application data
 	appData := AppData{
 		Config:       appConfig,
 		ZoneProvider: zoneProvider,
@@ -106,8 +116,6 @@ func RunApplication() {
 }
 
 func setupGinWebserver(app *AppData) (router *gin.Engine) {
-	auth_config := gin.H{"auth_provider": "not configured"}
-
 	// Determine the Gin mode based on the dev_mode variable
 	gin_mode := gin.ReleaseMode
 	if app.Config.DevMode {
@@ -119,14 +127,9 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Set up the Gin router
 	router = gin.New()
 
-	//Create router group for  API routes for v1
-	apiV1Group := router.Group("/v1")
-	router.Use(cors.Default())
-
 	if app.Config.DevMode {
 		app.Log.Debugf("Completely disabling caching in development mode.")
 		router.Use(disableCachingMiddleware())
-		app.Log.Debugf("Enabling CORS origin reflection in development mode.")
 	}
 
 	// Direct Gin's standard and error output streams to our custom Zap writer
@@ -135,69 +138,30 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	gin.DefaultErrorWriter = ginLogWriter
 	router.Use(ginzap.RecoveryWithZap(app.Logger, true))
 
-	// Serve the index.html file from the embedded string
-	router.GET("/", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(helper.IndexHTML))
-	})
-
-	// Expose generated static files
-	router.Static("/client", "./build/gen/client-dist")
-	router.StaticFile("/swagger.json", "./build/gen/swagger.json")
-
-	// Inject authentication data into the context
-	switch app.Config.WebServer.AuthProvider {
-	case "fake":
-		app.Log.Warnf("Using fake authentication provider, do not use in production")
-		router.Use(auth.InjectFakeAuthMiddleware())
-		auth_config = gin.H{"auth_provider": "fake"}
-
-	case "oidc":
-		app.Log.Infof("Using OIDC authentication provider.")
-
-		oidcConfig := auth.OIDCVerifierConfig{
-			IssuerURL: app.Config.WebServer.OIDCIssuerURL,
-			ClientID:  app.Config.WebServer.OIDCClientID,
-		}
-
-		// Validate that all required OIDC environment variables are set
-		if oidcConfig.IssuerURL == "" || oidcConfig.ClientID == "" {
-			app.Log.Fatalf("OIDC verification configuration missing. Please set OIDC_ISSUER_URL and OIDC_CLIENT_ID environment variables.")
-		}
-
-		// Initialize the OIDCAuthVerifier
-		oidcAuthVerifier, err := auth.NewOIDCAuthVerifier(oidcConfig, app.Log)
-		if err != nil {
-			app.Log.Fatalf("Failed to initialize OIDCAuthVerifier: %v", err)
-		}
-
-		//apiV1Group.Use(oidcAuthVerifier.BearerTokenAuthMiddleware())
-		apiV1Group.Use(auth.CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
-
-		auth_config = gin.H{
-			"auth_provider": "oidc",
-			"issuer_url":    oidcConfig.IssuerURL,
-			"client_id":     oidcConfig.ClientID,
-		}
-
-	default:
-		app.Log.Fatalf("Unknown authentication provider '%s'. Supported providers: fake, oidc.", app.Config.WebServer.AuthProvider)
+	// Create OIDC Auth Verifier
+	oidcConfig := auth.OIDCVerifierConfig{
+		IssuerURL: app.Config.WebServer.OIDCIssuerURL,
+		ClientID:  app.Config.WebServer.OIDCClientID,
 	}
 
-	// Expose DNS server configuration
-	router.GET(("/config.json"), func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"dns_server_address": app.Config.PowerDns.DnsServerAddress,
-			"dns_server_port":    app.Config.PowerDns.DnsServerPort,
-			"version":            helper.AppVersion,
-			"auth":               auth_config,
-		})
-	})
+	oidcAuthVerifier, err := auth.NewOIDCAuthVerifier(oidcConfig, app.Log)
+	if err != nil {
+		app.Log.Fatalf("Failed to initialize OIDCAuthVerifier: %v", err)
+	}
 
-	// Create the API routes for v1
+	// Create static file server
+	homeGroup := router.Group("/")
+	homeGroup.Use(cors.Default())
+	CreateHomeRoutes(homeGroup, app)
+
+	// Create router group for  API routes for v1
+	apiV1Group := router.Group("/v1")
 	enableCorsOriginReflectionConfig(apiV1Group)
+	apiV1Group.Use(auth.CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
+	CreatePolicyApiGroup(apiV1Group, app)
 
 	return router
 }

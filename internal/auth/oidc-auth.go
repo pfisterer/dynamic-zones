@@ -12,6 +12,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const UserDataKey = "__api_userData"
+
 // OIDCVerifierConfig holds the minimal configuration for OIDC token verification.
 type OIDCVerifierConfig struct {
 	IssuerURL string

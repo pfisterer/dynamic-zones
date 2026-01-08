@@ -7,6 +7,3 @@ var ExternalDNSValuesYamlTemplate string
 
 //go:embed "index.html"
 var IndexHTML string
-
-//go:embed "VERSION"
-var AppVersion string

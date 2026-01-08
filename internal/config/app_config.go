@@ -53,12 +53,10 @@ type StorageConfig struct {
 }
 
 type WebServerConfig struct {
-	// The authentication provider to use (e.g., "oidc", "fake")
-	AuthProvider string `json:"auth_provider" validate:"oneof=fake oidc"`
 	// The OIDC issuer URL for authentication
-	OIDCIssuerURL string `json:"oidc_issuer_url" validate:"required_if=AuthProvider oidc,url"`
+	OIDCIssuerURL string `json:"oidc_issuer_url" validate:"required,url"`
 	// The OIDC client ID for authentication
-	OIDCClientID string `json:"oidc_client_id" validate:"required_if=AuthProvider oidc"`
+	OIDCClientID string `json:"oidc_client_id" validate:"required"`
 	// The bind string for the Gin web server (e.g., ":8082")
 	GinBindString string `json:"gin_bind_string" validate:"required"`
 	// The base URL for the web server (e.g., "http://localhost:8082")
@@ -107,12 +105,19 @@ type UserZoneProviderConfig struct {
 	ScriptPath string `json:"script_path" validate:"required_if=Provider script,omitempty"`
 }
 
+type DnsPolicyConfig struct {
+	SuperAdminEmails map[string]struct{} `json:"super_admin_emails"`
+	// Flag to indicate if dummy data should be added (for development/testing)
+	AddDummyData bool `json:"add_dummy_data"`
+}
+
 type AppConfig struct {
 	UpstreamDns      UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
 	PowerDns         PowerDnsConfig          `json:"powerdns_config"`
 	Storage          StorageConfig           `json:"storage_config"`
 	WebServer        WebServerConfig         `json:"webserver_config"`
 	UserZoneProvider UserZoneProviderConfig  `json:"user_zone_provider_config"`
+	DnsPolicyConfig  DnsPolicyConfig         `json:"dns_policy_config"`
 	// Flag indicating if the application is running in development mode
 	DevMode bool `json:"dev_mode"`
 }
@@ -144,17 +149,14 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			DbType:             helper.GetEnvString("DB_TYPE", "sqlite"),
 			DbConnectionString: helper.GetEnvString("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
 		},
-
 		WebServer: WebServerConfig{
-			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
-			AuthProvider:       helper.GetEnvString("API_AUTH_PROVIDER", ""),
-			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
 			OIDCIssuerURL:      helper.GetEnvString("OIDC_ISSUER_URL", ""),
 			OIDCClientID:       helper.GetEnvString("OIDC_CLIENT_ID", ""),
+			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
+			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
 			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
 			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
 		},
-
 		UserZoneProvider: UserZoneProviderConfig{
 			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME", ""),
 			DefaultAdminTsigKey:     helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY", ""),
@@ -177,6 +179,10 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			WebhookBearerToken: helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
 
 			ScriptPath: helper.GetEnvString("ZONE_PROVIDER_SCRIPT_PATH", ""),
+		},
+		DnsPolicyConfig: DnsPolicyConfig{
+			SuperAdminEmails: helper.GetEnvStringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, ",", true),
+			AddDummyData:     helper.GetEnvBool("DNS_POLICY_ADD_DUMMY_DATA", false),
 		},
 
 		DevMode: helper.GetEnvString("API_MODE", "production") == "development",
