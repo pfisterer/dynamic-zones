@@ -1,4 +1,4 @@
-package auth
+package app
 
 import (
 	"context"
@@ -13,6 +13,14 @@ import (
 )
 
 const UserDataKey = "__api_userData"
+
+// UserClaims holds the relevant user information extracted from the ID token.
+type UserClaims struct {
+	Subject           string `json:"sub"`
+	Email             string `json:"email,omitempty"`
+	PreferredUsername string `json:"preferred_username,omitempty"`
+	Name              string `json:"name,omitempty"`
+}
 
 // OIDCVerifierConfig holds the minimal configuration for OIDC token verification.
 type OIDCVerifierConfig struct {
@@ -109,5 +117,68 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 		//m.Logger.Debugf("Token verified for user '%s' (sub: %s, email: %s).", claims.PreferredUsername, claims.Subject, claims.Email)
 
 		c.Next() // Continue to the next handler in the chain
+	}
+}
+
+func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		// Allow preflight OPTIONS requests without authentication
+		if c.Request.Method == http.MethodOptions && c.GetHeader("Access-Control-Request-Headers") != "" {
+			log.Infof("Allowing pre-flight request without authentication")
+			c.Next()
+			return
+		}
+
+		// Get the Authorization header
+		authHeader := c.GetHeader("Authorization")
+
+		// Remove the bearer prefix from the Authorization header (if present)
+		const bearerPrefix = "Bearer "
+		tokenString, ok := strings.CutPrefix(authHeader, bearerPrefix)
+		if !ok {
+			log.Warnf("Missing or invalid Authorization header: %s", authHeader)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization Bearer header"})
+			return
+		}
+
+		// Check if token is an API key (starts with your prefix)
+		if strings.HasPrefix(tokenString, ApiTokenPrefix) {
+
+			// Look up the token in storage
+			token, err := store.GetToken(ctx, tokenString)
+			if err != nil {
+				log.Warnf("storage error: %v", err)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+				return
+			}
+
+			// Check if a token was found
+			if token == nil {
+				log.Warn("Invalid API token, got nil token, returning unauthorized")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
+
+			// Check whether the operation is GET (read-only) and the token is read-only
+			if c.Request.Method != http.MethodGet && token.ReadOnly {
+				log.Warnf("Attempt to use read-only token for non-GET operation: %s %s", c.Request.Method, c.Request.URL.Path)
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token is read-only"})
+				return
+			}
+
+			// Set user info in context
+			c.Set(UserDataKey, &UserClaims{
+				PreferredUsername: token.Username,
+			})
+
+			c.Next()
+			return
+		}
+
+		// Otherwise, treat it as an OIDC Bearer JWT
+		oidcVerifier.BearerTokenAuthMiddleware()(c)
+
 	}
 }

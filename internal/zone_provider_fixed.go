@@ -1,11 +1,10 @@
-package zones
+package app
 
 import (
 	"context"
 	"regexp"
 	"strings"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +41,7 @@ func NewFixedZoneProvider(suffixes, soa string, logger *zap.Logger) *FixedZonePr
 	}
 }
 
-func (m *FixedZoneProvider) GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *FixedZoneProvider) GetUserZones(ctx context.Context, user *UserClaims) ([]ZoneResponse, error) {
 	result := make([]ZoneResponse, 0, len(m.zone_suffixes))
 
 	for i, zone := range m.zone_suffixes {
@@ -58,7 +57,7 @@ func (m *FixedZoneProvider) GetUserZones(ctx context.Context, user *auth.UserCla
 	return result, nil
 }
 
-func (m *FixedZoneProvider) IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
+func (m *FixedZoneProvider) IsAllowedZone(ctx context.Context, user *UserClaims, zone string) (bool, ZoneResponse, error) {
 	userZones, err := m.GetUserZones(ctx, user)
 	if err != nil {
 		return false, ZoneResponse{}, err

@@ -7,8 +7,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/config"
-	"github.com/farberg/dynamic-zones/internal/zones"
+	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
@@ -55,7 +54,7 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 
 }
 
-func PerformSingleUpstreamDnsUpdateCheck(c *config.UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger, forceUpdate bool) error {
+func PerformSingleUpstreamDnsUpdateCheck(c *UpstreamDnsUpdateConfig, dynamicZonesDnsIPAddress net.IP, log *zap.SugaredLogger, forceUpdate bool) error {
 	log.Debug("Performing upstream DNS update check")
 
 	// Make sure FQDNs are properly formatted
@@ -66,7 +65,7 @@ func PerformSingleUpstreamDnsUpdateCheck(c *config.UpstreamDnsUpdateConfig, dyna
 	log.Debugf("FQDN setup: Zone=%s, TSIG Name=%s, DNS Record=%s", c.Zone, c.Tsig_Name, dnsNameFQDN)
 
 	// Lookup the current DNS record for the server
-	ips, err := zones.PerformALookup(c.Server, c.Port, dnsNameFQDN)
+	ips, err := helper.PerformALookup(c.Server, c.Port, dnsNameFQDN)
 	if err != nil {
 		return fmt.Errorf("failed to perform DNS lookup of %s (on DNS server %s:%d): %v", dnsNameFQDN, c.Server, c.Port, err)
 	}
@@ -100,7 +99,7 @@ func PerformSingleUpstreamDnsUpdateCheck(c *config.UpstreamDnsUpdateConfig, dyna
 	return nil
 }
 
-func addRecord(ipAddr net.IP, c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
+func addRecord(ipAddr net.IP, c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
 	remoteDnsServer := fmt.Sprintf("%s:%d", c.Server, c.Port)
 
 	if ipAddr.To4() != nil { //IPv4
@@ -110,7 +109,7 @@ func addRecord(ipAddr net.IP, c *config.UpstreamDnsUpdateConfig, recordNameFQDN 
 			toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, c.Server, c.Port, c.Zone, "update add "+recordNameFQDN+" "+fmt.Sprintf("%d", c.Ttl)+" IN A "+ipAddr.String()))
 
 		// Pass the FQDN name to the zones library
-		msg, err := zones.Rfc2136AddARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN, ipAddr.String(), uint32(c.Ttl))
+		msg, err := helper.Rfc2136AddARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN, ipAddr.String(), uint32(c.Ttl))
 		if err != nil {
 			log.Errorf("Failed to add A record for %s in zone %s: %v", recordNameFQDN, c.Zone, err)
 			return err
@@ -120,7 +119,7 @@ func addRecord(ipAddr net.IP, c *config.UpstreamDnsUpdateConfig, recordNameFQDN 
 	} else if ipAddr.To16() != nil { //IPv6
 		log.Debugf("Adding new AAAA record for %s in zone %s with address %s", recordNameFQDN, c.Zone, ipAddr)
 		// Pass the FQDN name to the zones library
-		msg, err := zones.Rfc2136AddAAAARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN, ipAddr.String(), uint32(c.Ttl))
+		msg, err := helper.Rfc2136AddAAAARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN, ipAddr.String(), uint32(c.Ttl))
 		if err != nil {
 			log.Errorf("Failed to add AAAA record for %s in zone %s: %v", recordNameFQDN, c.Zone, err)
 			return err
@@ -134,7 +133,7 @@ func addRecord(ipAddr net.IP, c *config.UpstreamDnsUpdateConfig, recordNameFQDN 
 	return nil
 }
 
-func deleteRecords(c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
+func deleteRecords(c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.SugaredLogger) error {
 	remoteDnsServer := fmt.Sprintf("%s:%d", c.Server, c.Port)
 
 	log.Debugf("Deleting existing records for %s in zone %s on server %s", recordNameFQDN, c.Zone, remoteDnsServer)
@@ -143,7 +142,7 @@ func deleteRecords(c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log
 		toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, c.Server, c.Port, c.Zone, "update delete "+recordNameFQDN))
 
 	// Delete A records
-	msgA, err := zones.Rfc2136DeleteARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN)
+	msgA, err := helper.Rfc2136DeleteARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN)
 	if err != nil {
 		log.Errorf("Failed to delete A record for %s in zone %s: %v", recordNameFQDN, c.Zone, err)
 		return err
@@ -151,7 +150,7 @@ func deleteRecords(c *config.UpstreamDnsUpdateConfig, recordNameFQDN string, log
 	log.Debugf("Successfully deleted A records for %s in zone %s: %v", recordNameFQDN, c.Zone, msgA)
 
 	// Delete AAAA records
-	msgAAAA, err := zones.Rfc2136DeleteAAAARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN)
+	msgAAAA, err := helper.Rfc2136DeleteAAAARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN)
 	if err != nil {
 		log.Errorf("Failed to delete AAAA record for %s in zone %s: %v", recordNameFQDN, c.Zone, err)
 		return err

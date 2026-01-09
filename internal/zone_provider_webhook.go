@@ -1,4 +1,4 @@
-package zones
+package app
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
 	"github.com/jellydator/ttlcache/v3"
 	"go.uber.org/zap"
 )
@@ -47,7 +46,7 @@ func NewWebhookZoneProvider(url string, bearerToken string, logger *zap.Logger) 
 	}
 }
 
-func (m *ZoneProviderWebhook) GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *ZoneProviderWebhook) GetUserZones(ctx context.Context, user *UserClaims) ([]ZoneResponse, error) {
 	cacheKey := user.PreferredUsername
 	if cacheKey == "" {
 		m.log.Error("user claims missing preferred username")
@@ -74,7 +73,7 @@ func (m *ZoneProviderWebhook) GetUserZones(ctx context.Context, user *auth.UserC
 	return result, nil
 }
 
-func (m *ZoneProviderWebhook) IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
+func (m *ZoneProviderWebhook) IsAllowedZone(ctx context.Context, user *UserClaims, zone string) (bool, ZoneResponse, error) {
 	userZones, err := m.GetUserZones(ctx, user)
 
 	//Return on error fetching zones
@@ -92,7 +91,7 @@ func (m *ZoneProviderWebhook) IsAllowedZone(ctx context.Context, user *auth.User
 	return false, ZoneResponse{}, nil
 }
 
-func (m *ZoneProviderWebhook) fetchZonesFromWebhook(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *ZoneProviderWebhook) fetchZonesFromWebhook(ctx context.Context, user *UserClaims) ([]ZoneResponse, error) {
 	// Create JSON payload
 	userJSON, err := json.Marshal(user)
 	if err != nil {

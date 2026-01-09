@@ -8,8 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/zones"
+	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"github.com/miekg/dns"
 )
@@ -136,7 +135,7 @@ func CheckTSIGRequestData(req *DNSRecordRequest) *ErrorResponse {
 // listDNSRecords handles an AXFR request for a zone, authenticated via TSIG.
 func listDNSRecords(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		zone := strings.TrimSpace(c.Query("zone"))
 		if zone == "" {
@@ -264,7 +263,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 // @Router /v1/dns/records/create [post]
 func createDNSRecord(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		var req DNSRecordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -288,16 +287,16 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 		// UPSERT = delete first, then add
 		switch strings.ToUpper(req.Type) {
 		case "A":
-			_, _ = zones.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			_, err := zones.Rfc2136AddARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
+			_, _ = helper.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
+			_, err := helper.Rfc2136AddARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 				return
 			}
 
 		case "AAAA":
-			_, _ = zones.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			_, err := zones.Rfc2136AddAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
+			_, _ = helper.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
+			_, err := helper.Rfc2136AddAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 				return
@@ -334,7 +333,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 // @Router /v1/dns/records/delete [post]
 func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		var req DNSRecordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -362,14 +361,14 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 
 		switch strings.ToUpper(req.Type) {
 		case "A":
-			_, err := zones.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
+			_, err := helper.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 				return
 			}
 
 		case "AAAA":
-			_, err := zones.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
+			_, err := helper.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 				return

@@ -1,11 +1,10 @@
-package zones
+package app
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"github.com/joeig/go-powerdns/v3"
@@ -39,7 +38,7 @@ type PowerDnsClient struct {
 	log                     *zap.SugaredLogger
 	defaultTTLSeconds       uint32
 	zoneNsNames             []string
-	defaultUserZoneRecords  []config.DefaultRecord
+	defaultUserZoneRecords  []DefaultRecord
 	defaultAdminTsigKeyName string
 	defaultAdminTsigKey     string
 	defaultAdminTsigAlg     string
@@ -47,7 +46,7 @@ type PowerDnsClient struct {
 
 func NewPowerDnsClient(url, vhost, apiKey string, defaultTtlSecs uint32, zoneNsNames []string,
 	defaultAdminTsigKeyName, defaultAdminTsigKey, defaultAdminTsigAlg string,
-	defaultUserZoneRecords []config.DefaultRecord,
+	defaultUserZoneRecords []DefaultRecord,
 	log *zap.SugaredLogger) (*PowerDnsClient, error) {
 	pdns := powerdns.New(url, vhost, powerdns.WithAPIKey(apiKey))
 

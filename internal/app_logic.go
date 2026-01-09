@@ -3,15 +3,17 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
-	"github.com/farberg/dynamic-zones/internal/zones"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const AppLogicKey = "AppLogicKey"
@@ -22,7 +24,121 @@ func InjectAppLogic(app *AppData) gin.HandlerFunc {
 	}
 }
 
-func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVersion string) (int, any, error) {
+// PolicyRuleRequest is used for create/update operations.
+type PolicyRuleRequest struct {
+	ZonePattern      string `json:"zone_pattern" binding:"required"`
+	ZoneSoa          string `json:"zone_soa" binding:"required"`
+	TargetUserFilter string `json:"target_user_filter" binding:"required"`
+	Description      string `json:"description"`
+}
+
+// PolicyRulesResponse wraps policy rules for list endpoint.
+type PolicyRulesResponse struct {
+	EditAllowed bool         `json:"edit_allowed"`
+	Rules       []PolicyRule `json:"rules"`
+}
+
+func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesResponse, error) {
+	// Get all rules from storage
+	rules, err := app.Storage.PolicyGetAll()
+	if err != nil {
+		app.Log.Errorf("Error retrieving policy rules: %v", err)
+		return nil, err
+	}
+
+	// Filter the rules based on user email
+	is_super_admin := isSuperAdmin(app, user)
+
+	if !is_super_admin {
+		filteredRules := make([]PolicyRule, 0)
+		for _, rule := range rules {
+			if canAccess, err := userCanAccessRule(user.Email, rule.TargetUserFilter); err == nil && canAccess {
+				filteredRules = append(filteredRules, rule)
+			}
+		}
+		rules = filteredRules
+	}
+
+	return &PolicyRulesResponse{Rules: rules, EditAllowed: is_super_admin}, nil
+}
+
+func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error) {
+	err := policyValidateRequest(req)
+	if err != nil {
+		app.Log.Errorf("Invalid policy rule request: %v", err)
+		return nil, err
+	}
+
+	// Create and store the new rule
+	newRule := PolicyRule{
+		ZonePattern:      req.ZonePattern,
+		ZoneSoa:          req.ZoneSoa,
+		TargetUserFilter: req.TargetUserFilter,
+		Description:      req.Description,
+	}
+
+	app.Log.Infof("Storing new policy rule: %+v", newRule)
+	createdRule, err := app.Storage.PolicyCreate(&newRule)
+	if err != nil {
+		app.Log.Errorf("Error storing policy rule: %v", err)
+		return nil, err
+	}
+
+	return createdRule, nil
+}
+
+func (app *AppData) PolicyUpdateRule(id int64, req PolicyRuleRequest) (*PolicyRule, error) {
+	err := policyValidateRequest(req)
+	if err != nil {
+		app.Log.Errorf("Invalid policy rule request: %v", err)
+		return nil, err
+	}
+
+	// Check if rule exists before update attempt
+	existingRule, err := app.Storage.PolicyGetByID(id)
+	if err != nil {
+		app.Log.Errorf("Error retrieving existing policy rule #%d: %v", id, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("rule not found")
+		} else {
+			return nil, fmt.Errorf("failed to retrieve rule: %w", err)
+		}
+	}
+
+	// Update the fields on the existing rule object
+	existingRule.ZonePattern = req.ZonePattern
+	existingRule.ZoneSoa = req.ZoneSoa
+	existingRule.TargetUserFilter = req.TargetUserFilter
+	existingRule.Description = req.Description
+
+	app.Log.Infof("Updating policy rule #%d to: %+v", id, existingRule)
+	updatedRule, err := app.Storage.PolicyUpdate(existingRule)
+	if err != nil {
+		app.Log.Errorf("Error updating policy rule #%d: %v", id, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("rule not found")
+		}
+		return nil, fmt.Errorf("failed to update rule: %w", err)
+	}
+
+	return updatedRule, nil
+}
+
+func (app *AppData) PolicyDeleteRule(id int64) error {
+	app.Log.Debugf("Deleting policy rule #%d", id)
+
+	if err := app.Storage.PolicyDelete(id); err != nil {
+		app.Log.Errorf("Error deleting policy rule #%d: %v", id, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("rule not found")
+		}
+		return fmt.Errorf("failed to delete rule: %w", err)
+	}
+
+	return nil
+}
+
+func (app *AppData) ZoneGet(ctx context.Context, username, zone, externalDnsVersion string) (int, any, error) {
 	// Get from storage
 	storedZone, err := app.Storage.GetZone(username, zone)
 	if err != nil {
@@ -53,22 +169,22 @@ func (app *AppData) GetZone(ctx context.Context, username, zone, externalDnsVers
 	}, nil
 }
 
-func (app *AppData) DeleteZone(ctx context.Context, username, zone string) (int, any, error) {
+func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int, any, error) {
 	if err := app.PowerDns.DeleteZone(ctx, zone, true); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to delete zone from DNS server",
-			fmt.Errorf("app.DeleteZone: %w", err))
+			fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 
 	if err := app.Storage.DeleteZone(username, zone); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to delete zone from storage",
-			fmt.Errorf("app.DeleteZone: %w", err))
+			fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 
-	app.Log.Infof("app.DeleteZone: %s deleted for user %s", zone, username)
+	app.Log.Infof("app.ZoneDelete: %s deleted for user %s", zone, username)
 	return http.StatusNoContent, nil, nil
 }
 
-func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.ZoneResponse) (int, any, error) {
+func (app *AppData) ZoneCreate(ctx context.Context, username string, zone ZoneResponse) (int, any, error) {
 	// Check if zone exists
 	if status, msg, err := app.checkZoneExists(zone.Zone); err != nil {
 		return status, msg, err
@@ -87,7 +203,7 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.
 		// Determine next child zone
 		nextChildZone := next(authoritative, i)
 
-		app.Log.Infof("app.CreateZone: Creating intermediate zone '%s' I'm authoritative for (with child zone delegation to %s)", z, nextChildZone)
+		app.Log.Infof("app.ZoneCreate: Creating intermediate zone '%s' I'm authoritative for (with child zone delegation to %s)", z, nextChildZone)
 		if err := app.PowerDns.EnsureIntermediateZoneExists(ctx, z, nextChildZone); err != nil {
 			return errorResult(http.StatusInternalServerError, "Failed to ensure intermediate zone exists", err)
 		}
@@ -96,12 +212,12 @@ func (app *AppData) CreateZone(ctx context.Context, username string, zone zones.
 	// This is the requested zone, create it
 	zoneResponse, err := app.PowerDns.CreateUserZone(ctx, username, zone.Zone, true)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Failed to create zone in DNS server", fmt.Errorf("app.CreateZone: %w", err))
+		return errorResult(http.StatusInternalServerError, "Failed to create zone in DNS server", fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
 	if _, err := app.Storage.CreateZone(username, zone.Zone, refreshTime); err != nil {
-		return errorResult(http.StatusInternalServerError, "Failed to create zone in storage", fmt.Errorf("app.CreateZone: %w", err))
+		return errorResult(http.StatusInternalServerError, "Failed to create zone in storage", fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	return http.StatusCreated, gin.H{"success": zoneResponse}, nil
@@ -133,7 +249,7 @@ func (app *AppData) checkZoneExists(zone string) (int, any, error) {
 	return http.StatusOK, nil, nil
 }
 
-func toExternalDNSConfig(app *AppData, pdnsZone *zones.ZoneDataResponse, externalDnsVersion string) (string, error) {
+func toExternalDNSConfig(app *AppData, pdnsZone *ZoneDataResponse, externalDnsVersion string) (string, error) {
 	tmpl, err := template.New("external-dns").Parse(helper.ExternalDNSValuesYamlTemplate)
 	if err != nil {
 		return "", fmt.Errorf("parse external-dns template: %w", err)
@@ -199,4 +315,97 @@ func getAuthoritativeZones(fullName, soaBase string) []string {
 	}
 
 	return result
+}
+
+func policyValidateRequest(req PolicyRuleRequest) error {
+
+	if err := validateZonePattern(req.ZonePattern); err != nil {
+		return err
+	}
+
+	if err := validateUserFilter(req.TargetUserFilter); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// userCanAccessRule checks if a user has access to a given policy rule based on the target user filter.
+func userCanAccessRule(email string, pattern string) (bool, error) {
+	// Normalize both to lowercase for case-insensitive comparison
+	patternLower := strings.ToLower(pattern)
+	emailLower := strings.ToLower(email)
+
+	// Check that the pattern contains at most one asterisk
+	if strings.Count(patternLower, "*") > 1 {
+		return false, errors.New("user filter can contain at most one wildcard asterisk")
+	}
+
+	// Check if the pattern contains the wildcard
+	if !strings.Contains(patternLower, "*") {
+		// No asterisk: must be an exact match
+		return emailLower == patternLower, nil
+	}
+
+	// Split the pattern by the asterisk
+	parts := strings.Split(patternLower, "*")
+
+	// A single asterisk splits into two parts
+	prefix := parts[0]
+	suffix := strings.Join(parts[1:], "")
+
+	// Rule: Match prefix AND match suffix
+	// HasPrefix/HasSuffix handle empty strings correctly.
+	return strings.HasPrefix(emailLower, prefix) && strings.HasSuffix(emailLower, suffix), nil
+}
+
+func validateUserFilter(filter string) error {
+	errInvalidUserFilter := errors.New("user filter must be a valid email or a wildcard pattern like *@domain.com")
+
+	// Non-empty check
+	if filter == "" {
+		return errInvalidUserFilter
+	}
+
+	// At most one wildcard asterisk allowed
+	if strings.Count(filter, "*") > 1 {
+		return errInvalidUserFilter
+	}
+
+	// No wildcard: validate as a standard email address
+	if !strings.Contains(filter, "*") {
+		_, err := mail.ParseAddress(filter)
+		if err != nil {
+			return errInvalidUserFilter
+		}
+		return nil
+	}
+
+	return nil
+}
+
+func isSuperAdmin(app *AppData, user *UserClaims) bool {
+	superAdmins := app.Config.DnsPolicyConfig.SuperAdminEmails
+
+	if _, exists := superAdmins[strings.ToLower(user.Email)]; exists {
+		return true
+	}
+
+	return false
+}
+
+// isValidZonePattern converts the provided JavaScript function to Go.
+// It validates a zone pattern by temporarily replacing the custom '%u' placeholder
+// with a valid character ('A') before performing standard DNS label checks.
+func validateZonePattern(value string) error {
+	if value == "" {
+		return errors.New("No value supplied")
+	}
+
+	// 1. Replace '%u' with 'A' and trim whitespace
+	s := strings.ReplaceAll(value, "%u", "A")
+	s = strings.TrimSpace(s)
+
+	// Use existing DNS domain validation
+	return helper.DnsValidateName(s)
 }

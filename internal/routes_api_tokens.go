@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +19,7 @@ func CreateTokensApiGroup(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 
 // TokensResponse represents a list of tokens returned by GET /tokens
 type TokensResponse struct {
-	Tokens []storage.Token `json:"tokens"`
+	Tokens []Token `json:"tokens"`
 }
 
 type CreateTokenRequest struct {
@@ -40,7 +38,7 @@ type CreateTokenRequest struct {
 func getTokens(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
@@ -67,14 +65,14 @@ func getTokens(app *AppData) gin.HandlerFunc {
 // @Description Generate a new API token for the authenticated user with TTL defined in configuration
 // @Tags tokens
 // @Produce json
-// @Success 201 {object} storage.Token
+// @Success 201 {object} Token
 // @Failure 500 {object} map[string]string "Failed to retrieve tokens"
 // @Security ApiKeyAuth
 // @Router /v1/tokens/ [post]
 func createToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 		ttl := time.Duration(app.Config.WebServer.ApiTokenTTLHours) * time.Hour
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
@@ -120,7 +118,7 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token ID"})
 			return
 		}
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Delete token called for token: ", tokenId, " and user: ", user.PreferredUsername)

@@ -1,4 +1,4 @@
-package zones
+package app
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/config"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +28,7 @@ type ZoneProviderJavaScript struct {
 	log               *zap.SugaredLogger
 }
 
-func NewZoneProviderJavaScript(c *config.UserZoneProviderConfig, logger *zap.Logger) (*ZoneProviderJavaScript, error) {
+func NewZoneProviderJavaScript(c *UserZoneProviderConfig, logger *zap.Logger) (*ZoneProviderJavaScript, error) {
 	log := logger.Sugar()
 	vm := goja.New()
 
@@ -83,7 +81,7 @@ func NewZoneProviderJavaScript(c *config.UserZoneProviderConfig, logger *zap.Log
 	}, nil
 }
 
-func (m *ZoneProviderJavaScript) GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error) {
+func (m *ZoneProviderJavaScript) GetUserZones(ctx context.Context, user *UserClaims) ([]ZoneResponse, error) {
 	// Marshal user to goja Value
 	jsUser, err := m.marshalToJS(user)
 	if err != nil {
@@ -117,7 +115,7 @@ func (m *ZoneProviderJavaScript) GetUserZones(ctx context.Context, user *auth.Us
 	return result, nil
 }
 
-func (m *ZoneProviderJavaScript) IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error) {
+func (m *ZoneProviderJavaScript) IsAllowedZone(ctx context.Context, user *UserClaims, zone string) (bool, ZoneResponse, error) {
 	jsUser, err := m.marshalToJS(user)
 	if err != nil {
 		return false, ZoneResponse{}, err

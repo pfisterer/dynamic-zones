@@ -1,26 +1,17 @@
-package zones
+package app
 
 import (
 	"context"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/config"
 	"go.uber.org/zap"
 )
 
-type ZoneResponse struct {
-	// The DNS zone name (e.g., "my-user.users.example.com")
-	Zone string `json:"zone"`
-	// The zone name from which on this nameserver is authoritative (e.g., "users.example.com")
-	ZoneSOA string `json:"zone_soa"`
-}
-
 type ZoneProvider interface {
-	GetUserZones(ctx context.Context, user *auth.UserClaims) ([]ZoneResponse, error)
-	IsAllowedZone(ctx context.Context, user *auth.UserClaims, zone string) (bool, ZoneResponse, error)
+	GetUserZones(ctx context.Context, user *UserClaims) ([]ZoneResponse, error)
+	IsAllowedZone(ctx context.Context, user *UserClaims, zone string) (bool, ZoneResponse, error)
 }
 
-func NewUserZoneProvider(appConfig *config.AppConfig, logger *zap.Logger) ZoneProvider {
+func NewUserZoneProvider(appConfig *AppConfig, logger *zap.Logger) ZoneProvider {
 	c := appConfig.UserZoneProvider
 
 	switch c.Provider {

@@ -5,7 +5,6 @@ import (
 	"net"
 	"testing"
 
-	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/joho/godotenv"
 )
 
@@ -16,7 +15,7 @@ func TestUpstreamDnsUpdate(t *testing.T) {
 	}
 
 	// Get application configuration from environment variables
-	appConfig, err := config.GetAppConfigFromEnvironment()
+	appConfig, err := GetAppConfigFromEnvironment()
 	if err != nil {
 		fmt.Printf("Failed to get app config from environment: %v", err)
 		return

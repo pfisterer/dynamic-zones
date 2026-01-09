@@ -8,11 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/config"
 	"github.com/farberg/dynamic-zones/internal/helper"
-	"github.com/farberg/dynamic-zones/internal/storage"
-	"github.com/farberg/dynamic-zones/internal/zones"
 	"github.com/gin-contrib/cors"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
@@ -22,16 +18,16 @@ import (
 )
 
 type AppData struct {
-	Config       config.AppConfig
-	ZoneProvider zones.ZoneProvider
-	Storage      *storage.Storage
-	PowerDns     *zones.PowerDnsClient
+	Config       AppConfig
+	ZoneProvider ZoneProvider
+	Storage      *Storage
+	PowerDns     *PowerDnsClient
 	RefreshTime  uint64
 	Logger       *zap.Logger
 	Log          *zap.SugaredLogger
 }
 
-func CreateAppLogger(appConfig config.AppConfig) (*zap.Logger, *zap.SugaredLogger) {
+func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
 	logger, log := helper.InitLogger(appConfig.DevMode)
 	if appConfig.DevMode {
 		log.Warn("app.SetupComponents: Running in development mode. This is not secure for production!")
@@ -52,7 +48,7 @@ func RunApplication() {
 	}
 
 	// Get application configuration from environment variables
-	appConfig, err := config.GetAppConfigFromEnvironment()
+	appConfig, err := GetAppConfigFromEnvironment()
 	if err != nil {
 		log.Fatal("Error loading application configuration: ", err)
 	}
@@ -64,7 +60,7 @@ func RunApplication() {
 	// Powerds client
 	thisNsServer := fmt.Sprintf("%s.%s", appConfig.UpstreamDns.Name, appConfig.UpstreamDns.Zone)
 
-	pdns, err := zones.NewPowerDnsClient(
+	pdns, err := NewPowerDnsClient(
 		appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, appConfig.PowerDns.PdnsApiKey, appConfig.PowerDns.DefaultTTLSeconds,
 		[]string{thisNsServer}, appConfig.UserZoneProvider.DefaultAdminTsigKeyName, appConfig.UserZoneProvider.DefaultAdminTsigKey,
 		appConfig.UserZoneProvider.DefaultAdminTsigAlg,
@@ -76,7 +72,7 @@ func RunApplication() {
 	}
 
 	// Create storage component
-	db, err := storage.NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
+	db, err := NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
@@ -90,7 +86,7 @@ func RunApplication() {
 	}
 
 	// Zone Provider
-	zoneProvider := zones.NewUserZoneProvider(&appConfig, logger)
+	zoneProvider := NewUserZoneProvider(&appConfig, logger)
 
 	// Prepare application data
 	appData := AppData{
@@ -139,12 +135,12 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	router.Use(ginzap.RecoveryWithZap(app.Logger, true))
 
 	// Create OIDC Auth Verifier
-	oidcConfig := auth.OIDCVerifierConfig{
+	oidcConfig := OIDCVerifierConfig{
 		IssuerURL: app.Config.WebServer.OIDCIssuerURL,
 		ClientID:  app.Config.WebServer.OIDCClientID,
 	}
 
-	oidcAuthVerifier, err := auth.NewOIDCAuthVerifier(oidcConfig, app.Log)
+	oidcAuthVerifier, err := NewOIDCAuthVerifier(oidcConfig, app.Log)
 	if err != nil {
 		app.Log.Fatalf("Failed to initialize OIDCAuthVerifier: %v", err)
 	}
@@ -157,7 +153,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Create router group for  API routes for v1
 	apiV1Group := router.Group("/v1")
 	enableCorsOriginReflectionConfig(apiV1Group)
-	apiV1Group.Use(auth.CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
+	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
@@ -166,7 +162,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	return router
 }
 
-func logAppConfig(appConfig config.AppConfig, log *zap.SugaredLogger) {
+func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	var appConfigJson []byte
 	var err error
 

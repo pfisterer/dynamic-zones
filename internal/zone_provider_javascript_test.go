@@ -1,11 +1,9 @@
-package zones
+package app
 
 import (
 	"os"
 	"testing"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
-	"github.com/farberg/dynamic-zones/internal/config"
 	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
@@ -53,14 +51,14 @@ func TestZoneProviderJavaScript_GetUserZones(t *testing.T) {
 	`
 	scriptPath := createTempScriptFile(t, scriptContent)
 
-	cfg := &config.UserZoneProviderConfig{
+	cfg := &UserZoneProviderConfig{
 		ScriptPath: scriptPath,
 	}
 
 	provider, err := NewZoneProviderJavaScript(cfg, logger)
 	require.NoError(t, err)
 
-	user := &auth.UserClaims{
+	user := &UserClaims{
 		PreferredUsername: "testuser",
 	}
 
@@ -69,7 +67,7 @@ func TestZoneProviderJavaScript_GetUserZones(t *testing.T) {
 	assert.Len(t, zones, 1)
 	assert.Equal(t, "", zones[0].Zone)
 
-	user = &auth.UserClaims{
+	user = &UserClaims{
 		PreferredUsername: "anotheruser",
 	}
 

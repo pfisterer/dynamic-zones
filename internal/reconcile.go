@@ -3,17 +3,15 @@ package app
 import (
 	"context"
 
-	"github.com/farberg/dynamic-zones/internal/storage"
-	"github.com/farberg/dynamic-zones/internal/zones"
 	"go.uber.org/zap"
 )
 
 type MissingOrInvalidZoneInPdns struct {
-	Zone              storage.Zone
+	Zone              Zone
 	invalidInPowerDNS bool
 }
 
-func Reconcile(ctx context.Context, db *storage.Storage, powerdns *zones.PowerDnsClient, nameservers []string, defaultTTL uint32, log *zap.SugaredLogger) error {
+func Reconcile(ctx context.Context, db *Storage, powerdns *PowerDnsClient, nameservers []string, defaultTTL uint32, log *zap.SugaredLogger) error {
 	// Handle invalid and missing zones in PowerDNS
 	{
 		// Create channels for missing and invalid zones
@@ -55,9 +53,9 @@ func Reconcile(ctx context.Context, db *storage.Storage, powerdns *zones.PowerDn
 
 }
 
-func MissingOrInvalidZonesInPdns(ctx context.Context, db *storage.Storage, powerdns *zones.PowerDnsClient, out chan<- MissingOrInvalidZoneInPdns, log *zap.SugaredLogger) {
+func MissingOrInvalidZonesInPdns(ctx context.Context, db *Storage, powerdns *PowerDnsClient, out chan<- MissingOrInvalidZoneInPdns, log *zap.SugaredLogger) {
 	// Create a channel to receive zones from the database
-	ch := make(chan storage.Zone, 100)
+	ch := make(chan Zone, 100)
 
 	// Close channels when done
 	defer close(out)

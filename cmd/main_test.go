@@ -9,7 +9,7 @@ import (
 	"time"
 
 	app "github.com/farberg/dynamic-zones/internal"
-	"github.com/farberg/dynamic-zones/internal/zones"
+	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -97,7 +97,7 @@ func testCreateZone(t *testing.T, zone string) {
 
 }
 
-func testGetZone(t *testing.T, zone string) zones.ZoneDataResponse {
+func testGetZone(t *testing.T, zone string) app.ZoneDataResponse {
 	resp, err := http.Get(app.GetBaseURLForTests() + "/v1/zones/" + zone)
 	if err != nil {
 		t.Fatalf("testGetZone: ailed to send request: %v", err)
@@ -115,7 +115,7 @@ func testGetZone(t *testing.T, zone string) zones.ZoneDataResponse {
 	}
 
 	// unmarshal the response body
-	var response zones.ZoneDataResponse
+	var response app.ZoneDataResponse
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		t.Fatalf("testGetZone: Failed to unmarshal response body: %v, response body = %s", err, body)
@@ -163,14 +163,14 @@ func testDeleteZone(t *testing.T, zone string) {
 	t.Logf("testDeleteZone: Ok, Zone %s not found as expected", zone)
 }
 
-func testDnsUpdate(t *testing.T, zone zones.ZoneDataResponse, nameserverPort uint16) {
+func testDnsUpdate(t *testing.T, zone app.ZoneDataResponse, nameserverPort uint16) {
 	testname := "test." + zone.Zone + "."
 	testcontent := "111.222.33.44"
 	testttl := uint32(3600)
 	nameserver := "127.0.0.1"
 
 	// DNS-Lookup a non-existing record
-	ips, err := zones.PerformALookup(nameserver, nameserverPort, testname)
+	ips, err := helper.PerformALookup(nameserver, nameserverPort, testname)
 	if err != nil {
 		t.Fatalf("testDnsUpdate: Failed to perform 1st DNS lookup: %v", err)
 	} else if len(ips) > 0 {
@@ -182,14 +182,14 @@ func testDnsUpdate(t *testing.T, zone zones.ZoneDataResponse, nameserverPort uin
 	// Create a new DNS record using RFC 2136 update
 	t.Logf("testDnsUpdate: Using data from zone %s for DNS update test. Zone name: %s, Zone keys: %+v", zone.Zone, zone.Zone, zone.ZoneKeys)
 
-	_, err = zones.Rfc2136AddARecord(zone.ZoneKeys[0].Keyname, zone.ZoneKeys[0].Algorithm, zone.ZoneKeys[0].Key, nameserver+":"+strconv.Itoa(int(nameserverPort)), zone.Zone+".", testname, testcontent, testttl)
+	_, err = helper.Rfc2136AddARecord(zone.ZoneKeys[0].Keyname, zone.ZoneKeys[0].Algorithm, zone.ZoneKeys[0].Key, nameserver+":"+strconv.Itoa(int(nameserverPort)), zone.Zone+".", testname, testcontent, testttl)
 	if err != nil {
 		t.Fatalf("testDnsUpdate: Failed to create DNS record: %v", err)
 	}
 	t.Logf("testDnsUpdate: Created DNS record %s with content %s and TTL %d\n", testname, testcontent, testttl)
 
 	// DNS-Lookup a non-existing record
-	ips, err = zones.PerformALookup(nameserver, nameserverPort, testname)
+	ips, err = helper.PerformALookup(nameserver, nameserverPort, testname)
 	if err != nil {
 		t.Fatalf("testDnsUpdate: Failed to perform 2nd DNS lookup: %v", err)
 	} else if len(ips) == 1 {

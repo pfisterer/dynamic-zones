@@ -3,7 +3,6 @@ package app
 import (
 	"net/http"
 
-	"github.com/farberg/dynamic-zones/internal/auth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,7 +37,7 @@ type ZoneStatus struct {
 //	@Router			/v1/zones/ [get]
 func getZones(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
@@ -53,7 +52,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
-			statusCode, _, _ := app.GetZone(c.Request.Context(), user.PreferredUsername, zone.Zone, app.Config.WebServer.ExternalDnsVersion)
+			statusCode, _, _ := app.ZoneGet(c.Request.Context(), user.PreferredUsername, zone.Zone, app.Config.WebServer.ExternalDnsVersion)
 			app.Log.Debugf("Checked zone '%s', status code: %d", zone.Zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
 			app.Log.Debugf("Zone '%s' exists: %t", zone.Zone, zoneExists)
@@ -77,7 +76,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 //	@Security		Bearer
 //	@Param		zone	path	string	true	"The name of the zone to retrieve."
 //	@Query	  format  string    "The format of the response. If 'external-dns' is specified, the response will be formatted for ExternalDNS."
-//	@Success		200	{object}	zones.ZoneDataResponse	"The requested DNS zone."
+//	@Success		200	{object}	ZoneDataResponse	"The requested DNS zone."
 //	@Failure		404	{object}	map[string]any	"Zone not found."
 //	@Failure		500	{object}	map[string]any	"Internal server error."
 //	@Router			/v1/zones/{zone} [get]
@@ -86,14 +85,14 @@ func getZone(app *AppData) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		zone := c.Param("zone")
 		format := c.Query("format")
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		statusCode, returnValue, err := app.GetZone(ctx, user.PreferredUsername, zone, externalDnsVersion)
+		statusCode, returnValue, err := app.ZoneGet(ctx, user.PreferredUsername, zone, externalDnsVersion)
 
 		if err != nil {
 			app.Log.Warnf("getZone: zone '%s' error: %w", zone, err)
@@ -147,7 +146,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 //	@Produce		json
 //	@Security		Bearer
 //	@Param		zone	path	string	true	"The name of the zone to create."
-//	@Success		201	{object}	zones.ZoneDataResponse	"The created DNS zone."
+//	@Success		201	{object}	ZoneDataResponse	"The created DNS zone."
 //	@Failure		400	{object}	map[string]any	"Bad request."
 //	@Failure		403	{object}	map[string]any	"Forbidden."
 //	@Failure		409	{object}	map[string]any	"Conflict."
@@ -157,7 +156,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		zone := c.Param("zone")
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
@@ -178,7 +177,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 		}
 		app.Log.Infof("User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
 
-		statusCode, returnValue, err := app.CreateZone(ctx, user.PreferredUsername, zoneDef)
+		statusCode, returnValue, err := app.ZoneCreate(ctx, user.PreferredUsername, zoneDef)
 		if err != nil {
 			app.Log.Error("Failed: ", err)
 		}
@@ -203,7 +202,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		zone := c.Param("zone")
-		user := c.MustGet(auth.UserDataKey).(*auth.UserClaims)
+		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
@@ -223,7 +222,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		statusCode, returnValue, err := app.DeleteZone(ctx, user.PreferredUsername, zone)
+		statusCode, returnValue, err := app.ZoneDelete(ctx, user.PreferredUsername, zone)
 		if err != nil {
 			app.Log.Error("deleteZone failed: ", err)
 		}
