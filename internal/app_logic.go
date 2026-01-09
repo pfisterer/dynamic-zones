@@ -50,16 +50,43 @@ func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesRespons
 	is_super_admin := isSuperAdmin(app, user)
 
 	if !is_super_admin {
-		filteredRules := make([]PolicyRule, 0)
-		for _, rule := range rules {
-			if canAccess, err := userCanAccessRule(user.Email, rule.TargetUserFilter); err == nil && canAccess {
-				filteredRules = append(filteredRules, rule)
-			}
-		}
-		rules = filteredRules
+		rules = filterUserRules(rules, user)
 	}
 
 	return &PolicyRulesResponse{Rules: rules, EditAllowed: is_super_admin}, nil
+}
+
+func (app *AppData) PolicyGetUserZones(user *UserClaims) ([]ZoneResponse, error) {
+	// Get all rules that are applicable to the user
+	rules, err := app.Storage.PolicyGetAll()
+	if err != nil {
+		app.Log.Errorf("Error retrieving policy rules: %v", err)
+		return nil, err
+	}
+
+	// Filter the rules based on user email
+	filteredRules := filterUserRules(rules, user)
+	zones := rulesToUserZones(filteredRules, user)
+
+	return zones, nil
+}
+
+func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (bool, *ZoneResponse, error) {
+	zones, err := app.PolicyGetUserZones(user)
+	if err != nil {
+		app.Log.Errorf("Error getting user zones: %v", err)
+		return false, nil, err
+	}
+
+	for _, z := range zones {
+		if z.Zone == zone {
+			app.Log.Debugf("User %s is allowed to use zone %s", user.PreferredUsername, zone)
+			return true, &z, nil
+		}
+	}
+
+	app.Log.Debugf("User %s is not allowed to use zone %s", user.PreferredUsername, zone)
+	return false, nil, nil
 }
 
 func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error) {
@@ -408,4 +435,52 @@ func validateZonePattern(value string) error {
 
 	// Use existing DNS domain validation
 	return helper.DnsValidateName(s)
+}
+
+func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
+	// Make a new slice to hold filtered rules
+	filteredRules := make([]PolicyRule, 0, 10)
+
+	// Only include rules the user can access
+	for _, rule := range rules {
+		if canAccess, err := userCanAccessRule(user.Email, rule.TargetUserFilter); err == nil && canAccess {
+			filteredRules = append(filteredRules, rule)
+		}
+	}
+
+	return filteredRules
+}
+
+func ruleToZoneResponse(rule PolicyRule, user *UserClaims) ZoneResponse {
+	// Prepare data for pattern replacement
+	userDnsLabel := helper.DnsMakeCompliant(user.Email)
+	zone := strings.ReplaceAll(rule.ZonePattern, "%u", userDnsLabel)
+
+	return ZoneResponse{
+		Zone:    zone,
+		ZoneSOA: rule.ZoneSoa,
+	}
+}
+
+func rulesToUserZones(rules []PolicyRule, user *UserClaims) []ZoneResponse {
+	zones := make([]ZoneResponse, 0, len(rules))
+
+	for _, rule := range rules {
+		zone := ruleToZoneResponse(rule, user)
+
+		// Check if the zone has already been added by another rule
+		isDuplicate := false
+		for _, existing := range zones {
+			if existing.Zone == zone.Zone {
+				isDuplicate = true
+				break
+			}
+		}
+
+		if !isDuplicate {
+			zones = append(zones, zone)
+		}
+	}
+
+	return zones
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,13 +19,12 @@ import (
 )
 
 type AppData struct {
-	Config       AppConfig
-	ZoneProvider ZoneProvider
-	Storage      *Storage
-	PowerDns     *PowerDnsClient
-	RefreshTime  uint64
-	Logger       *zap.Logger
-	Log          *zap.SugaredLogger
+	Config      AppConfig
+	Storage     *Storage
+	PowerDns    *PowerDnsClient
+	RefreshTime uint64
+	Logger      *zap.Logger
+	Log         *zap.SugaredLogger
 }
 
 func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
@@ -62,9 +62,9 @@ func RunApplication() {
 
 	pdns, err := NewPowerDnsClient(
 		appConfig.PowerDns.PdnsUrl, appConfig.PowerDns.PdnsVhost, appConfig.PowerDns.PdnsApiKey, appConfig.PowerDns.DefaultTTLSeconds,
-		[]string{thisNsServer}, appConfig.UserZoneProvider.DefaultAdminTsigKeyName, appConfig.UserZoneProvider.DefaultAdminTsigKey,
-		appConfig.UserZoneProvider.DefaultAdminTsigAlg,
-		appConfig.UserZoneProvider.DefaultRecords,
+		[]string{thisNsServer}, appConfig.ZoneDefaults.DefaultAdminTsigKeyName, appConfig.ZoneDefaults.DefaultAdminTsigKey,
+		appConfig.ZoneDefaults.DefaultAdminTsigAlg,
+		appConfig.ZoneDefaults.DefaultRecords,
 		log,
 	)
 	if err != nil {
@@ -77,29 +77,37 @@ func RunApplication() {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
-	// If requested, insert dummy data into the database
-	if appConfig.DnsPolicyConfig.AddDummyData {
-		err = db.PolicyInsertDummyData()
-		if err != nil {
-			log.Fatalf("Failed to insert dummy data into the database: %v", err)
-		}
-	}
-
-	// Zone Provider
-	zoneProvider := NewUserZoneProvider(&appConfig, logger)
-
 	// Prepare application data
 	appData := AppData{
-		Config:       appConfig,
-		ZoneProvider: zoneProvider,
-		Storage:      db,
-		PowerDns:     pdns,
-		Logger:       logger,
-		Log:          log,
+		Config:   appConfig,
+		Storage:  db,
+		PowerDns: pdns,
+		Logger:   logger,
+		Log:      log,
 	}
 
 	// Start application
 	go RunPeriodicUpstreamDnsUpdateCheck(appData)
+
+	// If requested, insert initial data into the database
+	if appConfig.InitialDataScriptPath != "" {
+		// Read the file contents
+		scriptContent, err := os.ReadFile(appConfig.InitialDataScriptPath)
+		if err != nil {
+			log.Fatalf("Failed to read initial data script file: %v", err)
+			return
+		}
+
+		// Create initial data provider
+		initialDataProvider, err := NewJavaScriptEngine(&appData)
+		err = initialDataProvider.Run(scriptContent)
+		if err != nil {
+			log.Fatalf("Failed to run initial data script: %v", err)
+			return
+		}
+
+		log.Infof("Successfully executed initial data script: %s", appConfig.InitialDataScriptPath)
+	}
 
 	// Create and run the web server server forever
 	router := setupGinWebserver(&appData)

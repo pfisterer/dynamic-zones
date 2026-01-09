@@ -249,23 +249,6 @@ func (storage *Storage) DeleteToken(ctx context.Context, username string, id int
 	return http.StatusOK, gin.H{"status": "deleted"}, nil
 }
 
-// -- Insert dummy data function (optional) --
-func (s *Storage) PolicyInsertDummyData() error {
-	dummyRules := []PolicyRule{
-		{ZonePattern: "%u.users.dhbw.cloud", ZoneSoa: "users.dhbw.cloud", TargetUserFilter: "*@dhbw.de", Description: "Automatic personal zones for DHBW users", CreatedAt: time.Now().Add(-24 * time.Hour)},
-		{ZonePattern: "project.dhbw.cloud", ZoneSoa: "project.dhbw.cloud", TargetUserFilter: "*@dhbw.de", Description: "All DHBW users can manage a common project zone", CreatedAt: time.Now().Add(-24 * time.Hour)},
-		{ZonePattern: "%u.cloud.uni-luebeck.de", ZoneSoa: "cloud.uni-luebeck.de", TargetUserFilter: "*@uni-luebeck.de", Description: "All Uni-Luebeck users can create subdomains", CreatedAt: time.Now().Add(-24 * time.Hour)},
-	}
-
-	for _, rule := range dummyRules {
-		_, err := s.PolicyCreate(&rule)
-		if err != nil {
-			return fmt.Errorf("storage.InsertDummyData: Failed to insert dummy data: %w", err)
-		}
-	}
-	return nil
-}
-
 // --- CRUD Operations for PolicyRule ---
 
 // PolicyCreate inserts a new PolicyRule into the database.

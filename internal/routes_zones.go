@@ -21,8 +21,9 @@ type AvailableZonesResponse struct {
 }
 
 type ZoneStatus struct {
-	Name   string `json:"name"`
-	Exists bool   `json:"exists"`
+	Name                      string `json:"name"`
+	Exists                    bool   `json:"exists"`
+	AlreadyTakenBySomeoneElse bool   `json:"already_taken_by_someone_else,omitempty"`
 }
 
 // getZones returns a list of available DNS zones for the authenticated user.
@@ -42,21 +43,35 @@ func getZones(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		userZones, err := app.ZoneProvider.GetUserZones(c.Request.Context(), user)
+
+		userZones, err := app.PolicyGetUserZones(user)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
 			return
 		}
 
+		app.Log.Debugf("Zones for user by policy: %+v", userZones)
 		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
 
 		for _, zone := range userZones {
+			domainExistsInStorage, err := app.Storage.ZoneExists(zone.Zone)
+			if err != nil {
+				app.Log.Errorf("Error checking if zone exists in storage: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone existence"})
+				return
+			}
+
 			statusCode, _, _ := app.ZoneGet(c.Request.Context(), user.PreferredUsername, zone.Zone, app.Config.WebServer.ExternalDnsVersion)
-			app.Log.Debugf("Checked zone '%s', status code: %d", zone.Zone, statusCode)
 			zoneExists := statusCode == http.StatusOK
+
+			app.Log.Debugf("Checked zone '%s', status code: %d", zone.Zone, statusCode)
 			app.Log.Debugf("Zone '%s' exists: %t", zone.Zone, zoneExists)
-			zonesWithStatus = append(zonesWithStatus, ZoneStatus{Name: zone.Zone, Exists: zoneExists})
+			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+				Name:                      zone.Zone,
+				Exists:                    zoneExists,
+				AlreadyTakenBySomeoneElse: domainExistsInStorage && !zoneExists,
+			})
 		}
 
 		zones := AvailableZonesResponse{Zones: zonesWithStatus}
@@ -162,8 +177,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		// Ensure the user is allowed to create the zone
-		isAllowed, zoneDef, err := app.ZoneProvider.IsAllowedZone(ctx, user, zone)
+		isAllowed, zoneDef, err := app.PolicyIsZoneAllowedForUser(zone, user)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
@@ -175,9 +189,10 @@ func postZone(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to create this zone"})
 			return
 		}
+
 		app.Log.Infof("User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
 
-		statusCode, returnValue, err := app.ZoneCreate(ctx, user.PreferredUsername, zoneDef)
+		statusCode, returnValue, err := app.ZoneCreate(ctx, user.PreferredUsername, *zoneDef)
 		if err != nil {
 			app.Log.Error("Failed: ", err)
 		}
@@ -209,7 +224,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Check if the user is allowed to delete the zone
-		isAllowed, _, err := app.ZoneProvider.IsAllowedZone(ctx, user, zone)
+		isAllowed, _, err := app.PolicyIsZoneAllowedForUser(zone, user)
 		if err != nil {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})

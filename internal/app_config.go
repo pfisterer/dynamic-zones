@@ -78,7 +78,7 @@ type DefaultRecord struct {
 	TTL uint32 `json:"ttl,omitempty"`
 }
 
-type UserZoneProviderConfig struct {
+type ZoneDefaults struct {
 	// List of default records to create in each new zone for "fixed" provider (e.g., ""[{"name":"_acme-challenge","type":"CNAME","content":"auth.my-proxy.int","ttl":300}]"")
 	DefaultRecords []DefaultRecord `json:"default_records" validate:"omitempty"`
 	// TSIG key name for admin updates, added to all zones (intermediate and requested)provider
@@ -87,37 +87,22 @@ type UserZoneProviderConfig struct {
 	DefaultAdminTsigKey string `json:"default_admin_tsig_key,omitempty" validate:"omitempty"`
 	// TSIG algorithm for for admin updates, added to all zones (intermediate and requested)provider
 	DefaultAdminTsigAlg string `json:"default_admin_tsig_alg,omitempty" validate:"omitempty"`
-
-	// The type of zone provider
-	Provider string `json:"provider" validate:"oneof=fixed webhook script"`
-	// Comma-separated list of fixed domain suffixes for "fixed" provider (e.g., "test.example.com, example.example2.org")
-
-	FixedDomainSuffixes string `json:"fixed_domain_suffixes" validate:"required_if=Provider fixed"`
-	// Comma-separated list of fixed domains where SOA of this nameserver starts (in the same order as FixedDomainSuffixes, e.g., "example.com, example2.org")
-	FixedDomainSoa string `json:"fixed_domain_soa" validate:"required_if=Provider fixed"`
-
-	// The webhook URL for zone provider "webhook"
-	WebhookUrl string `json:"webhook_url" validate:"required_if=Provider webhook,omitempty,url"`
-	// The webhook bearer token for zone provider "webhook"
-	WebhookBearerToken string `json:"webhook_bearer_token" validate:"required_if=Provider webhook"`
-
-	// The script path for zone provider "script"
-	ScriptPath string `json:"script_path" validate:"required_if=Provider script,omitempty"`
 }
 
 type DnsPolicyConfig struct {
 	SuperAdminEmails map[string]struct{} `json:"super_admin_emails"`
-	// Flag to indicate if dummy data should be added (for development/testing)
-	AddDummyData bool `json:"add_dummy_data"`
+	// Filename of a JavaScript script to initialize default policies and data
 }
 
 type AppConfig struct {
-	UpstreamDns      UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
-	PowerDns         PowerDnsConfig          `json:"powerdns_config"`
-	Storage          StorageConfig           `json:"storage_config"`
-	WebServer        WebServerConfig         `json:"webserver_config"`
-	UserZoneProvider UserZoneProviderConfig  `json:"user_zone_provider_config"`
-	DnsPolicyConfig  DnsPolicyConfig         `json:"dns_policy_config"`
+	UpstreamDns     UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
+	PowerDns        PowerDnsConfig          `json:"powerdns_config"`
+	Storage         StorageConfig           `json:"storage_config"`
+	WebServer       WebServerConfig         `json:"webserver_config"`
+	ZoneDefaults    ZoneDefaults            `json:"zone_defaults"`
+	DnsPolicyConfig DnsPolicyConfig         `json:"dns_policy_config"`
+	// Path to the initial data script file (JavaScript) to run on startup
+	InitialDataScriptPath string `json:"initial_data_script_path,omitempty"`
 	// Flag indicating if the application is running in development mode
 	DevMode bool `json:"dev_mode"`
 }
@@ -157,35 +142,25 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
 			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
 		},
-		UserZoneProvider: UserZoneProviderConfig{
-			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME", ""),
-			DefaultAdminTsigKey:     helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY", ""),
-			DefaultAdminTsigAlg:     helper.GetEnvString("ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_ALG", ""),
+		ZoneDefaults: ZoneDefaults{
+			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),
+			DefaultAdminTsigKey:     helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_KEY", ""),
+			DefaultAdminTsigAlg:     helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_ALG", ""),
 			DefaultRecords: func() []DefaultRecord {
-				raw := helper.GetEnvString("ZONE_PROVIDER_DEFAULT_RECORDS", "[]")
+				raw := helper.GetEnvString("ZONE_DEFAULTS_ADMIN_RECORDS", "[]")
 				var records []DefaultRecord
 				if err = json.Unmarshal([]byte(raw), &records); err != nil {
-					err = fmt.Errorf("failed to parse ZONE_PROVIDER_DEFAULT_RECORDS: %w", err)
+					err = fmt.Errorf("failed to parse ZONE_DEFAULTS_ADMIN_RECORDS: %w", err)
 				}
 				return records
 			}(),
-
-			Provider: helper.GetEnvString("ZONE_PROVIDER_TYPE", "fixed"),
-
-			FixedDomainSuffixes: helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES", "test.example.com, demo.example2.org"),
-			FixedDomainSoa:      helper.GetEnvString("ZONE_PROVIDER_FIXED_DOMAIN_SOA", "example.com, example2.org"),
-
-			WebhookUrl:         helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_URL", ""),
-			WebhookBearerToken: helper.GetEnvString("ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN", ""),
-
-			ScriptPath: helper.GetEnvString("ZONE_PROVIDER_SCRIPT_PATH", ""),
 		},
 		DnsPolicyConfig: DnsPolicyConfig{
 			SuperAdminEmails: helper.GetEnvStringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, ",", true),
-			AddDummyData:     helper.GetEnvBool("DNS_POLICY_ADD_DUMMY_DATA", false),
 		},
 
-		DevMode: helper.GetEnvString("API_MODE", "production") == "development",
+		InitialDataScriptPath: helper.GetEnvString("INITIAL_DATA_SCRIPT_PATH", ""),
+		DevMode:               helper.GetEnvString("API_MODE", "production") == "development",
 	}
 
 	//Validate the configuration
