@@ -62,9 +62,21 @@ spec:
               subPath: initial-data-script.js
           {{- end }}
           env:
+            # General Settings
             {{- if .Values.dynamicZonesAPI.apiMode }}
             - name: API_MODE
               value: {{ .Values.dynamicZonesAPI.apiMode | quote }}
+            {{- end }}
+
+            - name: API_BASE_URL
+              value: {{ printf "https://%s" .Values.dynamicZonesAPI.hostname | quote }}
+            - name: API_TOKEN_TTL_HOURS
+              value: {{ .Values.dynamicZonesAPI.apiTokenTtlHours | default "24" | quote }}
+
+            # DNS Policy Settings
+            {{- if .Values.dynamicZonesAPI.dnsPolicy.superAdminEmails }}
+            - name: DNS_POLICY_SUPERADMIN_EMAILS
+              value: {{ join "," .Values.dynamicZonesAPI.dnsPolicy.superAdminEmails | quote }}
             {{- end }}
 
             # Auth Configuration
@@ -77,7 +89,7 @@ spec:
               value: {{ .Values.auth.oidc.clientId | quote }}
             {{- end }}
 
-            # Zone Provider Settings
+            # Zone Settings
             {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultRecords }}
             - name: ZONE_DEFAULTS_ADMIN_RECORDS
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultRecords | quote }}
@@ -112,13 +124,9 @@ spec:
             - name: PDNS_SERVER_DEFAULT_TTL
               value: "60"
 
-            - name: API_BASE_URL
-              value: {{ printf "https://%s" .Values.dynamicZonesAPI.hostname | quote }}
-            - name: API_TOKEN_TTL_HOURS
-              value: {{ .Values.dynamicZonesAPI.apiTokenTtlHours | default "24" | quote }}
 
-            {{- if .Values.dynamicZonesAPI.upstreamDNS.server }}
             # Upstream DNS
+            {{- if .Values.dynamicZonesAPI.upstreamDNS.server }}
             - name: UPSTREAM_DNS_SERVER
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.server | quote }}
             - name: UPSTREAM_DNS_PORT
@@ -128,6 +136,8 @@ spec:
             - name: UPSTREAM_DNS_NAME
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.name | quote }}
             {{- end }}
+
+
 
 ---
 {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}

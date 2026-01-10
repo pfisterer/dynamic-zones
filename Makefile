@@ -20,9 +20,9 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build dev update-helm
+.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build dev helm-update
 
-all: bundle build bundle-deps update-helm
+all: bundle build bundle-deps
 
 # Start development server with live reload
 dev:
@@ -124,7 +124,7 @@ docker-run: docker-build
 	docker run --rm -p 8083:8083 --env-file .env "$(DOCKER_REPO):$(DOCKER_TAG)"
 
 # Build and push multi-architecture Docker image
-docker-multi-arch-build:
+docker-multi-arch-build: helm-update
 	@echo "🏗️ Building multi-architecture Docker image for $(DOCKER_PLATFORMS)..."
 	docker buildx build \
 		--progress plain \
@@ -137,7 +137,7 @@ docker-multi-arch-build:
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"
 
 # Update helm chart version from VERSION file
-update-helm:
+helm-update:
 	helm lint helm-chart/
 	echo "✅ Helm chart linted successfully."
 
@@ -171,4 +171,4 @@ help:
 	@echo "  docker-build            → Build Docker image"
 	@echo "  docker-run              → Run Docker container"
 	@echo "  docker-multi-arch-build → Build and push multi-architecture Docker image (requires buildx & Docker login)"
-	@echo "  update-helm             → Update Helm chart"
+	@echo "  helm-update             → Update Helm chart"

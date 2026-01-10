@@ -40,7 +40,7 @@ type Token struct {
 type PolicyRule struct {
 	// GORM field tags are usually preferred for primary keys
 	ID               int64     `gorm:"primaryKey" json:"id"`
-	ZonePattern      string    `gorm:"type:varchar(255);uniqueIndex" json:"zone_pattern"`
+	ZonePattern      string    `gorm:"type:varchar(255);not null" json:"zone_pattern"`
 	ZoneSoa          string    `gorm:"type:varchar(255);not null" json:"zone_soa"`
 	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter"`
 	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`

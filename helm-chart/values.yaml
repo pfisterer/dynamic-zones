@@ -2,6 +2,7 @@
 #------------------------------------
 # Self-Service UI Configuration
 #------------------------------------
+
 selfServiceUI:
   hostname: "self-service-ui.example.com"
   replicas: 1
@@ -47,7 +48,9 @@ dynamicZonesAPI:
 
   # DNS Policy Configuration
   dnsPolicy:
-    superAdminEmails: your_mail@example.com, second_mail@example.com
+    superAdminEmails:
+      - your_mail@example.com
+      - second_mail@example.com
 
   # Zone Defaults
   zoneDefaults:
@@ -89,14 +92,6 @@ powerDNS:
   persistence:
     storageClass: local-path
     size: 10Gi
-
-#------------------------------------
-# Cert Manager Configuration
-#------------------------------------
-certManager:
-  enabled: true
-  email: admin@example.com
-  clusterIssuer: letsencrypt-production
 
 #------------------------------------
 # Ingress Configuration

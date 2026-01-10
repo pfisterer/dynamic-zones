@@ -11,8 +11,14 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Copy JS dependencies and build frontend assets
+COPY package.json package-lock.json ./
+
 # Copy the source code from the current directory to the Working Directory inside the container
-COPY . .
+COPY Makefile ./
+COPY VERSION ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 # Build the application
 RUN make all

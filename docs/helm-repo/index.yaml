@@ -2,8 +2,21 @@ apiVersion: v1
 entries:
   cloud-self-service:
   - apiVersion: v2
+    appVersion: 0.3.1-alpha
+    created: "2026-01-10T14:44:12.535022+01:00"
+    description: Self-Service Deployment for OpenStack environments
+    digest: ef2796054aea090f5984bf9d5c5e1ea1d3220ecf1e29249370434f49f0651129
+    maintainers:
+    - email: dennis.pfisterer@dhbw.de
+      name: Dennis Pfisterer
+    name: cloud-self-service
+    type: application
+    urls:
+    - https://pfisterer.github.io/dynamic-zones/helm-repo/cloud-self-service-0.3.1-alpha.tgz
+    version: 0.3.1-alpha
+  - apiVersion: v2
     appVersion: 0.3.0-alpha
-    created: "2026-01-10T10:10:24.365218+01:00"
+    created: "2026-01-10T14:44:12.534609+01:00"
     description: Self-Service Deployment for OpenStack environments
     digest: 2597e2dccf6536e417ebe66b11eaf87c09b4666a9668342e19bb827cecc2bdf4
     maintainers:
@@ -14,4 +27,4 @@ entries:
     urls:
     - https://pfisterer.github.io/dynamic-zones/helm-repo/cloud-self-service-0.3.0-alpha.tgz
     version: 0.3.0-alpha
-generated: "2026-01-10T10:10:24.364947+01:00"
+generated: "2026-01-10T14:44:12.534198+01:00"
