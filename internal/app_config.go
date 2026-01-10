@@ -135,12 +135,12 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			DbConnectionString: helper.GetEnvString("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
 		},
 		WebServer: WebServerConfig{
+			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
 			OIDCIssuerURL:      helper.GetEnvString("OIDC_ISSUER_URL", ""),
 			OIDCClientID:       helper.GetEnvString("OIDC_CLIENT_ID", ""),
 			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
 			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
 			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
-			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
 		},
 		ZoneDefaults: ZoneDefaults{
 			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),
