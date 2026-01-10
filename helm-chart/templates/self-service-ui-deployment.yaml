@@ -35,8 +35,6 @@ spec:
           env:
             - name: DYN_ZONES_BASE_URL
               value: "{{ .Values.dynamicZonesAPI.apiBaseUrl | default (printf "https://%s" .Values.dynamicZonesAPI.hostname) }}"
-            - name: CLOUD_SELF_SERVICE_BASE_URL
-              value: "{{ .Values.selfServiceAPI.apiBaseUrl | default (printf "https://%s" .Values.selfServiceAPI.hostname) }}"
             - name: OIDC_ISSUER_URL
               value: "{{ .Values.auth.oidc.issuerUrl  }}"
             - name: OIDC_CLIENT_ID

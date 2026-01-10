@@ -6,11 +6,10 @@ cmd/cmd
 *.log
 tmp/
 .env
-docs/client-typescript
-docs/
 .npm-temp
 node_modules/
 __*
 ansible-deployment-example/inventory.yaml
 kubeconfig-*.yaml
 internal/generated_docs/
+private/

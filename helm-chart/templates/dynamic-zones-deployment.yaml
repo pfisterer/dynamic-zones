@@ -5,7 +5,7 @@
 {{- $selectors := include "cloud-self-service.selectorLabels" $comp -}}
 
 {{- /* 2. Resource Name Lookups */ -}}
-{{- $scriptConfigName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "script-provider") -}}
+{{- $initialDataScriptName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "initial-data-script-provider") -}}
 {{- $tlsSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "tls") -}}
 {{- $pdnsSvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "api") -}}
 
@@ -43,11 +43,11 @@ spec:
       labels:
         {{- $selectors | nindent 8 }}
     spec:
-      {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+      {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
       volumes:
         - name: script-provider
           configMap:
-            name: {{ $scriptConfigName }}
+            name: {{ $initialDataScriptName }}
       {{- end }}
       containers:
         - name: dynamic-zones
@@ -55,11 +55,11 @@ spec:
           imagePullPolicy: {{ .Values.dynamicZonesAPI.imagePullPolicy | default "Always" }}
           ports:
             - containerPort: 8082
-          {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+          {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
           volumeMounts:
             - name: script-provider
-              mountPath: /app/zone-providers/zone_provider.js
-              subPath: zone_provider.js
+              mountPath: /app/initial-data-script.js
+              subPath: initial-data-script.js
           {{- end }}
           env:
             {{- if .Values.dynamicZonesAPI.apiMode }}
@@ -78,43 +78,18 @@ spec:
             {{- end }}
 
             # Zone Provider Settings
-            - name: ZONE_PROVIDER_TYPE
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.type | quote }}
-
-            {{- if .Values.dynamicZonesAPI.zoneProvider.defaultRecords }}
-            - name: ZONE_PROVIDER_DEFAULT_RECORDS
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultRecords | quote }}
+            {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultRecords }}
+            - name: ZONE_DEFAULTS_ADMIN_RECORDS
+              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultRecords | quote }}
             {{- end }}
 
-            {{- if .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigName }}
-            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_NAME
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigName | quote }}
-            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_KEY
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigKey | quote }}
-            - name: ZONE_PROVIDER_DEFAULT_ADMIN_TSIG_ALG
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.defaultAdminTsigAlgorithm | quote }}
-            {{- end }}
-
-            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "fixed" }}
-            - name: ZONE_PROVIDER_FIXED_DOMAIN_SUFFIXES
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.fixed.domainSuffixes | quote }}
-            - name: ZONE_PROVIDER_FIXED_DOMAIN_SOA
-              value: {{ .Values.dynamicZonesAPI.zoneProvider.fixed.domainSoa | quote }}
-            {{- end }}
-
-            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "webhook" }}
-            {{- $selfServiceComp := dict "context" . "component" "self-service-api" -}}
-            {{- $selfServiceName := include "cloud-self-service.componentName" $selfServiceComp -}}
-            {{- $webhookUrl := .Values.selfServiceAPI.dnsPolicy.webhookApiUrl | default (printf "http://%s:8083/v1/webhook/dns-policy" $selfServiceName) }}
-            - name: ZONE_PROVIDER_WEBHOOK_URL
-              value: {{ $webhookUrl | quote }}
-            - name: ZONE_PROVIDER_WEBHOOK_BEARER_TOKEN
-              value: {{ .Values.selfServiceAPI.dnsPolicy.webhookApiKey | quote }}
-            {{- end }}
-
-            {{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
-            - name: ZONE_PROVIDER_SCRIPT_PATH
-              value: "/app/zone-providers/zone_provider.js"
+            {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigName }}
+            - name: ZONE_DEFAULTS_ADMIN_TSIG_NAME
+              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKeyName | quote }}
+            - name: ZONE_DEFAULTS_ADMIN_TSIG_KEY
+              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKey | quote }}
+            - name: ZONE_DEFAULTS_ADMIN_TSIG_ALG
+              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigAlg | quote }}
             {{- end }}
 
             # Database Connection
@@ -155,17 +130,17 @@ spec:
             {{- end }}
 
 ---
-{{- if eq .Values.dynamicZonesAPI.zoneProvider.type "script" }}
+{{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $scriptConfigName }}
+  name: {{ $initialDataScriptName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- $labels | nindent 4 }}
 data:
-  zone_provider.js: |
-    {{ .Values.dynamicZonesAPI.zoneProvider.script | indent 4 }}
+  initial-data-script.js: |
+    {{ .Values.dynamicZonesAPI.initialDataProviderScript | indent 4 }}
 ---
 {{- end }}
 

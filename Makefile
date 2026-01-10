@@ -20,9 +20,9 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build dev
+.PHONY: all build clean doc convert client bundle check swag run help install-npm bundle-deps docker docker-login docker-build multi-arch-build dev update-helm
 
-all: bundle build bundle-deps
+all: bundle build bundle-deps update-helm
 
 # Start development server with live reload
 dev:
@@ -136,6 +136,23 @@ docker-multi-arch-build:
 	@echo "✅ Multi-architecture image $(DOCKER_REPO):$(DOCKER_TAG) built and pushed."
 	@echo "You can pull it with: docker pull $(DOCKER_REPO):$(DOCKER_TAG)"
 
+# Update helm chart version from VERSION file
+update-helm:
+	helm lint helm-chart/
+	echo "✅ Helm chart linted successfully."
+
+	@VERSION=$$(cat VERSION | tr -d '\n'); \
+	sed -i '' "s/^version: .*/version: $$VERSION/" helm-chart/Chart.yaml; \
+	sed -i '' "s/^appVersion: .*/appVersion: \"$$VERSION\"/" helm-chart/Chart.yaml; \
+	echo "✅ Updated helm-chart/Chart.yaml to version $$VERSION"
+
+	helm package helm-chart
+	mkdir -p docs/helm-repo
+	mv cloud-self-service*.tgz docs/helm-repo/
+	helm repo index docs/helm-repo --url https://pfisterer.github.io/dynamic-zones/helm-repo
+	echo "✅ Helm chart linted successfully."
+
+
 # Help target
 help:
 	@echo "Usage: make <target>"
@@ -154,3 +171,4 @@ help:
 	@echo "  docker-build            → Build Docker image"
 	@echo "  docker-run              → Run Docker container"
 	@echo "  docker-multi-arch-build → Build and push multi-architecture Docker image (requires buildx & Docker login)"
+	@echo "  update-helm             → Update Helm chart"
