@@ -1,16 +1,5 @@
 ---
 #------------------------------------
-# Self-Service UI Configuration
-#------------------------------------
-
-selfServiceUI:
-  hostname: "self-service-ui.example.com"
-  replicas: 1
-  imagePullPolicy: "Always"
-  image: "ghcr.io/pfisterer/self-service-ui"
-  version: "latest"
-
-#------------------------------------
 # Dynamic Zones API Configuration
 #------------------------------------
 dynamicZonesAPI:
@@ -60,16 +49,6 @@ dynamicZonesAPI:
     defaultRecords: ""
 
 #------------------------------------
-# Database Configuration (PostgreSQL via CloudNativePG)
-#------------------------------------
-database:
-  adminUsername: root
-  adminPassword: changeme
-  persistence:
-    storageClass: local-path
-    size: 20Gi
-
-#------------------------------------
 # OIDC/Auth Configuration
 #------------------------------------
 auth:
@@ -89,9 +68,6 @@ powerDNS:
   server:
     ip: "141.1.2.3"
     port: 53
-  persistence:
-    storageClass: local-path
-    size: 10Gi
 
 #------------------------------------
 # Ingress Configuration
