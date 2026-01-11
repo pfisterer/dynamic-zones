@@ -34,6 +34,7 @@ dynamicZonesAPI:
     name: dynamic_zones
     username: dynamic_zones
     password: changeme
+    hostname: your-postgres-host
 
   # DNS Policy Configuration
   dnsPolicy:
@@ -52,7 +53,6 @@ dynamicZonesAPI:
 # OIDC/Auth Configuration
 #------------------------------------
 auth:
-  provider: "oidc" # or 'none'
   oidc:
     issuerUrl: https://sso.example.cloud/realms/example
     clientId: example-cloud-dns

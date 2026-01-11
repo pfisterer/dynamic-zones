@@ -12,7 +12,7 @@
 {{- /* 3. Database Connection Logic */ -}}
 {{- $pgComp := dict "context" . "component" "postgres" -}}
 {{- $pgBaseName := include "cloud-self-service.componentName" $pgComp -}}
-{{- $pgHost := printf "%s-rw" $pgBaseName -}}
+{{- $pgHost := .Values.dynamicZonesAPI.database.hostname -}}
 {{- $pgUser := .Values.dynamicZonesAPI.database.username -}}
 {{- $pgPass := .Values.dynamicZonesAPI.database.password -}}
 {{- $pgDB := .Values.dynamicZonesAPI.database.name -}}
@@ -68,6 +68,11 @@ spec:
               value: {{ .Values.dynamicZonesAPI.apiMode | quote }}
             {{- end }}
 
+            {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
+            - name: INITIAL_DATA_SCRIPT_PATH
+              value: "/app/initial-data-script.js"
+            {{- end }}
+
             - name: API_BASE_URL
               value: {{ printf "https://%s" .Values.dynamicZonesAPI.hostname | quote }}
             - name: API_TOKEN_TTL_HOURS
@@ -80,14 +85,10 @@ spec:
             {{- end }}
 
             # Auth Configuration
-            {{- if eq .Values.auth.provider "oidc" }}
-            - name: API_AUTH_PROVIDER
-              value: "oidc"
             - name: OIDC_ISSUER_URL
               value: {{ .Values.auth.oidc.issuerUrl | quote }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.auth.oidc.clientId | quote }}
-            {{- end }}
 
             # Zone Settings
             {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultRecords }}
@@ -95,7 +96,7 @@ spec:
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultRecords | quote }}
             {{- end }}
 
-            {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigName }}
+            {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKeyName }}
             - name: ZONE_DEFAULTS_ADMIN_TSIG_NAME
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKeyName | quote }}
             - name: ZONE_DEFAULTS_ADMIN_TSIG_KEY
@@ -135,12 +136,16 @@ spec:
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.zone | quote }}
             - name: UPSTREAM_DNS_NAME
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.name | quote }}
+            - name: UPSTREAM_DNS_TSIG_NAME
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigName | quote }}
+            - name: UPSTREAM_DNS_TSIG_ALGORITHM
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigAlgorithm | quote }}
+            - name: UPSTREAM_DNS_TSIG_SECRET
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigSecret | quote }}
             {{- end }}
 
-
-
+{{ if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
 ---
-{{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -150,10 +155,10 @@ metadata:
     {{- $labels | nindent 4 }}
 data:
   initial-data-script.js: |
-    {{ .Values.dynamicZonesAPI.initialDataProviderScript | indent 4 }}
----
-{{- end }}
+    {{ .Values.dynamicZonesAPI.initialDataProviderScript | nindent 4 }}
+{{ end }}
 
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -198,3 +203,4 @@ spec:
     - hosts:
         - {{ .Values.dynamicZonesAPI.hostname | quote }}
       secretName: {{ $tlsSecretName }}
+
