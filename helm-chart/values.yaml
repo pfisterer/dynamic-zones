@@ -62,6 +62,7 @@ auth:
 #------------------------------------
 powerDNS:
   apiKey: my-api-key
+  apiUrl: http://localhost:8080
   vhost: localhost
   logLevel: 7
   # Server configuration

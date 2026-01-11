@@ -7,7 +7,6 @@
 {{- /* 2. Resource Name Lookups */ -}}
 {{- $initialDataScriptName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "initial-data-script-provider") -}}
 {{- $tlsSecretName := include "cloud-self-service.resourceName" (dict "context" . "component" "dynamic-zones" "name" "tls") -}}
-{{- $pdnsSvcName := include "cloud-self-service.resourceName" (dict "context" . "component" "powerdns" "name" "api") -}}
 
 {{- /* 3. Database Connection Logic */ -}}
 {{- $pgComp := dict "context" . "component" "postgres" -}}
@@ -113,7 +112,7 @@ spec:
 
             # PowerDNS Integration
             - name: PDNS_URL
-              value: {{ printf "http://%s:8080" $pdnsSvcName | quote }}
+              value: {{ .Values.powerDNS.apiUrl | quote }}
             - name: PDNS_VHOST
               value: {{ .Values.powerDNS.vhost | quote }}
             - name: PDNS_API_KEY
