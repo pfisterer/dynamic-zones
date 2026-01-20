@@ -126,7 +126,7 @@ make multi-arch-build
 
 Configuration is done through environment variables. 
 
-For a full list of available configuration options, see [README_ENV_VARIABLES.md](README_ENV_VARIABLES.md) or refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
+For a full list of available configuration options, refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
 
 ## Releasing a New Version
 
