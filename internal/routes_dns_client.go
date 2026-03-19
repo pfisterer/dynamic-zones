@@ -131,6 +131,7 @@ func CheckTSIGRequestData(req *DNSRecordRequest) *ErrorResponse {
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security ApiKeyAuth
+// @ID listDnsRecords
 // @Router /v1/dns/records [get]
 // listDNSRecords handles an AXFR request for a zone, authenticated via TSIG.
 func listDNSRecords(app *AppData) gin.HandlerFunc {
@@ -260,6 +261,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse "Invalid request or missing TSIG headers"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security ApiKeyAuth
+// @ID createDnsRecord
 // @Router /v1/dns/records/create [post]
 func createDNSRecord(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -330,6 +332,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse "Invalid request or missing TSIG headers"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security ApiKeyAuth
+// @ID deleteDnsRecord
 // @Router /v1/dns/records/delete [post]
 func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {

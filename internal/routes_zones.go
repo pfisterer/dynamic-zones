@@ -34,6 +34,7 @@ type ZoneStatus struct {
 //	@Accept			json
 //	@Produce		json
 //	@Security		Bearer
+//	@ID				listZones
 //	@Success		200	{object}	AvailableZonesResponse	"A list of available zones."
 //	@Router			/v1/zones/ [get]
 func getZones(app *AppData) gin.HandlerFunc {
@@ -94,6 +95,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 //	@Success		200	{object}	ZoneDataResponse	"The requested DNS zone."
 //	@Failure		404	{object}	map[string]any	"Zone not found."
 //	@Failure		500	{object}	map[string]any	"Internal server error."
+//	@ID				getZone
 //	@Router			/v1/zones/{zone} [get]
 func getZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -166,6 +168,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 //	@Failure		403	{object}	map[string]any	"Forbidden."
 //	@Failure		409	{object}	map[string]any	"Conflict."
 //	@Failure		500	{object}	map[string]any	"Internal server error."
+//	@ID				createZone
 //	@Router			/v1/zones/{zone} [post]
 func postZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -212,6 +215,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 //	@Success		204	"No content."
 //	@Failure		403	{object}	map[string]any	"Forbidden."
 //	@Failure		500	{object}	map[string]any	"Internal server error."
+//	@ID				deleteZone
 //	@Router			/v1/zones/{zone} [delete]
 func deleteZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {

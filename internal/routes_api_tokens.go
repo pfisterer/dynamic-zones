@@ -34,6 +34,7 @@ type CreateTokenRequest struct {
 // @Success 200 {object} TokensResponse
 // @Failure 500 {object} map[string]string "Failed to retrieve tokens"
 // @Security ApiKeyAuth
+// @ID listTokens
 // @Router /v1/tokens/ [get]
 func getTokens(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -68,6 +69,7 @@ func getTokens(app *AppData) gin.HandlerFunc {
 // @Success 201 {object} Token
 // @Failure 500 {object} map[string]string "Failed to retrieve tokens"
 // @Security ApiKeyAuth
+// @ID createToken
 // @Router /v1/tokens/ [post]
 func createToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -108,6 +110,7 @@ func createToken(app *AppData) gin.HandlerFunc {
 // @Success 404 {object} map[string]string
 // @Failure 500 {object} map[string]string "Failed to delete token"
 // @Security ApiKeyAuth
+// @ID deleteToken
 // @Router /v1/tokens/{id} [delete]
 func deleteToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {

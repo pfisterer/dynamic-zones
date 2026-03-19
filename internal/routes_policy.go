@@ -34,6 +34,7 @@ func CreatePolicyApiGroup(group *gin.RouterGroup, app *AppData) *gin.RouterGroup
 // @Success 200 {object} PolicyRulesResponse "List of policy rules"
 // @Failure 500 {object} map[string]string "Internal server error"
 // @Security ApiKeyAuth
+// @ID listPolicyRules
 // @Router /v1/policies/rules [get]
 func listPolicyRules(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -64,6 +65,7 @@ func listPolicyRules(app *AppData) gin.HandlerFunc {
 // @Failure 403 {object} map[string]string "Forbidden: Not a SuperAdmin"
 // @Failure 500 {object} map[string]string "Internal server error"
 // @Security ApiKeyAuth
+// @ID createPolicyRule
 // @Router /v1/policies/rules [post]
 func createPolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -107,6 +109,7 @@ func createPolicyRule(app *AppData) gin.HandlerFunc {
 // @Failure 404 {object} map[string]string "Rule not found"
 // @Failure 500 {object} map[string]string "Internal server error"
 // @Security ApiKeyAuth
+// @ID updatePolicyRule
 // @Router /v1/policies/rules/{id} [put]
 func updatePolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -156,6 +159,7 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 // @Failure 404 {object} map[string]string "Rule not found"
 // @Failure 500 {object} map[string]string "Internal server error"
 // @Security ApiKeyAuth
+// @ID deletePolicyRule
 // @Router /v1/policies/rules/{id} [delete]
 func deletePolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {

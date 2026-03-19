@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
@@ -192,14 +193,14 @@ func (config *AppConfig) Validate() error {
 
 // Helper to format validation errors
 func formatValidationErrors(errs validator.ValidationErrors) string {
-	var errorMessages string
+	var errorMessages strings.Builder
 	for _, e := range errs {
-		errorMessages += fmt.Sprintf(
+		errorMessages.WriteString(fmt.Sprintf(
 			"\n - Field '%s' failed on the '%s' tag (Value: '%v')",
 			e.Field(),
 			e.Tag(),
 			e.Value(),
-		)
+		))
 	}
-	return errorMessages
+	return errorMessages.String()
 }
