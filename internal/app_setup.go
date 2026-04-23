@@ -206,7 +206,7 @@ func disableCachingMiddleware() gin.HandlerFunc {
 }
 
 func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
-	allowedHeaders := []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key"}
+	allowedHeaders := []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"}
 
 	corsConfig := cors.Config{
 		AllowOriginFunc: func(origin string) bool {
