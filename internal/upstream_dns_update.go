@@ -23,20 +23,26 @@ func RunPeriodicUpstreamDnsUpdateCheck(app AppData) {
 	log := app.Log
 	log.Infof("Starting periodic upstream DNS updater with interval %d seconds", app.Config.UpstreamDns.UpdateIntervalSeconds)
 
-	// Get the IP address to this DNS server to publish to the upstream DNS server
 	c := app.Config.UpstreamDns
-	dynamicZonesDnsIPAddress := net.ParseIP(app.Config.PowerDns.DnsServerAddress)
 
-	// Check configuration for validity
+	// Upstream updates are opt-in: they only run when a TSIG key is configured.
+	// name/zone/server define the nameserver identity (also used as the SOA/NS of
+	// created zones) and are configured independently of whether we push updates.
+	if c.Tsig_Name == "" || c.Tsig_Alg == "" || c.Tsig_Secret == "" {
+		log.Info("No upstream TSIG configured — upstream DNS updates are disabled.")
+		return
+	}
+
+	// Get the IP address of this DNS server to publish to the upstream server.
+	dynamicZonesDnsIPAddress := net.ParseIP(app.Config.PowerDns.DnsServerAddress)
 	if dynamicZonesDnsIPAddress == nil {
 		log.Warnf("Invalid DNS server address: %s, skipping periodic update", app.Config.PowerDns.DnsServerAddress)
 		return
 	}
 
-	// Check required upstream DNS configuration
-	if c.Server == "" || c.Tsig_Name == "" || c.Tsig_Alg == "" ||
-		c.Tsig_Secret == "" || c.Zone == "" || c.Name == "" || c.Ttl <= 0 {
-		log.Warn("Invalid upstream DNS configuration. Please check your environment variables. Exiting upstream DNS updater.")
+	// TSIG is set, so the remaining update parameters must be present too.
+	if c.Server == "" || c.Zone == "" || c.Name == "" || c.Ttl <= 0 {
+		log.Warn("Upstream TSIG is set but server/zone/name/ttl is incomplete — skipping upstream DNS updates.")
 		return
 	}
 

@@ -23,8 +23,11 @@ type UpstreamDnsUpdateConfig struct {
 	Port uint16 `json:"port" validate:"port"`
 	// DNS zone to be updated, also the zone this server is authoritative for (e.g., "example.com")
 	Zone string `json:"zone" validate:"required"`
-	// Name within the DNS zone to be updated, also the name of this servers NS record (e.g, "ns1")
-	Name string `json:"name"`
+	// Name within the DNS zone, also the name of this server's NS record (e.g, "ns1").
+	// Required: Name+Zone form the nameserver used as the SOA/NS of every created
+	// zone. An empty Name would produce a malformed SOA (".zone") that PowerDNS
+	// rejects, so we fail fast at startup instead.
+	Name string `json:"name" validate:"required"`
 	// Time to live for DNS records
 	Ttl int `json:"ttl"`
 	// Interval in seconds between DNS updates
