@@ -16,6 +16,7 @@
 {{- $pgPass := .Values.dynamicZonesAPI.database.password -}}
 {{- $pgDB := .Values.dynamicZonesAPI.database.name -}}
 {{- $defaultConn := printf "host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable" $pgHost $pgUser $pgPass $pgDB -}}
+{{- $secretName := default $name .Values.dynamicZonesAPI.existingSecret -}}
 
 ---
 apiVersion: apps/v1
@@ -99,7 +100,10 @@ spec:
             - name: ZONE_DEFAULTS_ADMIN_TSIG_NAME
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKeyName | quote }}
             - name: ZONE_DEFAULTS_ADMIN_TSIG_KEY
-              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: zone-admin-tsig-key
             - name: ZONE_DEFAULTS_ADMIN_TSIG_ALG
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigAlg | quote }}
             {{- end }}
@@ -108,7 +112,10 @@ spec:
             - name: DB_TYPE
               value: {{ .Values.dynamicZonesAPI.database.type | quote }}
             - name: DB_CONNECTION_STRING
-              value: {{ default $defaultConn .Values.dynamicZonesAPI.database.connectionString | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: db-connection-string
 
             # PowerDNS Integration
             - name: PDNS_URL
@@ -116,7 +123,10 @@ spec:
             - name: PDNS_VHOST
               value: {{ .Values.powerDNS.vhost | quote }}
             - name: PDNS_API_KEY
-              value: {{ .Values.powerDNS.apiKey | trim | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: pdns-api-key
             - name: PDNS_SERVER_ADDRESS
               value: {{ .Values.powerDNS.server.ip | quote }}
             - name: PDNS_SERVER_PORT
@@ -140,7 +150,10 @@ spec:
             - name: UPSTREAM_DNS_TSIG_ALGORITHM
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigAlgorithm | quote }}
             - name: UPSTREAM_DNS_TSIG_SECRET
-              value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: upstream-tsig-secret
             {{- end }}
 
 {{ if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}

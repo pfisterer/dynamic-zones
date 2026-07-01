@@ -9,6 +9,13 @@ dynamicZonesAPI:
   hostname: "dyndnsapi.example.com"
   replicas: 1
 
+  # Name of an existing Secret providing the keys `db-connection-string`,
+  # `pdns-api-key`, `upstream-tsig-secret` and `zone-admin-tsig-key`. When set,
+  # the chart does NOT create its own Secret and the corresponding secret values
+  # below (database.password/connectionString, powerDNS.apiKey,
+  # upstreamDNS.tsigSecret, zoneDefaults.defaultAdminTsigKey) are ignored.
+  existingSecret: ""
+
   # Upstream DNS Configuration (RFC 2136 Updates)
   upstreamDNS:
     server: ns.example.de
