@@ -134,16 +134,23 @@ spec:
               value: "60"
 
 
-            # Upstream DNS
-            {{- if .Values.dynamicZonesAPI.upstreamDNS.enabled }}
-            - name: UPSTREAM_DNS_SERVER
-              value: {{ .Values.dynamicZonesAPI.upstreamDNS.server | quote }}
-            - name: UPSTREAM_DNS_PORT
-              value: {{ .Values.dynamicZonesAPI.upstreamDNS.port | default "53" | quote }}
+            # Upstream DNS nameserver identity (name + zone). This is ALSO used as
+            # the SOA/NS of every zone this instance creates (see app_setup
+            # "thisNsServer"), so it must always be set — independent of whether
+            # the RFC2136 updater below runs. A missing name here yields a
+            # malformed SOA ("<empty>.zone") and PowerDNS rejects the zone.
             - name: UPSTREAM_DNS_ZONE
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.zone | quote }}
             - name: UPSTREAM_DNS_NAME
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.name | quote }}
+            {{- if .Values.dynamicZonesAPI.upstreamDNS.enabled }}
+            # RFC2136 updater target — only when enabled. When disabled, server/
+            # tsig stay unset and the periodic updater exits at runtime, so this
+            # instance never writes to the shared upstream DNS.
+            - name: UPSTREAM_DNS_SERVER
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.server | quote }}
+            - name: UPSTREAM_DNS_PORT
+              value: {{ .Values.dynamicZonesAPI.upstreamDNS.port | default "53" | quote }}
             - name: UPSTREAM_DNS_TSIG_NAME
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigName | quote }}
             - name: UPSTREAM_DNS_TSIG_ALGORITHM
@@ -153,12 +160,6 @@ spec:
                 secretKeyRef:
                   name: {{ $secretName }}
                   key: upstream-tsig-secret
-            {{- else }}
-            # Updater disabled: pass only the startup-required zone. The missing
-            # server/name/tsig make the periodic updater exit at runtime, so this
-            # instance never writes to the shared upstream DNS.
-            - name: UPSTREAM_DNS_ZONE
-              value: {{ .Values.dynamicZonesAPI.upstreamDNS.zone | quote }}
             {{- end }}
 
 {{ if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}

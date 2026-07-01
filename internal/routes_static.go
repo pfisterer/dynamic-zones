@@ -3,6 +3,7 @@ package app
 import (
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/farberg/dynamic-zones/internal/generated_docs"
 	"github.com/farberg/dynamic-zones/internal/helper"
@@ -11,10 +12,10 @@ import (
 
 func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 
-	// Serve index.html
+	// Serve index.html with the __VERSION__ placeholder replaced by the version
 	group.GET("/", func(c *gin.Context) {
 		c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, helper.IndexHTML)
+		c.String(http.StatusOK, strings.ReplaceAll(helper.IndexHTML, "__VERSION__", generated_docs.Version))
 	})
 
 	// Serve JS client
