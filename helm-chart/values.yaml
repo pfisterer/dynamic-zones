@@ -18,6 +18,11 @@ dynamicZonesAPI:
 
   # Upstream DNS Configuration (RFC 2136 Updates)
   upstreamDNS:
+    # When false, the periodic upstream updater is not configured (only the
+    # startup-required zone is passed) so the app boots but performs no upstream
+    # updates. Use this for environments (e.g. staging) that must not touch the
+    # shared upstream record.
+    enabled: true
     server: ns.example.de
     port: 53
     tsigName: cloud-ns.example.de

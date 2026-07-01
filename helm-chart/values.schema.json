@@ -25,6 +25,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "enabled": { "type": "boolean" },
             "server": { "type": "string" },
             "port": { "type": "integer" },
             "tsigName": { "type": "string" },
