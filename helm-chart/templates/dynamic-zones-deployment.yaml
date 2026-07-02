@@ -151,7 +151,7 @@ spec:
             # (the app disables updates when TSIG is absent).
             - name: UPSTREAM_DNS_TSIG_NAME
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigName | quote }}
-            - name: UPSTREAM_DNS_TSIG_ALGORITHM
+            - name: UPSTREAM_DNS_TSIG_ALG
               value: {{ .Values.dynamicZonesAPI.upstreamDNS.tsigAlgorithm | quote }}
             - name: UPSTREAM_DNS_TSIG_SECRET
               valueFrom:
