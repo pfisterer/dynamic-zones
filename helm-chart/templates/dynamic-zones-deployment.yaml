@@ -42,24 +42,58 @@ spec:
       labels:
         {{- $selectors | nindent 8 }}
     spec:
-      {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
       volumes:
+        # Writable scratch so the container rootfs can stay read-only.
+        - name: tmp
+          emptyDir: {}
+        {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
         - name: script-provider
           configMap:
             name: {{ $initialDataScriptName }}
-      {{- end }}
+        {{- end }}
       containers:
         - name: dynamic-zones
           image: {{ .Values.dynamicZonesAPI.image }}:{{ .Values.dynamicZonesAPI.version }}
           imagePullPolicy: {{ .Values.dynamicZonesAPI.imagePullPolicy | default "Always" }}
           ports:
             - containerPort: 8082
-          {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
+          # Hardening: no privilege escalation, no capabilities, read-only rootfs,
+          # default seccomp. (runAsNonRoot needs a non-root USER in the image's
+          # Dockerfile — add that, then set runAsNonRoot here.)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8082
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if ne .Values.dynamicZonesAPI.initialDataProviderScript "" }}
             - name: script-provider
               mountPath: /app/initial-data-script.js
               subPath: initial-data-script.js
-          {{- end }}
+            {{- end }}
           env:
             # General Settings
             {{- if .Values.dynamicZonesAPI.apiMode }}
