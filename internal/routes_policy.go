@@ -13,6 +13,8 @@ type ZoneResponse struct {
 	Zone string `json:"zone"`
 	// The zone name from which on this nameserver is authoritative (e.g., "users.example.com")
 	ZoneSOA string `json:"zone_soa"`
+	// Whether the owner may create delegated subzones under this zone.
+	AllowSubdomains bool `json:"allow_subdomains"`
 }
 
 // CreatePolicyApiGroup sets up the /policies API group and its routes.
@@ -22,6 +24,17 @@ func CreatePolicyApiGroup(group *gin.RouterGroup, app *AppData) *gin.RouterGroup
 	group.POST("/policies/rules", createPolicyRule(app))
 	group.PUT("/policies/rules/:id", updatePolicyRule(app))
 	group.DELETE("/policies/rules/:id", deletePolicyRule(app))
+
+	// Delegation policies (super-admin only) — grant users the right to manage
+	// policy rules for specific zones.
+	group.GET("/policies/delegations", listDelegations(app))
+	group.POST("/policies/delegations", createDelegation(app))
+	group.PUT("/policies/delegations/:id", updateDelegation(app))
+	group.DELETE("/policies/delegations/:id", deleteDelegation(app))
+
+	// Orphaned zones (super-admin only): zones no longer covered by any policy.
+	group.GET("/policies/orphaned-zones", listOrphanedZones(app))
+	group.DELETE("/policies/orphaned-zones/:zone", deleteOrphanedZone(app))
 
 	return group
 }
@@ -71,16 +84,19 @@ func createPolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
-		// Only super admins can manage rules
-		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can manage rules"})
-			return
-		}
-
 		// Unmarshal and validate request body
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			return
+		}
+
+		// Authorize: super-admin, or a delegation covering the rule's zone.
+		if allowed, err := app.userCanManageZoneSoa(user, req.ZoneSoa); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			return
+		} else if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
 			return
 		}
 
@@ -115,12 +131,6 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
-		// Only super admins can manage rules
-		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can manage rules"})
-			return
-		}
-
 		// Get rule ID to update from path
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
@@ -133,6 +143,24 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			return
+		}
+
+		// Authorize: the user must be allowed to manage BOTH the rule's current
+		// zone and the new zone (so a rule cannot be moved out of scope).
+		existing, err := app.Storage.PolicyGetByID(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+			return
+		}
+		okOld, err1 := app.userCanManageZoneSoa(user, existing.ZoneSoa)
+		okNew, err2 := app.userCanManageZoneSoa(user, req.ZoneSoa)
+		if err1 != nil || err2 != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			return
+		}
+		if !okOld || !okNew {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
 			return
 		}
 
@@ -165,17 +193,25 @@ func deletePolicyRule(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
-		// Only super admins can manage rules
-		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can manage rules"})
-			return
-		}
-
-		// Get rule ID to update from path
+		// Get rule ID to delete from path
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID"})
+			return
+		}
+
+		// Authorize: super-admin, or a delegation covering the rule's zone.
+		existing, err := app.Storage.PolicyGetByID(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+			return
+		}
+		if allowed, err := app.userCanManageZoneSoa(user, existing.ZoneSoa); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			return
+		} else if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
 			return
 		}
 

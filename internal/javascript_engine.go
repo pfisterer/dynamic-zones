@@ -81,6 +81,7 @@ func (p *JavaScriptEngine) createRuleWrapper() func(goja.FunctionCall) goja.Valu
 			ZonePattern:      toString(obj.Get("zone_pattern")),
 			ZoneSoa:          toString(obj.Get("zone_soa")),
 			TargetUserFilter: toString(obj.Get("target_user_filter")),
+			AllowSubdomains:  toBool(obj.Get("allow_subdomains")),
 			Description:      toString(obj.Get("description")),
 		}
 
@@ -111,6 +112,7 @@ func (p *JavaScriptEngine) updateRuleWrapper() func(goja.FunctionCall) goja.Valu
 			ZonePattern:      toString(obj.Get("zone_pattern")),
 			ZoneSoa:          toString(obj.Get("zone_soa")),
 			TargetUserFilter: toString(obj.Get("target_user_filter")),
+			AllowSubdomains:  toBool(obj.Get("allow_subdomains")),
 			Description:      toString(obj.Get("description")),
 		}
 
@@ -244,6 +246,13 @@ func toString(val goja.Value) string {
 		return ""
 	}
 	return val.String()
+}
+
+func toBool(val goja.Value) bool {
+	if val == nil {
+		return false
+	}
+	return val.ToBoolean()
 }
 
 // jsObjectToUserClaims converts a JavaScript object to UserClaims struct

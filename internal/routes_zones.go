@@ -24,6 +24,11 @@ type ZoneStatus struct {
 	Name                      string `json:"name"`
 	Exists                    bool   `json:"exists"`
 	AlreadyTakenBySomeoneElse bool   `json:"already_taken_by_someone_else,omitempty"`
+	// AllowSubdomains: the user may create delegated subzones under this zone.
+	AllowSubdomains bool `json:"allow_subdomains"`
+	// Parent: for a created subzone, the base zone it is delegated under
+	// (empty for policy base zones). Lets the UI indent subzones under their parent.
+	Parent string `json:"parent,omitempty"`
 }
 
 // getZones returns a list of available DNS zones for the authenticated user.
@@ -72,6 +77,46 @@ func getZones(app *AppData) gin.HandlerFunc {
 				Name:                      zone.Zone,
 				Exists:                    zoneExists,
 				AlreadyTakenBySomeoneElse: domainExistsInStorage && !zoneExists,
+				AllowSubdomains:           zone.AllowSubdomains,
+			})
+		}
+
+		// Add the user's created subzones (delegated under an allow_subdomains base
+		// zone) so the UI can show them indented under their parent.
+		baseNames := make(map[string]bool, len(userZones))
+		allowSubBases := make([]string, 0)
+		for _, z := range userZones {
+			baseNames[z.Zone] = true
+			if z.AllowSubdomains {
+				allowSubBases = append(allowSubBases, z.Zone)
+			}
+		}
+
+		createdZones, err := app.Storage.ListUserZones(user.PreferredUsername)
+		if err != nil {
+			app.Log.Errorf("Error listing user zones: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list user zones"})
+			return
+		}
+		for _, cz := range createdZones {
+			if baseNames[cz.Zone] {
+				continue // already listed as a policy base zone
+			}
+			// Find the most specific allow_subdomains parent this zone sits under.
+			parent := ""
+			for _, base := range allowSubBases {
+				if isSubdomainOf(cz.Zone, base) && len(base) > len(parent) {
+					parent = base
+				}
+			}
+			if parent == "" {
+				continue // not a managed subzone (e.g. orphaned) -> not shown here
+			}
+			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+				Name:            cz.Zone,
+				Exists:          true,
+				AllowSubdomains: true, // subzones inherit the parent's allow_subdomains
+				Parent:          parent,
 			})
 		}
 

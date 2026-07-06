@@ -29,13 +29,17 @@ type PolicyRuleRequest struct {
 	ZonePattern      string `json:"zone_pattern" binding:"required"`
 	ZoneSoa          string `json:"zone_soa" binding:"required"`
 	TargetUserFilter string `json:"target_user_filter" binding:"required"`
+	AllowSubdomains  bool   `json:"allow_subdomains"`
 	Description      string `json:"description"`
 }
 
 // PolicyRulesResponse wraps policy rules for list endpoint.
 type PolicyRulesResponse struct {
-	EditAllowed bool         `json:"edit_allowed"`
-	Rules       []PolicyRule `json:"rules"`
+	EditAllowed bool `json:"edit_allowed"`
+	// IsSuperAdmin distinguishes full admins (who may also manage delegations)
+	// from delegated users (who can edit in-scope rules but not delegations).
+	IsSuperAdmin bool         `json:"is_super_admin"`
+	Rules        []PolicyRule `json:"rules"`
 }
 
 func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesResponse, error) {
@@ -46,14 +50,39 @@ func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesRespons
 		return nil, err
 	}
 
-	// Filter the rules based on user email
-	is_super_admin := isSuperAdmin(app, user)
-
-	if !is_super_admin {
-		rules = filterUserRules(rules, user)
+	// Super-admins see and can edit every rule.
+	if isSuperAdmin(app, user) {
+		return &PolicyRulesResponse{Rules: rules, EditAllowed: true, IsSuperAdmin: true}, nil
 	}
 
-	return &PolicyRulesResponse{Rules: rules, EditAllowed: is_super_admin}, nil
+	// Delegated users: show (and allow editing of) the rules whose ZoneSoa falls
+	// within one of the delegations granted to them.
+	delegations, err := app.Storage.DelegationGetAll()
+	if err != nil {
+		app.Log.Errorf("Error retrieving delegations: %v", err)
+		return nil, err
+	}
+	var userDelegations []DelegationPolicy
+	for _, d := range delegations {
+		if ok, _ := userCanAccessRule(user.Email, d.TargetUserFilter); ok {
+			userDelegations = append(userDelegations, d)
+		}
+	}
+	if len(userDelegations) > 0 {
+		inScope := make([]PolicyRule, 0)
+		for _, r := range rules {
+			for _, d := range userDelegations {
+				if zoneInScope(r.ZoneSoa, d.ZoneSuffix) {
+					inScope = append(inScope, r)
+					break
+				}
+			}
+		}
+		return &PolicyRulesResponse{Rules: inScope, EditAllowed: true}, nil
+	}
+
+	// Plain users: read-only view of the rules that grant them zones.
+	return &PolicyRulesResponse{Rules: filterUserRules(rules, user), EditAllowed: false}, nil
 }
 
 func (app *AppData) PolicyGetUserZones(user *UserClaims) ([]ZoneResponse, error) {
@@ -78,15 +107,42 @@ func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (b
 		return false, nil, err
 	}
 
-	for _, z := range zones {
-		if z.Zone == zone {
+	// Exact match: the requested zone is one of the user's base zones.
+	for i := range zones {
+		if zones[i].Zone == zone {
 			app.Log.Debugf("User %s is allowed to use zone %s", user.PreferredUsername, zone)
-			return true, &z, nil
+			return true, &zones[i], nil
 		}
+	}
+
+	// Subzone match: the requested zone is a subdomain of a base zone whose rule
+	// allows subdomains. Pick the most specific (longest) matching parent so the
+	// subzone is delegated under the closest owned zone.
+	var bestParent *ZoneResponse
+	for i := range zones {
+		if zones[i].AllowSubdomains && isSubdomainOf(zone, zones[i].Zone) {
+			if bestParent == nil || len(zones[i].Zone) > len(bestParent.Zone) {
+				bestParent = &zones[i]
+			}
+		}
+	}
+	if bestParent != nil {
+		app.Log.Debugf("User %s is allowed to use subzone %s under %s", user.PreferredUsername, zone, bestParent.Zone)
+		// Delegate the subzone under its parent (ZoneSOA = parent zone).
+		return true, &ZoneResponse{Zone: zone, ZoneSOA: bestParent.Zone, AllowSubdomains: true}, nil
 	}
 
 	app.Log.Debugf("User %s is not allowed to use zone %s", user.PreferredUsername, zone)
 	return false, nil, nil
+}
+
+// isSubdomainOf reports whether child is a strict subdomain of parent
+// (e.g. "sub.example.com" is a subdomain of "example.com"). Case and trailing
+// dots are normalized.
+func isSubdomainOf(child, parent string) bool {
+	c := strings.ToLower(strings.TrimSuffix(child, "."))
+	p := strings.ToLower(strings.TrimSuffix(parent, "."))
+	return c != p && strings.HasSuffix(c, "."+p)
 }
 
 func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error) {
@@ -101,6 +157,7 @@ func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error)
 		ZonePattern:      req.ZonePattern,
 		ZoneSoa:          req.ZoneSoa,
 		TargetUserFilter: req.TargetUserFilter,
+		AllowSubdomains:  req.AllowSubdomains,
 		Description:      req.Description,
 	}
 
@@ -136,6 +193,7 @@ func (app *AppData) PolicyUpdateRule(id int64, req PolicyRuleRequest) (*PolicyRu
 	existingRule.ZonePattern = req.ZonePattern
 	existingRule.ZoneSoa = req.ZoneSoa
 	existingRule.TargetUserFilter = req.TargetUserFilter
+	existingRule.AllowSubdomains = req.AllowSubdomains
 	existingRule.Description = req.Description
 
 	app.Log.Infof("Updating policy rule #%d to: %+v", id, existingRule)
@@ -197,6 +255,19 @@ func (app *AppData) ZoneGet(ctx context.Context, username, zone, externalDnsVers
 }
 
 func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int, any, error) {
+	// Refuse to delete a zone that still has delegated subzones under it — the
+	// user must delete the subzones first.
+	userZones, err := app.Storage.ListUserZones(username)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to list user zones", fmt.Errorf("app.ZoneDelete: %w", err))
+	}
+	for _, z := range userZones {
+		if isSubdomainOf(z.Zone, zone) {
+			return errorResult(http.StatusConflict, "Zone still has subzones — delete them first",
+				fmt.Errorf("app.ZoneDelete: %s still has subzone %s", zone, z.Zone))
+		}
+	}
+
 	if err := app.PowerDns.DeleteZone(ctx, zone, true); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to delete zone from DNS server",
 			fmt.Errorf("app.ZoneDelete: %w", err))
@@ -209,6 +280,34 @@ func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int,
 
 	app.Log.Infof("app.ZoneDelete: %s deleted for user %s", zone, username)
 	return http.StatusNoContent, nil, nil
+}
+
+// OrphanedZone is a stored zone that is no longer covered by any policy rule for
+// its owner (e.g. because the policy was later deleted or changed).
+type OrphanedZone struct {
+	Zone string `json:"zone"`
+	User string `json:"user"`
+}
+
+// OrphanedZones returns all stored zones that no current policy would grant to
+// their owner anymore. Ownership is checked against the stored username.
+func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
+	zones, err := app.Storage.ListAllZones()
+	if err != nil {
+		return nil, err
+	}
+	orphaned := make([]OrphanedZone, 0)
+	for _, z := range zones {
+		owner := &UserClaims{Email: z.Username, PreferredUsername: z.Username}
+		allowed, _, err := app.PolicyIsZoneAllowedForUser(z.Zone, owner)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			orphaned = append(orphaned, OrphanedZone{Zone: z.Zone, User: z.Username})
+		}
+	}
+	return orphaned, nil
 }
 
 func (app *AppData) ZoneCreate(ctx context.Context, username string, zone ZoneResponse) (int, any, error) {
@@ -357,57 +456,61 @@ func policyValidateRequest(req PolicyRuleRequest) error {
 	return nil
 }
 
-// userCanAccessRule checks if a user has access to a given policy rule based on the target user filter.
-func userCanAccessRule(email string, pattern string) (bool, error) {
-	// Normalize both to lowercase for case-insensitive comparison
-	patternLower := strings.ToLower(pattern)
-	emailLower := strings.ToLower(email)
-
-	// Check that the pattern contains at most one asterisk
-	if strings.Count(patternLower, "*") > 1 {
-		return false, errors.New("user filter can contain at most one wildcard asterisk")
+// emailMatchesPattern matches an email against a single filter pattern — either
+// an exact email or a one-'*' prefix/suffix wildcard (e.g. *@domain.com).
+// Comparison is case-insensitive; surrounding whitespace is ignored.
+func emailMatchesPattern(email, pattern string) bool {
+	e := strings.ToLower(strings.TrimSpace(email))
+	p := strings.ToLower(strings.TrimSpace(pattern))
+	if p == "" || strings.Count(p, "*") > 1 {
+		return false
 	}
-
-	// Check if the pattern contains the wildcard
-	if !strings.Contains(patternLower, "*") {
-		// No asterisk: must be an exact match
-		return emailLower == patternLower, nil
+	if !strings.Contains(p, "*") {
+		return e == p
 	}
+	parts := strings.SplitN(p, "*", 2)
+	return strings.HasPrefix(e, parts[0]) && strings.HasSuffix(e, parts[1])
+}
 
-	// Split the pattern by the asterisk
-	parts := strings.Split(patternLower, "*")
-
-	// A single asterisk splits into two parts
-	prefix := parts[0]
-	suffix := strings.Join(parts[1:], "")
-
-	// Rule: Match prefix AND match suffix
-	// HasPrefix/HasSuffix handle empty strings correctly.
-	return strings.HasPrefix(emailLower, prefix) && strings.HasSuffix(emailLower, suffix), nil
+// userCanAccessRule reports whether the email matches the target user filter.
+// The filter may be a comma-separated list of patterns; access is granted if
+// the email matches ANY entry.
+func userCanAccessRule(email string, filter string) (bool, error) {
+	for _, p := range strings.Split(filter, ",") {
+		if emailMatchesPattern(email, p) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func validateUserFilter(filter string) error {
-	errInvalidUserFilter := errors.New("user filter must be a valid email or a wildcard pattern like *@domain.com")
+	errInvalidUserFilter := errors.New("user filter must be a comma-separated list of valid emails or wildcard patterns like *@domain.com")
 
-	// Non-empty check
-	if filter == "" {
-		return errInvalidUserFilter
-	}
+	hasEntry := false
+	for _, raw := range strings.Split(filter, ",") {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue // tolerate blank entries / trailing commas
+		}
+		hasEntry = true
 
-	// At most one wildcard asterisk allowed
-	if strings.Count(filter, "*") > 1 {
-		return errInvalidUserFilter
-	}
-
-	// No wildcard: validate as a standard email address
-	if !strings.Contains(filter, "*") {
-		_, err := mail.ParseAddress(filter)
-		if err != nil {
+		// At most one wildcard asterisk allowed per entry.
+		if strings.Count(p, "*") > 1 {
 			return errInvalidUserFilter
 		}
-		return nil
+
+		// No wildcard: the entry must be a standard email address.
+		if !strings.Contains(p, "*") {
+			if _, err := mail.ParseAddress(p); err != nil {
+				return errInvalidUserFilter
+			}
+		}
 	}
 
+	if !hasEntry {
+		return errInvalidUserFilter
+	}
 	return nil
 }
 
@@ -457,8 +560,9 @@ func ruleToZoneResponse(rule PolicyRule, user *UserClaims) ZoneResponse {
 	zone := strings.ReplaceAll(rule.ZonePattern, "%u", userDnsLabel)
 
 	return ZoneResponse{
-		Zone:    zone,
-		ZoneSOA: rule.ZoneSoa,
+		Zone:            zone,
+		ZoneSOA:         rule.ZoneSoa,
+		AllowSubdomains: rule.AllowSubdomains,
 	}
 }
 

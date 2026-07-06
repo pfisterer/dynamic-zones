@@ -43,6 +43,21 @@ type PolicyRule struct {
 	ZonePattern      string    `gorm:"type:varchar(255);not null" json:"zone_pattern"`
 	ZoneSoa          string    `gorm:"type:varchar(255);not null" json:"zone_soa"`
 	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter"`
+	// AllowSubdomains lets owners of a matched zone also create/manage delegated
+	// subzones under it (e.g. sub.example.com under example.com). Added via GORM
+	// AutoMigrate (new column, defaults to false).
+	AllowSubdomains  bool      `gorm:"not null;default:false" json:"allow_subdomains"`
+	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// DelegationPolicy grants a user (or wildcard filter) the right to manage
+// PolicyRules whose ZoneSoa is at or below ZoneSuffix (zone + subdomains).
+// Managed by super-admins only.
+type DelegationPolicy struct {
+	ID               int64     `gorm:"primaryKey" json:"id"`
+	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter"`
+	ZoneSuffix       string    `gorm:"type:varchar(255);not null" json:"zone_suffix"`
 	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 }
@@ -71,7 +86,7 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to connect to %s database: %w", dbType, err)
 	}
 
-	err = db.AutoMigrate(&Zone{}, &Token{}, &PolicyRule{})
+	err = db.AutoMigrate(&Zone{}, &Token{}, &PolicyRule{}, &DelegationPolicy{})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to auto-migrate database: %w", err)
 	}
@@ -296,7 +311,7 @@ func (s *Storage) PolicyGetByID(id int64) (*PolicyRule, error) {
 func (s *Storage) PolicyUpdate(rule *PolicyRule) (*PolicyRule, error) {
 	// GORM will use the primary key (ID) of the struct to determine which record to update.
 	// We use Select to specify only the fields we allow the user to modify.
-	result := s.db.Model(rule).Select("ZonePattern", "TargetUserFilter", "Description").Updates(rule)
+	result := s.db.Model(rule).Select("ZonePattern", "ZoneSoa", "TargetUserFilter", "AllowSubdomains", "Description").Updates(rule)
 
 	if result.Error != nil {
 		return nil, fmt.Errorf("storage.Update: Failed to update rule %d: %w", rule.ID, result.Error)
@@ -331,4 +346,82 @@ func (s *Storage) PolicyDelete(id int64) error {
 	}
 
 	return nil
+}
+
+// --- DelegationPolicy storage ---
+
+func (s *Storage) DelegationCreate(d *DelegationPolicy) (*DelegationPolicy, error) {
+	if d.CreatedAt.IsZero() {
+		d.CreatedAt = time.Now()
+	}
+	if result := s.db.Create(d); result.Error != nil {
+		return nil, fmt.Errorf("storage.DelegationCreate: %w", result.Error)
+	}
+	return d, nil
+}
+
+func (s *Storage) DelegationGetAll() ([]DelegationPolicy, error) {
+	var ds []DelegationPolicy
+	if result := s.db.Order("id asc").Find(&ds); result.Error != nil {
+		return nil, fmt.Errorf("storage.DelegationGetAll: %w", result.Error)
+	}
+	return ds, nil
+}
+
+func (s *Storage) DelegationGetByID(id int64) (*DelegationPolicy, error) {
+	var d DelegationPolicy
+	if result := s.db.First(&d, id); result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, gorm.ErrRecordNotFound
+		}
+		return nil, fmt.Errorf("storage.DelegationGetByID: %w", result.Error)
+	}
+	return &d, nil
+}
+
+func (s *Storage) DelegationUpdate(d *DelegationPolicy) (*DelegationPolicy, error) {
+	result := s.db.Model(d).Select("TargetUserFilter", "ZoneSuffix", "Description").Updates(d)
+	if result.Error != nil {
+		return nil, fmt.Errorf("storage.DelegationUpdate: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		if _, err := s.DelegationGetByID(d.ID); err != nil {
+			return nil, err
+		}
+	}
+	return d, nil
+}
+
+func (s *Storage) DelegationDelete(id int64) error {
+	result := s.db.Delete(&DelegationPolicy{}, id)
+	if result.Error != nil {
+		return fmt.Errorf("storage.DelegationDelete: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// ListAllZones returns every stored zone (across all users).
+func (s *Storage) ListAllZones() ([]Zone, error) {
+	var zones []Zone
+	if result := s.db.Order("zone asc").Find(&zones); result.Error != nil {
+		return nil, fmt.Errorf("storage.ListAllZones: %w", result.Error)
+	}
+	return zones, nil
+}
+
+// GetZoneByName looks up a zone by its name (zone names are unique/primary key).
+// Returns (nil, nil) if no such zone exists.
+func (s *Storage) GetZoneByName(zone string) (*Zone, error) {
+	var z Zone
+	result := s.db.Where("zone = ?", zone).First(&z)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("storage.GetZoneByName: %w", result.Error)
+	}
+	return &z, nil
 }
