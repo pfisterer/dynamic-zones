@@ -120,7 +120,7 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger) gin.HandlerFunc {
+func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devMode bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -129,6 +129,19 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			log.Infof("Allowing pre-flight request without authentication")
 			c.Next()
 			return
+		}
+
+		// Dev-only: trust the X-Dummy-Auth-User header so the self-service UI's
+		// dummy-auth mode works for local development. This bypasses token
+		// verification entirely, so it is gated on devMode and is NEVER active
+		// in production (devMode is false there).
+		if devMode {
+			if dummyUser := c.GetHeader("X-Dummy-Auth-User"); dummyUser != "" {
+				log.Warnf("DEV MODE: trusting X-Dummy-Auth-User '%s' without token verification", dummyUser)
+				c.Set(UserDataKey, &UserClaims{Subject: dummyUser, Email: dummyUser, PreferredUsername: dummyUser})
+				c.Next()
+				return
+			}
 		}
 
 		// Get the Authorization header

@@ -161,7 +161,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Create router group for  API routes for v1
 	apiV1Group := router.Group("/v1")
 	enableCorsOriginReflectionConfig(apiV1Group)
-	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log))
+	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
