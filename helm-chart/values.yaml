@@ -57,7 +57,11 @@ dynamicZonesAPI:
     defaultAdminTsigKeyName: ""
     defaultAdminTsigKey: ""
     defaultAdminTsigAlg: ""
+    # JSON list of records added to each new user (leaf) zone.
     defaultRecords: ""
+    # JSON list of records added ONLY to SOA/base (intermediate) zones — e.g. the
+    # enforced CAA — kept out of leaf zones so a user cannot delete/override it.
+    defaultRecordsSoa: ""
 
 #------------------------------------
 # OIDC/Auth Configuration

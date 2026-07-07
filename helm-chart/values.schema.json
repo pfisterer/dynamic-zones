@@ -67,7 +67,8 @@
             "defaultAdminTsigKeyName": { "type": "string" },
             "defaultAdminTsigKey": { "type": "string" },
             "defaultAdminTsigAlg": { "type": "string" },
-            "defaultRecords": { "type": "string" }
+            "defaultRecords": { "type": "string" },
+            "defaultRecordsSoa": { "type": "string" }
           }
         }
       }

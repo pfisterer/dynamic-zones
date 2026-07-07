@@ -65,6 +65,7 @@ func RunApplication() {
 		[]string{thisNsServer}, appConfig.ZoneDefaults.DefaultAdminTsigKeyName, appConfig.ZoneDefaults.DefaultAdminTsigKey,
 		appConfig.ZoneDefaults.DefaultAdminTsigAlg,
 		appConfig.ZoneDefaults.DefaultRecords,
+		appConfig.ZoneDefaults.DefaultRecordsSoa,
 		log,
 	)
 	if err != nil {

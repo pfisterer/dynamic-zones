@@ -97,8 +97,13 @@ type DefaultRecord struct {
 }
 
 type ZoneDefaults struct {
-	// List of default records to create in each new zone for "fixed" provider (e.g., ""[{"name":"_acme-challenge","type":"CNAME","content":"auth.my-proxy.int","ttl":300}]"")
+	// List of default records to create in each new user (leaf) zone (e.g., ""[{"name":"_acme-challenge","type":"CNAME","content":"auth.my-proxy.int","ttl":300}]"")
 	DefaultRecords []DefaultRecord `json:"default_records" validate:"omitempty"`
+	// List of default records to create ONLY in the SOA/base (intermediate) zones,
+	// not in user (leaf) zones — e.g. the enforced CAA. Kept out of leaf zones so a
+	// user's zone TSIG key cannot delete or override it; it still applies to all
+	// child names below via CAA tree-climbing.
+	DefaultRecordsSoa []DefaultRecord `json:"default_records_soa" validate:"omitempty"`
 	// TSIG key name for admin updates, added to all zones (intermediate and requested)provider
 	DefaultAdminTsigKeyName string `json:"default_admin_tsig_name,omitempty" validate:"omitempty"`
 	// TSIG key for for admin updates, added to all zones (intermediate and requested)provider
@@ -170,6 +175,14 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 				var records []DefaultRecord
 				if err = json.Unmarshal([]byte(raw), &records); err != nil {
 					err = fmt.Errorf("failed to parse ZONE_DEFAULTS_ADMIN_RECORDS: %w", err)
+				}
+				return records
+			}(),
+			DefaultRecordsSoa: func() []DefaultRecord {
+				raw := helper.GetEnvString("ZONE_DEFAULTS_SOA_RECORDS", "[]")
+				var records []DefaultRecord
+				if err = json.Unmarshal([]byte(raw), &records); err != nil {
+					err = fmt.Errorf("failed to parse ZONE_DEFAULTS_SOA_RECORDS: %w", err)
 				}
 				return records
 			}(),

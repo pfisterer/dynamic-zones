@@ -128,6 +128,10 @@ spec:
             - name: ZONE_DEFAULTS_ADMIN_RECORDS
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultRecords | quote }}
             {{- end }}
+            {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultRecordsSoa }}
+            - name: ZONE_DEFAULTS_SOA_RECORDS
+              value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultRecordsSoa | quote }}
+            {{- end }}
 
             {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigKeyName }}
             - name: ZONE_DEFAULTS_ADMIN_TSIG_NAME

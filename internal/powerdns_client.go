@@ -39,6 +39,7 @@ type PowerDnsClient struct {
 	defaultTTLSeconds       uint32
 	zoneNsNames             []string
 	defaultUserZoneRecords  []DefaultRecord
+	defaultSoaZoneRecords   []DefaultRecord
 	defaultAdminTsigKeyName string
 	defaultAdminTsigKey     string
 	defaultAdminTsigAlg     string
@@ -47,6 +48,7 @@ type PowerDnsClient struct {
 func NewPowerDnsClient(url, vhost, apiKey string, defaultTtlSecs uint32, zoneNsNames []string,
 	defaultAdminTsigKeyName, defaultAdminTsigKey, defaultAdminTsigAlg string,
 	defaultUserZoneRecords []DefaultRecord,
+	defaultSoaZoneRecords []DefaultRecord,
 	log *zap.SugaredLogger) (*PowerDnsClient, error) {
 	pdns := powerdns.New(url, vhost, powerdns.WithAPIKey(apiKey))
 
@@ -61,6 +63,7 @@ func NewPowerDnsClient(url, vhost, apiKey string, defaultTtlSecs uint32, zoneNsN
 		defaultTTLSeconds:       defaultTtlSecs,
 		zoneNsNames:             zoneNsNames,
 		defaultUserZoneRecords:  defaultUserZoneRecords,
+		defaultSoaZoneRecords:   defaultSoaZoneRecords,
 		defaultAdminTsigKeyName: defaultAdminTsigKeyName,
 		defaultAdminTsigKey:     defaultAdminTsigKey,
 		defaultAdminTsigAlg:     defaultAdminTsigAlg,
@@ -155,8 +158,9 @@ func (p *PowerDnsClient) EnsureIntermediateZoneExists(ctx context.Context, zone,
 	} else {
 		p.log.Debugf("Intermediate zone %s does not exist (%v), will create it", zoneFQDN, err)
 
-		// Create zone via API with SOA + NS
-		zoneDef := p.prepareZoneForCreation(zoneFQDN)
+		// Create zone via API with SOA + NS. Intermediate/base (SOA) zones get the
+		// SOA default records (e.g. the enforced CAA) — the user cannot write here.
+		zoneDef := p.prepareZoneForCreation(zoneFQDN, p.defaultSoaZoneRecords)
 		_, err = p.powerdns.Zones.Add(ctx, zoneDef)
 
 		if err != nil {
@@ -205,8 +209,10 @@ func (p *PowerDnsClient) CreateUserZone(ctx context.Context, user, zone string, 
 		_ = p.powerdns.TSIGKeys.Delete(ctx, keyname)
 	}
 
-	// Create zone via API with SOA + NS
-	zoneDef := p.prepareZoneForCreation(zoneFQDN)
+	// Create zone via API with SOA + NS. User (leaf) zones get the user default
+	// records only — NOT the SOA records (e.g. CAA), which live in the base zone
+	// so the user's zone TSIG key cannot delete or override them.
+	zoneDef := p.prepareZoneForCreation(zoneFQDN, p.defaultUserZoneRecords)
 	p.log.Debugf("Creating zone with definition: %+v", zoneDef)
 	_, err := p.powerdns.Zones.Add(ctx, zoneDef)
 	if err != nil {
@@ -329,7 +335,11 @@ func (p *PowerDnsClient) addKeyToZone(ctx context.Context, zone, keyname, algori
 	return nil
 }
 
-func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string) *powerdns.Zone {
+// prepareZoneForCreation builds the zone definition (SOA + NS + the given
+// default records). `records` differs by zone kind: leaf/user zones get
+// defaultUserZoneRecords, SOA/base (intermediate) zones get defaultSoaZoneRecords
+// — so e.g. the enforced CAA lives only in the base zone the user cannot write.
+func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string, records []DefaultRecord) *powerdns.Zone {
 	// Build your SOA serial in YYYYMMDDnn
 	serial := time.Now().Format("20060102") + "01"
 	soaNameserver := dns.Fqdn(p.zoneNsNames[0])
@@ -339,13 +349,13 @@ func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string) *powerdns.Zone 
 	minimum := p.defaultTTLSeconds
 	soaContent := fmt.Sprintf("%s hostmaster.%s %s %d %d %d %d", soaNameserver, zoneFQDN, serial, refresh, retry, expire, minimum)
 
-	// Create the default records for user zones. Group by (name, type) so that
-	// several values sharing a name+type (e.g. multiple CAA records at the apex)
-	// end up in ONE RRset instead of overwriting each other. An empty or "@"
-	// name targets the zone apex (needed for zone-wide CAA records).
-	defaultRecordsRRSets := make([]powerdns.RRset, 0, len(p.defaultUserZoneRecords))
-	rrsetByKey := make(map[string]*powerdns.RRset, len(p.defaultUserZoneRecords))
-	for _, record := range p.defaultUserZoneRecords {
+	// Create the given default records. Group by (name, type) so that several
+	// values sharing a name+type (e.g. multiple CAA records at the apex) end up in
+	// ONE RRset instead of overwriting each other. An empty or "@" name targets the
+	// zone apex (needed for zone-wide CAA records).
+	defaultRecordsRRSets := make([]powerdns.RRset, 0, len(records))
+	rrsetByKey := make(map[string]*powerdns.RRset, len(records))
+	for _, record := range records {
 		name := zoneFQDN
 		if record.Name != "" && record.Name != "@" {
 			name = record.Name + "." + zoneFQDN
