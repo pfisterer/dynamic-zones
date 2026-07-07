@@ -110,7 +110,8 @@
           "additionalProperties": false,
           "properties": {
             "ip": { "type": "string" },
-            "port": { "type": "integer" }
+            "port": { "type": "integer" },
+            "advertisedNameserver": { "type": "string" }
           }
         }
       }

@@ -79,6 +79,10 @@ powerDNS:
   server:
     ip: "141.1.2.3"
     port: 53
+    # Optional public NS hostname (e.g. ns.cloud-ns.dhbw-mannheim.de.) shown to
+    # users in the dig / cert-manager / external-dns examples. The API still
+    # queries `ip` internally. Empty -> examples use `ip`.
+    advertisedNameserver: ""
 
 #------------------------------------
 # Ingress Configuration

@@ -388,7 +388,9 @@ func toExternalDNSConfig(app *AppData, pdnsZone *ZoneDataResponse, externalDnsVe
 	data := map[string]any{
 		"txtPrefix":        "dynamic-zones-dns-",
 		"txtOwnerId":       "dynamic-zones-dns",
-		"dnsServerAddress": app.Config.PowerDns.DnsServerAddress,
+		// external-dns runs in the user's cluster; advertise the public NS
+		// hostname (falls back to the literal IP when unset).
+		"dnsServerAddress": app.Config.PowerDns.AdvertisedServer(),
 		"dnsServerPort":    app.Config.PowerDns.DnsServerPort,
 		"zone":             pdnsZone.Zone,
 		"tsigKey":          pdnsZone.ZoneKeys[0].Key,

@@ -33,7 +33,10 @@ func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 		c.JSON(http.StatusOK, gin.H{
 			"dns_server_address": app.Config.PowerDns.DnsServerAddress,
 			"dns_server_port":    app.Config.PowerDns.DnsServerPort,
-			"version":            generated_docs.Version,
+			// Public NS hostname to show in dig / cert-manager / external-dns
+			// examples (falls back to dns_server_address when unset).
+			"advertised_nameserver": app.Config.PowerDns.AdvertisedServer(),
+			"version":               generated_docs.Version,
 			"auth": gin.H{
 				"auth_provider": "oidc",
 				"issuer_url":    app.Config.WebServer.OIDCIssuerURL,

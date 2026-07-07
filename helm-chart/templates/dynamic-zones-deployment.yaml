@@ -164,6 +164,12 @@ spec:
               value: {{ .Values.powerDNS.server.ip | quote }}
             - name: PDNS_SERVER_PORT
               value: {{ .Values.powerDNS.server.port | quote }}
+            {{- if .Values.powerDNS.server.advertisedNameserver }}
+            # Public NS hostname shown in the dig / cert-manager / external-dns
+            # examples. The API still talks to PDNS_SERVER_ADDRESS internally.
+            - name: PDNS_ADVERTISED_NAMESERVER
+              value: {{ .Values.powerDNS.server.advertisedNameserver | quote }}
+            {{- end }}
             - name: PDNS_SERVER_DEFAULT_TTL
               value: "60"
 

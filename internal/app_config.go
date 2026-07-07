@@ -47,6 +47,20 @@ type PowerDnsConfig struct {
 	DnsServerPort uint16 `json:"dns_server_port" validate:"required,port"`
 	// The default TTL for DNS records served by PowerDNS when they are created by this application
 	DefaultTTLSeconds uint32 `json:"default_ttl_seconds"`
+	// AdvertisedNameserver is the public NS hostname (e.g. ns.cloud-ns.dhbw-mannheim.de.)
+	// shown to users in the dig / cert-manager / external-dns examples. Purely
+	// cosmetic: the API itself always talks to DnsServerAddress (a literal IP).
+	// Empty -> the examples fall back to DnsServerAddress.
+	AdvertisedNameserver string `json:"advertised_nameserver"`
+}
+
+// AdvertisedServer returns the nameserver to show to users (the public NS
+// hostname if configured, otherwise the literal DnsServerAddress).
+func (p PowerDnsConfig) AdvertisedServer() string {
+	if p.AdvertisedNameserver != "" {
+		return p.AdvertisedNameserver
+	}
+	return p.DnsServerAddress
 }
 
 type StorageConfig struct {
@@ -130,9 +144,10 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			PdnsUrl:           helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
 			PdnsVhost:         helper.GetEnvString("PDNS_VHOST", "localhost"),
 			PdnsApiKey:        helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
-			DnsServerAddress:  helper.GetEnvString("PDNS_SERVER_ADDRESS", "localhost"),
-			DnsServerPort:     uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
-			DefaultTTLSeconds: uint32(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
+			DnsServerAddress:     helper.GetEnvString("PDNS_SERVER_ADDRESS", "localhost"),
+			DnsServerPort:        uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
+			DefaultTTLSeconds:    uint32(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
+			AdvertisedNameserver: helper.GetEnvString("PDNS_ADVERTISED_NAMESERVER", ""),
 		},
 		Storage: StorageConfig{
 			DbType:             helper.GetEnvString("DB_TYPE", "sqlite"),
