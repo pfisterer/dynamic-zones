@@ -339,22 +339,36 @@ func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string) *powerdns.Zone 
 	minimum := p.defaultTTLSeconds
 	soaContent := fmt.Sprintf("%s hostmaster.%s %s %d %d %d %d", soaNameserver, zoneFQDN, serial, refresh, retry, expire, minimum)
 
-	// Create the default records for user zones
+	// Create the default records for user zones. Group by (name, type) so that
+	// several values sharing a name+type (e.g. multiple CAA records at the apex)
+	// end up in ONE RRset instead of overwriting each other. An empty or "@"
+	// name targets the zone apex (needed for zone-wide CAA records).
 	defaultRecordsRRSets := make([]powerdns.RRset, 0, len(p.defaultUserZoneRecords))
+	rrsetByKey := make(map[string]*powerdns.RRset, len(p.defaultUserZoneRecords))
 	for _, record := range p.defaultUserZoneRecords {
+		name := zoneFQDN
+		if record.Name != "" && record.Name != "@" {
+			name = record.Name + "." + zoneFQDN
+		}
+		fqdn := dns.Fqdn(name)
+		key := fqdn + "|" + record.Type
+		rec := powerdns.Record{
+			Content:  powerdns.String(record.Content),
+			Disabled: powerdns.Bool(false),
+		}
+		if existing, ok := rrsetByKey[key]; ok {
+			existing.Records = append(existing.Records, rec)
+			continue
+		}
 		rrset := powerdns.RRset{
-			Name:       powerdns.String(dns.Fqdn(record.Name + "." + zoneFQDN)),
+			Name:       powerdns.String(fqdn),
 			Type:       powerdns.RRTypePtr(powerdns.RRType(record.Type)),
 			TTL:        powerdns.Uint32(record.TTL),
 			ChangeType: powerdns.ChangeTypePtr(powerdns.ChangeTypeReplace),
-			Records: []powerdns.Record{
-				{
-					Content:  powerdns.String(record.Content),
-					Disabled: powerdns.Bool(false),
-				},
-			},
+			Records:    []powerdns.Record{rec},
 		}
 		defaultRecordsRRSets = append(defaultRecordsRRSets, rrset)
+		rrsetByKey[key] = &defaultRecordsRRSets[len(defaultRecordsRRSets)-1]
 	}
 
 	// Build the RRsets: SOA + NS
