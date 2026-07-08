@@ -15,6 +15,9 @@ type ZoneResponse struct {
 	ZoneSOA string `json:"zone_soa"`
 	// Whether the owner may create delegated subzones under this zone.
 	AllowSubdomains bool `json:"allow_subdomains"`
+	// Whether this zone may be shared with additional owners (and policy-entitled
+	// users auto-join). Comes from the governing policy rule.
+	SharingAllowed bool `json:"sharing_allowed"`
 }
 
 // CreatePolicyApiGroup sets up the /policies API group and its routes.

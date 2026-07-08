@@ -69,8 +69,10 @@ func MissingOrInvalidZonesInPdns(ctx context.Context, db *Storage, powerdns *Pow
 
 	// Process zones from the channel
 	for zone := range ch {
-		// Check if the zone exists in PowerDNS
-		pdnsZone, err := powerdns.GetZone(ctx, zone.Zone)
+		// Check if the zone exists in PowerDNS. Empty forUser -> return all keys:
+		// this is the internal reconcile loop (no caller to scope to), it only needs
+		// to know whether the zone/keys exist, not a specific owner's key.
+		pdnsZone, err := powerdns.GetZone(ctx, zone.Zone, "")
 		if err != nil {
 			out <- MissingOrInvalidZoneInPdns{Zone: zone, invalidInPowerDNS: false}
 			continue

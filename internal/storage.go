@@ -47,6 +47,11 @@ type PolicyRule struct {
 	// subzones under it (e.g. sub.example.com under example.com). Added via GORM
 	// AutoMigrate (new column, defaults to false).
 	AllowSubdomains  bool      `gorm:"not null;default:false" json:"allow_subdomains"`
+	// SharingAllowed lets owners of a matched zone share it with additional users
+	// (and policy-entitled users auto-join). Off by default (opt-in per rule);
+	// added via GORM AutoMigrate (new column, defaults to false -> backfills
+	// existing rules to false, preserving the old single-owner behaviour).
+	SharingAllowed   bool      `gorm:"not null;default:false" json:"sharing_allowed"`
 	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 }
@@ -171,6 +176,44 @@ func (storage *Storage) CreateZone(user string, zone string, requiresRefreshAt t
 func (storage *Storage) DeleteZone(user string, zone string) error {
 	if err := storage.db.Where("username = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
 		return fmt.Errorf("storage.CreateZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
+	}
+	return nil
+}
+
+// ---- Zone owners (a zone can have several owner rows, one per user) --------
+
+// ListZoneOwners returns the usernames that manage (own) a zone.
+func (storage *Storage) ListZoneOwners(zone string) ([]string, error) {
+	var owners []string
+	if err := storage.db.Model(&Zone{}).Where("zone = ?", zone).Distinct().Pluck("username", &owners).Error; err != nil {
+		return nil, fmt.Errorf("storage.ListZoneOwners: Failed to list owners of zone ('%s'): %w", zone, err)
+	}
+	return owners, nil
+}
+
+// IsZoneOwner reports whether `user` manages `zone`.
+func (storage *Storage) IsZoneOwner(user string, zone string) (bool, error) {
+	var count int64
+	if err := storage.db.Model(&Zone{}).Where("zone = ? AND username = ?", zone, user).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("storage.IsZoneOwner: Failed to check owner ('%s') of zone ('%s'): %w", user, zone, err)
+	}
+	return count > 0, nil
+}
+
+// CountZoneOwners returns how many users own a zone.
+func (storage *Storage) CountZoneOwners(zone string) (int64, error) {
+	var count int64
+	if err := storage.db.Model(&Zone{}).Where("zone = ?", zone).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("storage.CountZoneOwners: Failed to count owners of zone ('%s'): %w", zone, err)
+	}
+	return count, nil
+}
+
+// DeleteAllZoneOwners removes every owner row for a zone (used when the whole
+// zone is deleted, as opposed to removing a single owner via DeleteZone).
+func (storage *Storage) DeleteAllZoneOwners(zone string) error {
+	if err := storage.db.Where("zone = ?", zone).Delete(&Zone{}).Error; err != nil {
+		return fmt.Errorf("storage.DeleteAllZoneOwners: Failed to delete owners of zone ('%s'): %w", zone, err)
 	}
 	return nil
 }

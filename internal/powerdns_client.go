@@ -79,12 +79,22 @@ func (p *PowerDnsClient) isUserKey(keyname string) bool {
 	return len(keyname) > len(userKeyPrefix) && keyname[:len(userKeyPrefix)] == userKeyPrefix
 }
 
-func (p *PowerDnsClient) GetZone(ctx context.Context, zone string) (*ZoneDataResponse, error) {
+// GetZone returns the zone's user TSIG keys. When forUser is non-empty, ONLY that
+// user's own key (keyNameFor(forUser, zone)) is returned — so a co-owner never
+// sees another owner's key, which is what makes owner removal an effective
+// revocation. An empty forUser returns all user keys (internal/admin callers).
+func (p *PowerDnsClient) GetZone(ctx context.Context, zone string, forUser string) (*ZoneDataResponse, error) {
 	// Get zone metadata from PowerDNS
 	zonemeta, err := p.powerdns.Metadata.Get(ctx, zone, powerdns.MetadataTSIGAllowDNSUpdate)
 	if err != nil {
 		p.log.Errorf("Failed to get metadata for zone %s: %v", zone, err)
 		return nil, fmt.Errorf("failed to get metadata from PowerDNS: %v", err)
+	}
+
+	// Scope to the caller's own key when a user is given.
+	wantKey := ""
+	if forUser != "" {
+		wantKey = p.keyNameFor(forUser, zone)
 	}
 
 	// Generate the response
@@ -98,6 +108,9 @@ func (p *PowerDnsClient) GetZone(ctx context.Context, zone string) (*ZoneDataRes
 		if !p.isUserKey(keyname) {
 			p.log.Debugf("Skipping non-user TSIG key '%s' for zone '%s'", keyname, zone)
 			continue
+		}
+		if wantKey != "" && keyname != wantKey {
+			continue // only the caller's own key
 		}
 
 		tsigkey, err := p.powerdns.TSIGKeys.Get(ctx, keyname)
@@ -114,6 +127,72 @@ func (p *PowerDnsClient) GetZone(ctx context.Context, zone string) (*ZoneDataRes
 	}
 
 	return &response, nil
+}
+
+// removeValueFromMetadata rewrites a zone's metadata list of `kind`, dropping `value`.
+func (p *PowerDnsClient) removeValueFromMetadata(ctx context.Context, zone string, kind powerdns.MetadataKind, value string) error {
+	existing, err := p.powerdns.Metadata.Get(ctx, zone, kind)
+	if err != nil {
+		return fmt.Errorf("getting metadata %s failed: %v", kind, err)
+	}
+	final := make([]string, 0)
+	if existing != nil && existing.Metadata != nil {
+		for _, v := range existing.Metadata {
+			if v != value {
+				final = append(final, v)
+			}
+		}
+	}
+	_, err = p.powerdns.Metadata.Set(ctx, zone, kind, final)
+	return err
+}
+
+// AddOwnerKey ensures `user` has their own TSIG key on `zone` (generating one if
+// absent). Idempotent — re-adding an existing owner keeps their key.
+func (p *PowerDnsClient) AddOwnerKey(ctx context.Context, zone, user string) error {
+	zoneFQDN := dns.Fqdn(zone)
+	keyname := p.keyNameFor(user, zone)
+
+	// Reuse the existing key if it is already present.
+	if existing, err := p.powerdns.TSIGKeys.Get(ctx, keyname); err == nil && existing != nil && existing.Key != nil && existing.Algorithm != nil {
+		return p.addKeyToZone(ctx, zoneFQDN, keyname, *existing.Algorithm, *existing.Key)
+	}
+
+	key, err := helper.GenerateTSIGKeyHMACSHA512()
+	if err != nil {
+		return fmt.Errorf("AddOwnerKey: failed to generate TSIG key: %w", err)
+	}
+	return p.addKeyToZone(ctx, zoneFQDN, keyname, "hmac-sha512", key)
+}
+
+// RemoveOwnerKey deletes `user`'s TSIG key from `zone`: it is dropped from the
+// update and AXFR metadata and the key object is deleted, so it stops validating
+// immediately. Other owners' keys are untouched.
+func (p *PowerDnsClient) RemoveOwnerKey(ctx context.Context, zone, user string) error {
+	zoneFQDN := dns.Fqdn(zone)
+	keyname := p.keyNameFor(user, zone)
+
+	_ = p.removeValueFromMetadata(ctx, zoneFQDN, powerdns.MetadataTSIGAllowDNSUpdate, keyname)
+	_ = p.removeValueFromMetadata(ctx, zoneFQDN, powerdns.MetadataTSIGAllowAXFR, keyname)
+
+	if err := p.powerdns.TSIGKeys.Delete(ctx, keyname); err != nil {
+		return fmt.Errorf("RemoveOwnerKey: failed to delete TSIG key '%s': %w", keyname, err)
+	}
+	return nil
+}
+
+// RotateZoneKeys regenerates the TSIG key of every given owner (delete + create),
+// e.g. after a suspected key compromise. All owners must re-fetch their key.
+func (p *PowerDnsClient) RotateZoneKeys(ctx context.Context, zone string, owners []string) error {
+	for _, owner := range owners {
+		if err := p.RemoveOwnerKey(ctx, zone, owner); err != nil {
+			return fmt.Errorf("RotateZoneKeys: %w", err)
+		}
+		if err := p.AddOwnerKey(ctx, zone, owner); err != nil {
+			return fmt.Errorf("RotateZoneKeys: %w", err)
+		}
+	}
+	return nil
 }
 
 func (p *PowerDnsClient) DeleteZone(ctx context.Context, zone string, delete_all_keys bool) error {
@@ -241,7 +320,7 @@ func (p *PowerDnsClient) CreateUserZone(ctx context.Context, user, zone string, 
 		return nil, fmt.Errorf("failed to add TSIG key to zone: %v", err)
 	}
 
-	return p.GetZone(ctx, zone)
+	return p.GetZone(ctx, zone, user)
 }
 
 func (p *PowerDnsClient) addKeyToZone(ctx context.Context, zone, keyname, algorithm, key string) error {

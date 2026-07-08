@@ -25,13 +25,15 @@
                 zone_soa: "users.dhbw.cloud",
                 target_user_filter: "*@dhbw.de",
                 allow_subdomains: true,
+                sharing_allowed: false,
                 description: "Automatic personal zones for DHBW users"
             },
             {
-                zone_pattern: "project.dhbw.cloud",
+                zone_pattern: "some-project.dhbw.cloud",
                 zone_soa: "project.dhbw.cloud",
-                target_user_filter: "*@dhbw.de",
+                target_user_filter: "dennis.pfisterer@dhbw.de, clemens.martin@dhbw.de",
                 allow_subdomains: true,
+                sharing_allowed: true,
                 description: "All DHBW users can manage a common project zone"
             },
             {
@@ -39,6 +41,7 @@
                 zone_soa: "cloud.uni-luebeck.de",
                 target_user_filter: "*@uni-luebeck.de",
                 allow_subdomains: true,
+                sharing_allowed: false,
                 description: "All Uni-Luebeck users can create subdomains"
             }
         ];
