@@ -14,9 +14,9 @@
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.99.0",
-    "esbuild": "^0.25.9",
+    "esbuild": "^0.28.1",
     "esbuild-plugin-alias-path": "^2.0.2",
     "swagger2openapi": "^7.0.8",
-    "typescript": "^5.9.2"
+    "typescript": "^6.0.3"
   }
 }
