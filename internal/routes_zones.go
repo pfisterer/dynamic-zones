@@ -222,10 +222,15 @@ func getZones(app *AppData) gin.HandlerFunc {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone ownership"})
 					return
 				}
-				if owners, err = app.Storage.ListZoneOwners(zone.Zone); err != nil {
-					app.Log.Errorf("Error listing zone owners: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone owners"})
-					return
+				// Only reveal the owner list to an actual owner. A policy-
+				// entitled non-owner (including the "already taken by someone else"
+				// case) must not be able to enumerate the current owners' emails.
+				if isOwner {
+					if owners, err = app.Storage.ListZoneOwners(zone.Zone); err != nil {
+						app.Log.Errorf("Error listing zone owners: %v", err)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone owners"})
+						return
+					}
 				}
 			}
 			canJoin := existsInStorage && !isOwner && zone.SharingAllowed
@@ -299,7 +304,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 				Name:            cz.Zone,
 				Exists:          true,
-				AllowSubdomains: true,               // subzones inherit the parent's allow_subdomains
+				AllowSubdomains: true,                // subzones inherit the parent's allow_subdomains
 				SharingAllowed:  baseSharing[parent], // and the parent's sharing setting
 				Parent:          parent,
 				Owners:          zOwners,

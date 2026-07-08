@@ -353,8 +353,11 @@ func (s *Storage) PolicyGetByID(id int64) (*PolicyRule, error) {
 // The rule parameter should contain the ID of the rule to update and the new values.
 func (s *Storage) PolicyUpdate(rule *PolicyRule) (*PolicyRule, error) {
 	// GORM will use the primary key (ID) of the struct to determine which record to update.
-	// We use Select to specify only the fields we allow the user to modify.
-	result := s.db.Model(rule).Select("ZonePattern", "ZoneSoa", "TargetUserFilter", "AllowSubdomains", "Description").Updates(rule)
+	// We use Select to specify only the fields we allow the user to modify. Listing a
+	// field here also forces GORM to write its ZERO value (Updates skips zero fields of a
+	// struct otherwise) — required for booleans like SharingAllowed/AllowSubdomains so
+	// that toggling them OFF actually persists (SEC #9: sharing must be revocable).
+	result := s.db.Model(rule).Select("ZonePattern", "ZoneSoa", "TargetUserFilter", "AllowSubdomains", "Description", "SharingAllowed").Updates(rule)
 
 	if result.Error != nil {
 		return nil, fmt.Errorf("storage.Update: Failed to update rule %d: %w", rule.ID, result.Error)

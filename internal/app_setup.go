@@ -171,6 +171,33 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	return router
 }
 
+// maskSecret returns a short, non-reversible preview of a secret for logs: the
+// first few characters plus the total length, or "***" when it is too short to
+// reveal safely. The length guard also means slicing can never panic on an empty
+// or short secret (SEC #18).
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	const shown = 4
+	if len(s) <= shown {
+		return "***"
+	}
+	return fmt.Sprintf("%s…(len %d)", s[:shown], len(s))
+}
+
+// maskConnString redacts only the password=… token of a space-separated DSN,
+// keeping host/user/dbname visible for debugging.
+func maskConnString(dsn string) string {
+	fields := strings.Fields(dsn)
+	for i, f := range fields {
+		if k, v, ok := strings.Cut(f, "="); ok && strings.EqualFold(k, "password") {
+			fields[i] = k + "=" + maskSecret(v)
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
 func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	var appConfigJson []byte
 	var err error
@@ -178,8 +205,14 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	if appConfig.DevMode {
 		appConfigJson, err = json.MarshalIndent(appConfig, "", "  ")
 	} else {
-		// Redact sensitive information (print first 10 characters of the secret)
-		appConfig.UpstreamDns.Tsig_Secret = fmt.Sprintf("%s**********", appConfig.UpstreamDns.Tsig_Secret[:10])
+		// Redact every secret to a short preview before logging (SEC #10): these
+		// logs are shipped to Loki, so full API keys / TSIG keys / DB passwords must
+		// never appear. maskSecret also length-guards the value, so an empty or
+		// short secret can no longer panic on a slice (SEC #18).
+		appConfig.UpstreamDns.Tsig_Secret = maskSecret(appConfig.UpstreamDns.Tsig_Secret)
+		appConfig.PowerDns.PdnsApiKey = maskSecret(appConfig.PowerDns.PdnsApiKey)
+		appConfig.ZoneDefaults.DefaultAdminTsigKey = maskSecret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
+		appConfig.Storage.DbConnectionString = maskConnString(appConfig.Storage.DbConnectionString)
 		// In production mode, we use a compact JSON format without indentation
 		appConfigJson, err = json.Marshal(appConfig)
 	}
