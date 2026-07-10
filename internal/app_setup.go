@@ -157,6 +157,13 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Create static file server
 	homeGroup := router.Group("/")
 	homeGroup.Use(cors.Default())
+	// The generated API client (client/*.gen.mjs) is imported by the SPA at runtime and
+	// MUST never be served stale: a browser holding a cached older SDK silently lacks any
+	// newly added operation and the UI feature no-ops. In DevMode the whole router already
+	// gets this; in production only the static assets need it.
+	if !app.Config.DevMode {
+		homeGroup.Use(disableCachingMiddleware())
+	}
 	CreateHomeRoutes(homeGroup, app)
 
 	// Create router group for  API routes for v1
