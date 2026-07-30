@@ -265,6 +265,29 @@ func getZones(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list user zones"})
 			return
 		}
+
+		// A zone held through SHARING rather than policy is a base zone too, so
+		// resolve the governing rule of every owned zone up front and let those
+		// that allow subdomains act as parents below. Without this a co-owner's
+		// subzones would render top-level instead of indented under their parent.
+		govDefs := make(map[string]*ZoneResponse, len(createdZones))
+		for _, cz := range createdZones {
+			if baseNames[cz.Zone] {
+				continue
+			}
+			def, err := app.zoneGoverningDef(cz.Zone)
+			if err != nil {
+				app.Log.Errorf("Error resolving governing rule: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve zone policy"})
+				return
+			}
+			govDefs[cz.Zone] = def
+			if def != nil && def.AllowSubdomains {
+				allowSubBases = append(allowSubBases, cz.Zone)
+				baseSharing[cz.Zone] = def.SharingAllowed
+			}
+		}
+
 		for _, cz := range createdZones {
 			if baseNames[cz.Zone] {
 				continue // already listed as a policy base zone
@@ -286,12 +309,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 				// A zone the user owns that is neither a policy base zone nor a
 				// subzone of one -> a zone SHARED with them (or orphaned). Show it as
 				// a top-level managed zone, using its governing rule's flags.
-				def, err := app.zoneGoverningDef(cz.Zone)
-				if err != nil {
-					app.Log.Errorf("Error resolving governing rule: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve zone policy"})
-					return
-				}
+				def := govDefs[cz.Zone]
 				zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 					Name:            cz.Zone,
 					Exists:          true,
@@ -421,6 +439,20 @@ func postZone(app *AppData) gin.HandlerFunc {
 			app.Log.Errorf("Error getting user zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
 			return
+		}
+
+		if !isAllowed {
+			// Second path: the user owns a zone above this one that allows
+			// subdomains. A co-owner shared into a zone manages it, so they may
+			// delegate below it even without their own policy entitlement — which is
+			// also what the "Subzone" button in the UI offers them.
+			zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.PreferredUsername)
+			if err != nil {
+				app.Log.Errorf("Error resolving owned parent zone: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve parent zone"})
+				return
+			}
+			isAllowed = zoneDef != nil
 		}
 
 		if !isAllowed {

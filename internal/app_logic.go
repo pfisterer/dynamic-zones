@@ -353,7 +353,13 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 	if err := app.PowerDns.AddOwnerKey(ctx, zone, username); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to provision zone key", err)
 	}
-	app.Log.Infof("app.ZoneJoin: %s joined shared zone %s", username, zone)
+
+	// Sharing covers the subtree: take over the zones already delegated below.
+	subzones, err := app.grantOwnerSubtree(ctx, username, zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to grant subzone access", err)
+	}
+	app.Log.Infof("app.ZoneJoin: %s joined shared zone %s (%d subzone(s))", username, zone, len(subzones))
 
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
@@ -430,6 +436,16 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 		app.Log.Infof("app.ZoneAddOwner: %s added %s as owner of %s", caller.PreferredUsername, newOwner, zone)
 	}
 
+	// Unconditional (not only for a fresh owner): sharing covers the subtree, so
+	// this also repairs an owner who predates a subzone.
+	subzones, err := app.grantOwnerSubtree(ctx, newOwner, zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to grant subzone access", err)
+	}
+	for _, sub := range subzones {
+		app.Log.Infof("app.ZoneAddOwner: %s also owns subzone %s", newOwner, sub)
+	}
+
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to list owners", err)
@@ -470,7 +486,17 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 	if err := app.PowerDns.RemoveOwnerKey(ctx, zone, owner); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to remove owner key", err)
 	}
-	app.Log.Infof("app.ZoneRemoveOwner: %s removed %s from %s", caller.PreferredUsername, owner, zone)
+
+	// Symmetric to joining: giving up a zone gives up what it delegates. Subzones
+	// where they are the last owner are kept — see revokeOwnerSubtree.
+	revoked, kept, err := app.revokeOwnerSubtree(ctx, owner, zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to revoke subzone access", err)
+	}
+	app.Log.Infof("app.ZoneRemoveOwner: %s removed %s from %s (%d subzone(s) revoked)", caller.PreferredUsername, owner, zone, len(revoked))
+	for _, sub := range kept {
+		app.Log.Warnf("app.ZoneRemoveOwner: %s stays the only owner of subzone '%s' — removing them would orphan it", owner, sub)
+	}
 
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
@@ -563,6 +589,12 @@ func (app *AppData) ZoneCreate(ctx context.Context, username string, zone ZoneRe
 	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
 	if _, err := app.Storage.CreateZone(username, zone.Zone, refreshTime); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to create zone in storage", fmt.Errorf("app.ZoneCreate: %w", err))
+	}
+
+	// A subzone under a shared zone belongs to that zone's owners as well, so it
+	// does not become invisible to the people who share the parent.
+	if err := app.inheritOwnersFromParent(ctx, zone.Zone, username); err != nil {
+		return errorResult(http.StatusInternalServerError, "Failed to inherit parent owners", fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	return http.StatusCreated, gin.H{"success": zoneResponse}, nil
