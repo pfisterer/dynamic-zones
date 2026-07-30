@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -109,13 +108,6 @@ func RunApplication() {
 		}
 
 		log.Infof("Successfully executed initial data script: %s", appConfig.InitialDataScriptPath)
-	}
-
-	// Sharing covers a zone's subtree. Zones shared before that rule existed still
-	// have co-owners without access to the subzones below them, so bring the owner
-	// sets in line once at startup (idempotent, a no-op on consistent data).
-	if err := appData.BackfillSubzoneOwners(context.Background()); err != nil {
-		log.Errorf("Failed to backfill subzone owners: %v", err)
 	}
 
 	// Create and run the web server server forever

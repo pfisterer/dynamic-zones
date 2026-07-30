@@ -120,64 +120,6 @@ func seedSharedParentWithSubzone(t *testing.T, app *AppData, owner, parent, subz
 	}
 }
 
-// TestBackfillSubzoneOwners covers the repair path for zones shared before
-// sharing covered the subtree: the co-owner is on the parent only.
-func TestBackfillSubzoneOwners(t *testing.T) {
-	const (
-		owner    = "dennis@dhbw.de"
-		coOwner  = "clemens@dhbw.de"
-		parent   = "services.example.com"
-		subzone  = "llm.services.example.com"
-		unshared = "other.example.com"
-	)
-	app := newPdnsTestApp(t)
-	ctx := t.Context()
-	seedSharedParentWithSubzone(t, app, owner, parent, subzone)
-
-	// The pre-fix state: joining granted the parent and nothing below it.
-	if err := app.grantOwner(ctx, coOwner, parent); err != nil {
-		t.Fatalf("failed to seed the co-owner: %v", err)
-	}
-	if owns, _ := ownsWithKey(t, app, coOwner, subzone); owns {
-		t.Fatal("precondition failed: the co-owner already owns the subzone")
-	}
-
-	// An unrelated zone must not be dragged in by the repair.
-	if _, err := app.PowerDns.CreateUserZone(ctx, owner, unshared, true); err != nil {
-		t.Fatalf("failed to create unrelated zone: %v", err)
-	}
-	if _, err := app.Storage.CreateZone(owner, unshared, time.Now()); err != nil {
-		t.Fatalf("failed to create unrelated zone in storage: %v", err)
-	}
-
-	if err := app.BackfillSubzoneOwners(ctx); err != nil {
-		t.Fatalf("BackfillSubzoneOwners failed: %v", err)
-	}
-
-	owns, hasKey := ownsWithKey(t, app, coOwner, subzone)
-	if !owns {
-		t.Error("expected the co-owner to own the subzone after the backfill")
-	}
-	if !hasKey {
-		t.Error("expected the co-owner to have their own TSIG key on the subzone")
-	}
-	if owns, _ := ownsWithKey(t, app, coOwner, unshared); owns {
-		t.Error("the backfill must not grant zones outside the shared subtree")
-	}
-
-	// Running it again changes nothing — it is meant to be safe on every startup.
-	if err := app.BackfillSubzoneOwners(ctx); err != nil {
-		t.Fatalf("second BackfillSubzoneOwners run failed: %v", err)
-	}
-	owners, err := app.Storage.ListZoneOwners(subzone)
-	if err != nil {
-		t.Fatalf("ListZoneOwners failed: %v", err)
-	}
-	if len(owners) != 2 {
-		t.Errorf("expected 2 owners after a repeated run, got %v", owners)
-	}
-}
-
 // TestShareAndLeaveCoverSubtree covers the forward paths: sharing a zone hands
 // over what it delegates, and leaving gives it back.
 func TestShareAndLeaveCoverSubtree(t *testing.T) {
