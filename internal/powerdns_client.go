@@ -474,12 +474,15 @@ func (p *PowerDnsClient) prepareZoneForCreation(zoneFQDN string, records []Defau
 		},
 	}
 
-	// Build the zone definition with rrsets
+	// Build the zone definition with rrsets. SOAEdit stays unset on purpose:
+	// "DEFAULT" is a valid value for SOA-EDIT-API only, and pdns logged
+	// "SOA-EDIT type 'DEFAULT' for zone <x> is unknown." on every zone access
+	// (~2400 lines/h on prod) when we set it as SOA-EDIT. SOA-EDIT affects
+	// DNSSEC-signed zones only anyway, and we create zones unsigned.
 	zoneDef := powerdns.Zone{
 		Name:        powerdns.String(zoneFQDN),
 		Kind:        powerdns.ZoneKindPtr(powerdns.NativeZoneKind),
 		DNSsec:      powerdns.Bool(false),
-		SOAEdit:     powerdns.String("DEFAULT"),
 		SOAEditAPI:  powerdns.String("DEFAULT"),
 		APIRectify:  powerdns.Bool(true),
 		Nameservers: p.zoneNsNames,
