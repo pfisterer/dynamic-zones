@@ -10,12 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// appVersion is the embedded VERSION file, which ends in a newline — trim it
+// once here so no consumer has to (it used to reach the UI as "0.7.2\n").
+var appVersion = strings.TrimSpace(generated_docs.Version)
+
 func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 
 	// Serve index.html with the __VERSION__ placeholder replaced by the version
 	group.GET("/", func(c *gin.Context) {
 		c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, strings.ReplaceAll(helper.IndexHTML, "__VERSION__", generated_docs.Version))
+		c.String(http.StatusOK, strings.ReplaceAll(helper.IndexHTML, "__VERSION__", appVersion))
 	})
 
 	// Serve JS client
@@ -36,7 +40,7 @@ func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 			// Public NS hostname to show in dig / cert-manager / external-dns
 			// examples (falls back to dns_server_address when unset).
 			"advertised_nameserver": app.Config.PowerDns.AdvertisedServer(),
-			"version":               generated_docs.Version,
+			"version":               appVersion,
 			"auth": gin.H{
 				"auth_provider": "oidc",
 				"issuer_url":    app.Config.WebServer.OIDCIssuerURL,
