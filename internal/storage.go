@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -30,8 +31,19 @@ type Token struct {
 	UpdatedAt time.Time  `json:"updated_at" example:"2025-11-04T12:00:00Z" swagger:"desc(Last update timestamp)"`
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty" example:"2025-12-31T23:59:59Z" swagger:"desc(Deletion timestamp, if soft-deleted)"`
 
-	Username    string    `gorm:"index" json:"user" example:"alice" swagger:"desc(User that owns the token)"`
-	TokenString string    `gorm:"uniqueIndex" json:"token_string" example:"dynz_abcdef123456" swagger:"desc(The API token string)"`
+	Username string `gorm:"index" json:"user" example:"alice" swagger:"desc(User that owns the token)"`
+	// TokenHash is the SHA-256 of the token. The token itself is NEVER stored:
+	// whoever reads the database (backup, pgweb, a pod in the same network) would
+	// otherwise hold working DNS write credentials for every user. Tokens carry
+	// 128 bits of entropy from crypto/rand, so a plain hash is enough — there is
+	// nothing to brute-force and no need for a slow KDF.
+	TokenHash string `gorm:"uniqueIndex" json:"-"`
+	// TokenPrefix is the first few characters of the token, kept in the clear so
+	// the UI can tell two tokens apart in a list without holding either of them.
+	TokenPrefix string `json:"token_prefix" example:"dynz_token_ab12cd34" swagger:"desc(First characters of the token, for identification)"`
+	// TokenString carries the generated token OUT of CreateToken exactly once and
+	// is never persisted (gorm:"-"): after the response it cannot be recovered.
+	TokenString string    `gorm:"-" json:"token_string,omitempty" example:"dynz_token_abcdef123456" swagger:"desc(The API token — returned ONLY when it is created)"`
 	ExpiresAt   time.Time `json:"expires_at" example:"2025-12-31T23:59:59Z" swagger:"desc(Token expiration date and time)"`
 	ReadOnly    bool      `json:"read_only" gorm:"default:false" example:"false"`
 }
@@ -39,21 +51,21 @@ type Token struct {
 // PolicyRule represents a DNS policy rule.
 type PolicyRule struct {
 	// GORM field tags are usually preferred for primary keys
-	ID               int64     `gorm:"primaryKey" json:"id"`
-	ZonePattern      string    `gorm:"type:varchar(255);not null" json:"zone_pattern"`
-	ZoneSoa          string    `gorm:"type:varchar(255);not null" json:"zone_soa"`
-	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter"`
+	ID               int64  `gorm:"primaryKey" json:"id"`
+	ZonePattern      string `gorm:"type:varchar(255);not null" json:"zone_pattern"`
+	ZoneSoa          string `gorm:"type:varchar(255);not null" json:"zone_soa"`
+	TargetUserFilter string `gorm:"type:varchar(255);not null" json:"target_user_filter"`
 	// AllowSubdomains lets owners of a matched zone also create/manage delegated
 	// subzones under it (e.g. sub.example.com under example.com). Added via GORM
 	// AutoMigrate (new column, defaults to false).
-	AllowSubdomains  bool      `gorm:"not null;default:false" json:"allow_subdomains"`
+	AllowSubdomains bool `gorm:"not null;default:false" json:"allow_subdomains"`
 	// SharingAllowed lets owners of a matched zone share it with additional users
 	// (and policy-entitled users auto-join). Off by default (opt-in per rule);
 	// added via GORM AutoMigrate (new column, defaults to false -> backfills
 	// existing rules to false, preserving the old single-owner behaviour).
-	SharingAllowed   bool      `gorm:"not null;default:false" json:"sharing_allowed"`
-	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	SharingAllowed bool      `gorm:"not null;default:false" json:"sharing_allowed"`
+	Description    string    `gorm:"type:text;default:null" json:"description,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // DelegationPolicy grants a user (or wildcard filter) the right to manage
@@ -97,6 +109,31 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	}
 
 	return &Storage{db: db}, nil
+}
+
+// PurgeLegacyPlaintextTokens removes API tokens from the era when the token was
+// stored in the clear, and drops the column that held it.
+//
+// Those rows cannot be migrated: hashing them would keep credentials alive that
+// have been readable in the database (and in every backup taken since) — the
+// exact exposure this change exists to end. They are deleted, so every user
+// issues a fresh token. Returns how many were removed.
+func (storage *Storage) PurgeLegacyPlaintextTokens(ctx context.Context) (int64, error) {
+	migrator := storage.db.Migrator()
+	if !migrator.HasColumn(&Token{}, "token_string") {
+		return 0, nil // already migrated
+	}
+
+	result := storage.db.WithContext(ctx).Where("token_hash IS NULL OR token_hash = ''").Delete(&Token{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("storage.PurgeLegacyPlaintextTokens: delete failed: %w", result.Error)
+	}
+
+	if err := migrator.DropColumn(&Token{}, "token_string"); err != nil {
+		return result.RowsAffected, fmt.Errorf("storage.PurgeLegacyPlaintextTokens: drop column failed: %w", err)
+	}
+
+	return result.RowsAffected, nil
 }
 
 func (storage *Storage) GetAllZones(ctx context.Context, ch chan<- Zone) error {
@@ -218,17 +255,23 @@ func (storage *Storage) DeleteAllZoneOwners(zone string) error {
 	return nil
 }
 
+// GetToken looks up a token for authentication. Expired tokens are treated as
+// absent: the lazy cleanup in GetTokens only runs when the OWNER happens to list
+// their tokens, so without this condition an expired token kept authenticating
+// indefinitely — an expiry date that nothing enforces is not an expiry date.
 func (storage *Storage) GetToken(ctx context.Context, tokenString string) (*Token, error) {
 	var token Token
 	err := storage.db.WithContext(ctx).
-		Where("token_string = ?", tokenString).
+		Where("token_hash = ? AND expires_at > ?", HashToken(tokenString), time.Now()).
 		Take(&token).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("storage.GetToken: failed to get token '%s': %w", tokenString, err)
+		// The token string itself is never part of the error: this error is logged
+		// by the auth middleware, and a credential does not belong in a log line.
+		return nil, fmt.Errorf("storage.GetToken: lookup failed: %w", err)
 	}
 
 	return &token, nil
@@ -265,6 +308,23 @@ func (storage *Storage) GetTokens(ctx context.Context, username string) ([]Token
 	return validTokens, nil
 }
 
+// HashToken is the one-way mapping from a token to what the database stores.
+func HashToken(tokenString string) string {
+	sum := sha256.Sum256([]byte(tokenString))
+	return hex.EncodeToString(sum[:])
+}
+
+// tokenDisplayPrefix returns the identifying head of a token: the fixed prefix
+// plus the first 8 random characters. Short enough to reveal nothing usable
+// (2^96 remain), long enough to pick a token out of a list.
+func tokenDisplayPrefix(tokenString string) string {
+	const shown = len(ApiTokenPrefix) + 8
+	if len(tokenString) <= shown {
+		return tokenString
+	}
+	return tokenString[:shown]
+}
+
 func (storage *Storage) CreateToken(ctx context.Context, username string, ttl time.Duration, readOnly bool) (*Token, error) {
 	// Generate a secure random token string
 	b := make([]byte, 16) // 16 bytes → 32 hex chars
@@ -276,7 +336,8 @@ func (storage *Storage) CreateToken(ctx context.Context, username string, ttl ti
 
 	token := &Token{
 		Username:    username,
-		TokenString: tokenString,
+		TokenHash:   HashToken(tokenString),
+		TokenPrefix: tokenDisplayPrefix(tokenString),
 		ExpiresAt:   time.Now().Add(ttl),
 		ReadOnly:    readOnly,
 	}
@@ -285,6 +346,8 @@ func (storage *Storage) CreateToken(ctx context.Context, username string, ttl ti
 		return nil, fmt.Errorf("storage.CreateToken: failed to create token for user '%s': %w", username, err)
 	}
 
+	// The only moment the caller can ever see the token. It is not persisted.
+	token.TokenString = tokenString
 	return token, nil
 }
 

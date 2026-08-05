@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -76,6 +77,15 @@ func RunApplication() {
 	db, err := NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
+	}
+
+	// One-time migration: API tokens are stored as hashes now, so the rows that
+	// still carry a plaintext token are deleted (they were readable in every
+	// backup) and the column goes away. Users issue a new token afterwards.
+	if purged, err := db.PurgeLegacyPlaintextTokens(context.Background()); err != nil {
+		log.Fatalf("Failed to migrate API tokens to hashed storage: %v", err)
+	} else if purged > 0 {
+		log.Warnf("Token migration: deleted %d plaintext API token(s). Affected users must create a new token.", purged)
 	}
 
 	// Prepare application data
