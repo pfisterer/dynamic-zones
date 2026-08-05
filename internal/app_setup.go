@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -178,7 +179,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 
 	// Create router group for  API routes for v1
 	apiV1Group := router.Group("/v1")
-	enableCorsOriginReflectionConfig(apiV1Group)
+	enableCors(apiV1Group, app.Config.WebServer.CORSAllowedOrigins, app.Config.DevMode, app.Log)
 	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
@@ -256,31 +257,64 @@ func disableCachingMiddleware() gin.HandlerFunc {
 	}
 }
 
-func enableCorsOriginReflectionConfig(router *gin.RouterGroup) {
-	allowedHeaders := []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"}
+// enableCors restricts cross-origin API access to allowedOrigins (exact origin
+// matches, e.g. "https://selfservice.dhbw.cloud").
+//
+// The previous version reflected ANY origin back and combined that with
+// AllowCredentials, which lets an arbitrary page issue credentialed requests to
+// this API AND read the answers. Empty allowlist = no cross-origin access, the
+// right default whenever the SPA reaches the API same-origin through the BFF.
+// Non-browser clients (dyndns updaters, curl) are unaffected by CORS entirely.
+// In development the local Vite dev server (http://localhost:8084) is a genuine
+// cross-origin caller, so devMode additionally allows any loopback origin —
+// nobody should have to configure an allowlist to run the UI locally.
+func enableCors(router *gin.RouterGroup, allowedOrigins []string, devMode bool, log *zap.SugaredLogger) {
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		if trimmed := strings.TrimRight(strings.TrimSpace(origin), "/"); trimmed != "" {
+			allowed[trimmed] = true
+		}
+	}
 
-	corsConfig := cors.Config{
+	switch {
+	case devMode:
+		log.Infof("CORS: development mode — allowing loopback origins plus %v", allowedOrigins)
+	case len(allowed) == 0:
+		log.Info("CORS: no allowed origins configured — cross-origin API access is disabled")
+	default:
+		log.Infof("CORS: allowing cross-origin API access from %v", allowedOrigins)
+	}
+
+	router.Use(cors.New(cors.Config{
 		AllowOriginFunc: func(origin string) bool {
-			return true
+			origin = strings.TrimRight(origin, "/")
+			return allowed[origin] || (devMode && isLoopbackOrigin(origin))
 		},
 		AllowCredentials: true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     allowedHeaders,
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"},
 		MaxAge:           1 * time.Hour,
+	}))
+
+	// Gin runs group middleware only for requests that MATCH a route, and no
+	// handler is registered for OPTIONS — without this catch-all a preflight
+	// would 404 before the CORS middleware ever ran. The handler sets nothing
+	// itself: an allowed origin was already answered 204 with the headers by the
+	// middleware, any other origin was aborted with 403. That is the difference
+	// to the previous version, whose catch-all wrote reflected headers on its own.
+	router.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+}
+
+// isLoopbackOrigin reports whether an origin points at this machine — the dev
+// server and any local tooling. Only consulted in development mode.
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
 	}
-
-	router.Use(cors.New(corsConfig))
-
-	router.OPTIONS("/*path", func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if origin != "" {
-			c.Header("Access-Control-Allow-Origin", origin)
-		}
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Max-Age", fmt.Sprint(int(time.Hour.Seconds())))
-		c.Status(http.StatusNoContent)
-	})
-
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

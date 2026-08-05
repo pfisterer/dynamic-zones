@@ -83,6 +83,11 @@ type WebServerConfig struct {
 	ApiTokenTTLHours int `json:"api_token_ttl_hours"`
 	// The version of the external DNS image to use
 	ExternalDnsVersion string `json:"external_dns_version" validate:"required"`
+	// CORSAllowedOrigins lists the exact browser origins allowed to call this
+	// API cross-origin, e.g. "https://selfservice.dhbw.cloud". Empty (the
+	// default) allows none: behind the BFF the SPA is same-origin with the API.
+	// dyndns clients are not browsers and never see a CORS check.
+	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
 }
 
 type DefaultRecord struct {
@@ -165,6 +170,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
 			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
 			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
+			CORSAllowedOrigins: helper.GetEnvStringArray("CORS_ALLOWED_ORIGINS", []string{}, ",", false),
 		},
 		ZoneDefaults: ZoneDefaults{
 			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),

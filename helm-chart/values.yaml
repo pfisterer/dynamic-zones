@@ -33,6 +33,11 @@ dynamicZonesAPI:
 
   # General Configuration
   apiMode: production
+  # Browser origins allowed to call /v1 cross-origin, as full origins
+  # ("https://selfservice.example.cloud"). Empty = no cross-origin access, which
+  # is right when the SPA reaches this API same-origin through a BFF/reverse
+  # proxy. dyndns clients are not browsers and are unaffected either way.
+  corsAllowedOrigins: []
   initialDataProviderScript: ""
   apiTokenTtlHours: 8760 # 1 year
   apiBindString: "" # Optional

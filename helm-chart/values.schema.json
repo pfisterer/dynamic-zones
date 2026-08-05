@@ -17,6 +17,10 @@
         "replicas": { "type": "integer", "minimum": 0 },
         "existingSecret": { "type": "string" },
         "apiMode": { "type": "string", "enum": ["production", "development"] },
+        "corsAllowedOrigins": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^https?://[^/]+$" }
+        },
         "initialDataProviderScript": { "type": "string" },
         "apiTokenTtlHours": { "type": "integer", "minimum": 1 },
         "apiBindString": { "type": "string" },
