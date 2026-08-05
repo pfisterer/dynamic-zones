@@ -36,4 +36,9 @@ COPY --from=builder /app/tmp/build/dynamic-zones /app/
 EXPOSE 8082
 
 # Command to run the executable
+# Run as a non-root user (numeric UID so Kubernetes can enforce runAsNonRoot
+# without resolving names). Nothing in this image is written at runtime; the
+# binary only needs to be readable and executable.
+USER 65532:65532
+
 CMD ["./dynamic-zones"]
