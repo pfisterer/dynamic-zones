@@ -55,6 +55,34 @@ func CreateRfc2136ClientApiGroup(v1 *gin.RouterGroup, app *AppData) *gin.RouterG
 	return v1
 }
 
+// requireZoneOwner refuses to act on a zone the caller does not own.
+//
+// The TSIG key in the request is what PowerDNS checks, so this endpoint used to
+// authorize on key possession alone — turning the API into an open RFC2136 relay
+// that any logged-in user could point at any zone: convenient for probing keys
+// against an internal DNS server that is otherwise unreachable from outside, and
+// for generating load in someone else's name. Ownership is the same rule the
+// zone endpoints apply, so nothing legitimate changes.
+func requireZoneOwner(app *AppData, c *gin.Context, user *UserClaims, zone string) bool {
+	name := strings.TrimSuffix(strings.TrimSpace(zone), ".")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "zone is required"})
+		return false
+	}
+	isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, name)
+	if err != nil {
+		app.Log.Errorf("requireZoneOwner: ownership check failed for zone '%s': %v", name, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to check zone ownership"})
+		return false
+	}
+	if !isOwner {
+		app.Log.Warnf("requireZoneOwner: user '%s' is not an owner of zone '%s'", user.PreferredUsername, name)
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: "you are not an owner of this zone"})
+		return false
+	}
+	return true
+}
+
 // canonicalRecordName ensures a record name is fully qualified (FQDN) relative to a zone.
 func canonicalRecordName(name, zone string) string {
 	zoneFQDN := dns.Fqdn(zone)
@@ -142,6 +170,10 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 		if zone == "" {
 			app.Log.Error("Zone query parameter missing")
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "zone query parameter required"})
+			return
+		}
+
+		if !requireZoneOwner(app, c, user, zone) {
 			return
 		}
 
@@ -282,6 +314,10 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 			return
 		}
 
+		if !requireZoneOwner(app, c, user, req.Zone) {
+			return
+		}
+
 		zone := dns.Fqdn(req.Zone)
 		name := canonicalRecordName(req.Name, req.Zone)
 		dnsServer := GetServerAddress(app)
@@ -355,6 +391,10 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Infof("🚀 Delete record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
+
+		if !requireZoneOwner(app, c, user, req.Zone) {
+			return
+		}
 
 		zone := dns.Fqdn(req.Zone)
 
