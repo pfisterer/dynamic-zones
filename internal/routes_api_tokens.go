@@ -56,7 +56,10 @@ func getTokens(app *AppData) gin.HandlerFunc {
 		var tokenResponse TokensResponse
 		tokenResponse.Tokens = tokens
 
-		app.Log.Debug("Returning tokens: ", tokens)
+		// Count only: Token.TokenString is the credential itself, and it is
+		// stored in the clear — printing the list would put working API tokens
+		// into the log of anyone running with debug enabled.
+		app.Log.Debugf("Returning %d tokens for user %s", len(tokens), user.PreferredUsername)
 		c.JSON(http.StatusOK, tokenResponse)
 	}
 }

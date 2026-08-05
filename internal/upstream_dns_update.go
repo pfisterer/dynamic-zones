@@ -12,7 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const tmplString string = `nsupdate -d -y "{{.KeydataAlgorithm}}:{{.KeydataKeyname}}:{{.KeydataSecret}}" -v <<EOF
+// The TSIG secret is deliberately NOT interpolated: this command exists only to
+// be logged, and a log line is the last place a DNS update key belongs. Whoever
+// wants to replay the command exports the key themselves.
+const tmplString string = `TSIG_SECRET=<see the zone's TSIG key> \
+nsupdate -d -y "{{.KeydataAlgorithm}}:{{.KeydataKeyname}}:$TSIG_SECRET" -v <<EOF
 server {{.ServerAddress}} {{.ServerPort}}
 zone {{.ZoneName}}
 {{.Commands}}
@@ -112,7 +116,7 @@ func addRecord(ipAddr net.IP, c *UpstreamDnsUpdateConfig, recordNameFQDN string,
 		log.Debugf("Adding new A record for '%s' in zone '%s' with address '%s'", recordNameFQDN, c.Zone, ipAddr)
 
 		log.Debugf("Equivalent nsupdate command: %s",
-			toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, c.Server, c.Port, c.Zone, "update add "+recordNameFQDN+" "+fmt.Sprintf("%d", c.Ttl)+" IN A "+ipAddr.String()))
+			toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Server, c.Port, c.Zone, "update add "+recordNameFQDN+" "+fmt.Sprintf("%d", c.Ttl)+" IN A "+ipAddr.String()))
 
 		// Pass the FQDN name to the zones library
 		msg, err := helper.Rfc2136AddARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN, ipAddr.String(), uint32(c.Ttl))
@@ -145,7 +149,7 @@ func deleteRecords(c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.S
 	log.Debugf("Deleting existing records for %s in zone %s on server %s", recordNameFQDN, c.Zone, remoteDnsServer)
 
 	log.Debugf("Equivalent nsupdate command: %s",
-		toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, c.Server, c.Port, c.Zone, "update delete "+recordNameFQDN))
+		toNsUpdateCommand(c.Tsig_Name, c.Tsig_Alg, c.Server, c.Port, c.Zone, "update delete "+recordNameFQDN))
 
 	// Delete A records
 	msgA, err := helper.Rfc2136DeleteARecord(c.Tsig_Name, c.Tsig_Alg, c.Tsig_Secret, remoteDnsServer, c.Zone, recordNameFQDN)
@@ -167,7 +171,7 @@ func deleteRecords(c *UpstreamDnsUpdateConfig, recordNameFQDN string, log *zap.S
 
 }
 
-func toNsUpdateCommand(tsigName, tsigAlg, tsigSecret, serverAddr string, serverPort uint16, zoneName, commands string) string {
+func toNsUpdateCommand(tsigName, tsigAlg, serverAddr string, serverPort uint16, zoneName, commands string) string {
 	tmpl, err := template.New("nsupdate").Parse(tmplString)
 	if err != nil {
 		return "<error parsing template>"
@@ -175,7 +179,6 @@ func toNsUpdateCommand(tsigName, tsigAlg, tsigSecret, serverAddr string, serverP
 	data := map[string]any{
 		"KeydataAlgorithm": tsigAlg,
 		"KeydataKeyname":   dns.Fqdn(tsigName),
-		"KeydataSecret":    tsigSecret,
 		"ServerAddress":    serverAddr,
 		"ServerPort":       serverPort,
 		"ZoneName":         dns.Fqdn(zoneName),

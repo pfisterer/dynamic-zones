@@ -345,10 +345,13 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 			return
 		}
 
+		// Echo the record, NOT the request: req carries the TSIG key the client
+		// sent, and a credential has no business in a response body (or in
+		// whatever logs and proxies that body passes through).
 		c.JSON(http.StatusCreated, gin.H{
 			"status": "ok",
 			"action": "upserted",
-			"record": req,
+			"record": DNSRecord{Zone: zone, Name: name, Type: strings.ToUpper(req.Type), TTL: req.TTL, Value: req.Value},
 		})
 	}
 }
