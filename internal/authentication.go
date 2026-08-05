@@ -73,15 +73,14 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Check if the header starts with "Bearer "
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			m.Logger.Debug("Authorization header does not start with 'Bearer '. Denying access.")
+		// Check if the header uses the Bearer scheme (case-insensitive per RFC 7235)
+		rawIDToken, ok := cutBearerPrefix(authHeader)
+		if !ok {
+			m.Logger.Debug("Authorization header does not use the Bearer scheme. Denying access.")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unsupported authorization type. Use Bearer token."})
 			return
 		}
 
-		// Extract the raw ID token string
-		rawIDToken := strings.TrimPrefix(authHeader, "Bearer ")
 		if rawIDToken == "" {
 			m.Logger.Debug("Bearer token is empty. Denying access.")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Bearer token missing"})
@@ -147,11 +146,12 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		// Get the Authorization header
 		authHeader := c.GetHeader("Authorization")
 
-		// Remove the bearer prefix from the Authorization header (if present)
-		const bearerPrefix = "Bearer "
-		tokenString, ok := strings.CutPrefix(authHeader, bearerPrefix)
+		tokenString, ok := cutBearerPrefix(authHeader)
 		if !ok {
-			log.Warnf("Missing or invalid Authorization header: %s", authHeader)
+			// The header value itself is never logged: a client sending a valid
+			// token under an unexpected scheme would write its credential into
+			// the log. The scheme alone is what makes this diagnosable.
+			log.Warnf("Missing or invalid Authorization header (scheme %q)", authScheme(authHeader))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization Bearer header"})
 			return
 		}
@@ -194,4 +194,22 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		oidcVerifier.BearerTokenAuthMiddleware()(c)
 
 	}
+}
+
+// cutBearerPrefix strips the "Bearer " prefix and returns the token. The scheme
+// is matched case-insensitively: RFC 7235 defines it that way, and a client
+// sending "bearer <token>" was previously rejected as unauthenticated.
+func cutBearerPrefix(header string) (string, bool) {
+	const prefix = "bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(header[len(prefix):]), true
+}
+
+// authScheme returns the scheme of an Authorization header ("Basic", "Token", …)
+// without the credentials that follow it — safe to log, unlike the header.
+func authScheme(header string) string {
+	scheme, _, _ := strings.Cut(strings.TrimSpace(header), " ")
+	return scheme
 }
