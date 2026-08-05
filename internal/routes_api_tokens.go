@@ -103,12 +103,12 @@ func createToken(app *AppData) gin.HandlerFunc {
 	}
 }
 
-// deleteToken deletes an API token by TokenString for the authenticated user
+// deleteToken deletes an API token by its numeric ID for the authenticated user
 // @Summary Delete an API token
-// @Description Delete an API token by its TokenString
+// @Description Delete an API token by its ID
 // @Tags tokens
 // @Produce json
-// @Param id path string true "TokenString of the token to delete"
+// @Param id path int true "ID of the token to delete"
 // @Success 200 {object} map[string]string
 // @Success 404 {object} map[string]string
 // @Failure 500 {object} map[string]string "Failed to delete token"
@@ -132,12 +132,12 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 
 		statusCode, returnValue, err := app.Storage.DeleteToken(ctx, user.PreferredUsername, tokenId)
 		if err != nil {
-			app.Log.Errorf("Error deleting token '%s' for user %s: %v", tokenId, user.PreferredUsername, err)
+			app.Log.Errorf("Error deleting token %d for user %s: %v", tokenId, user.PreferredUsername, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete token"})
 			return
 		}
 
-		app.Log.Debugf("Deleted token '%s', returning %s", tokenId, returnValue)
+		app.Log.Debugf("Deleted token %d, returning %s", tokenId, returnValue)
 		c.JSON(statusCode, returnValue)
 	}
 }
