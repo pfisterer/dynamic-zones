@@ -151,10 +151,14 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			UpdateIntervalSeconds: helper.GetEnvInt("UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
 		},
 		PowerDns: PowerDnsConfig{
-			PdnsUrl:           helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
-			PdnsVhost:         helper.GetEnvString("PDNS_VHOST", "localhost"),
-			PdnsApiKey:        helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
-			DnsServerAddress:     helper.GetEnvString("PDNS_SERVER_ADDRESS", "localhost"),
+			PdnsUrl:    helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
+			PdnsVhost:  helper.GetEnvString("PDNS_VHOST", "localhost"),
+			PdnsApiKey: helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
+			// Loopback, not "localhost": this is validated as (and used as) a
+			// literal IP — it is the address published upstream as this
+			// nameserver's A/AAAA record, so a hostname never fits. ::1 works
+			// just as well when the local PowerDNS is reachable over IPv6.
+			DnsServerAddress:     helper.GetEnvString("PDNS_SERVER_ADDRESS", "127.0.0.1"),
 			DnsServerPort:        uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
 			DefaultTTLSeconds:    uint32(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
 			AdvertisedNameserver: helper.GetEnvString("PDNS_ADVERTISED_NAMESERVER", ""),
