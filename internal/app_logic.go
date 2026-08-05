@@ -561,8 +561,15 @@ func (app *AppData) ZoneCreate(ctx context.Context, username string, zone ZoneRe
 		return status, msg, err
 	}
 
-	// Check which zones this nameserver is authoritative for
+	// Check which zones this nameserver is authoritative for. A nil result means
+	// the zone is NOT under its own SOA — the chain of intermediate zones cannot
+	// be built, and creating the zone anyway would mint a name outside the SOA
+	// the caller was authorized for. Refuse instead of silently skipping the loop.
 	authoritative := getAuthoritativeZones(zone.Zone, zone.ZoneSOA)
+	if len(authoritative) == 0 {
+		return errorResult(http.StatusBadRequest, "Zone is not below its SOA",
+			fmt.Errorf("app.ZoneCreate: zone %q is not at or below soa %q", zone.Zone, zone.ZoneSOA))
+	}
 
 	// Create all  intermediates zones
 	for i, z := range authoritative {
@@ -706,6 +713,32 @@ func policyValidateRequest(req PolicyRuleRequest) error {
 		return err
 	}
 
+	if err := validatePatternWithinSoa(req.ZonePattern, req.ZoneSoa); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validatePatternWithinSoa enforces that the zone a rule hands out actually lies
+// under the rule's own SOA.
+//
+// This is what confines a DELEGATE to their subtree: createPolicyRule authorizes
+// against ZoneSoa, but the name a user ends up owning comes from ZonePattern.
+// Without this check somebody delegated for projects.dhbw.site could write a rule
+// with zone_pattern "victim.users.dhbw.site", create that zone, and hold its TSIG
+// key — PowerDNS answers the more specific zone, so that is a takeover of a
+// foreign name including DNS-01 certificate issuance.
+func validatePatternWithinSoa(zonePattern, zoneSoa string) error {
+	if strings.TrimSpace(zoneSoa) == "" {
+		return errors.New("zone_soa must not be empty")
+	}
+	// %u expands to a user label; any label keeps the suffix relationship intact.
+	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(strings.ReplaceAll(zonePattern, "%u", "a"))), ".")
+	soa := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zoneSoa)), ".")
+	if zone != soa && !isSubdomainOf(zone, soa) {
+		return fmt.Errorf("zone_pattern %q must be at or below zone_soa %q", zonePattern, zoneSoa)
+	}
 	return nil
 }
 
