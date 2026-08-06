@@ -111,31 +111,6 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	return &Storage{db: db}, nil
 }
 
-// PurgeLegacyPlaintextTokens removes API tokens from the era when the token was
-// stored in the clear, and drops the column that held it.
-//
-// Those rows cannot be migrated: hashing them would keep credentials alive that
-// have been readable in the database (and in every backup taken since) — the
-// exact exposure this change exists to end. They are deleted, so every user
-// issues a fresh token. Returns how many were removed.
-func (storage *Storage) PurgeLegacyPlaintextTokens(ctx context.Context) (int64, error) {
-	migrator := storage.db.Migrator()
-	if !migrator.HasColumn(&Token{}, "token_string") {
-		return 0, nil // already migrated
-	}
-
-	result := storage.db.WithContext(ctx).Where("token_hash IS NULL OR token_hash = ''").Delete(&Token{})
-	if result.Error != nil {
-		return 0, fmt.Errorf("storage.PurgeLegacyPlaintextTokens: delete failed: %w", result.Error)
-	}
-
-	if err := migrator.DropColumn(&Token{}, "token_string"); err != nil {
-		return result.RowsAffected, fmt.Errorf("storage.PurgeLegacyPlaintextTokens: drop column failed: %w", err)
-	}
-
-	return result.RowsAffected, nil
-}
-
 func (storage *Storage) GetAllZones(ctx context.Context, ch chan<- Zone) error {
 	defer close(ch)
 
