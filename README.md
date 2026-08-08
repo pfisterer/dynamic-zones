@@ -1,146 +1,227 @@
-# Dynamic DNS Zone Provisioning API
+# Dynamic Zones API
 
-This project provides an API service that allows users to dynamically create and manage DNS zones. It is particularly useful in automated environments such as Kubernetes.
+## Why
 
-## Overview
+A DNS name is the smallest possible request and one of the slowest to fulfil. A
+student needs `myproject.students.example.edu` for a demo, a lecturer needs a
+handful of names for a course, a Kubernetes cluster needs to prove domain
+ownership to Let's Encrypt every few weeks — and all of it typically ends in a
+ticket to whoever holds the zone file. The wait is longer than the work.
 
-The API enables:
+The obstacle is not effort but trust: giving someone write access to a zone means
+giving it for the *whole* zone. So requests are funnelled through people who are
+allowed to edit it, and automation gets a shared credential nobody dares rotate.
 
-- **Dynamic DNS zone creation**: Users can request new DNS zones via the API.
-- **Zone updates via RFC2136**: The created zones can be managed using RFC2136-compliant tools like `nsupdate` or Kubernetes' [external-dns](https://github.com/kubernetes-sigs/external-dns). [RCF2136](https://datatracker.ietf.org/doc/html/rfc2136) (Dynamic Updates in the Domain Name System) is a protocol for dynamic updates to DNS zones, allowing for real-time changes without manual intervention.
-- **PowerDNS integration**: The service configures a [PowerDNS](https://doc.powerdns.com/) server through its API, enabling read and write access to managed zones.
-- **Upstream DNS updates**: To integrate the configured PowerDNS server into the global DNS infrastructure, an upstream DNS server must be configured to delegate the managed zones. Alternatively, this project can itself update an A record in the upstream DNS via RFC2136.
+This service removes that trade-off. A policy states which names which people may
+have; anyone matching it creates their zone themselves and gets a key that is
+valid **for that zone only**. Machines then keep their own records up to date over
+the standard protocol (RFC 2136), with no human in the loop and no credential
+that reaches beyond one delegated name.
 
+Put plainly: this is the self-service layer over a hardened
+[PowerDNS](https://doc.powerdns.com/) installation. PowerDNS stays the
+authoritative nameserver and does what it is good at; this service owns the
+question PowerDNS has no opinion about — *who is allowed to have which name, and
+with which key* — and configures it accordingly through its HTTP API.
 
-### Prerequisites
+It is an API and usable on its own: zones, records, keys and policy are all
+reachable over HTTP, and it ships a generated TypeScript client. If you want a
+browser interface rather than building one,
+[**self-service-ui**](https://github.com/pfisterer/self-service-ui) is one — zone
+and record management, API tokens, the policy view and ready-made snippets for
+`nsupdate`, `external-dns` and `cert-manager`. Its README has screenshots.
 
-Before you begin, ensure the following tools and services are installed and configured:
+## What it does
 
-- **[Go (Golang)](https://go.dev/)**: Required for compiling and running the application.
-- **[Air](https://github.com/cosmtrek/air)** (live reload for Go apps, optional but recommended): For hot-reloading during development.
-- **[PowerDNS](https://www.powerdns.com/)**: Either running locally or in a container, with the [API enabled](https://doc.powerdns.com/authoritative/http-api/).
-- **[Node.js and npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)**: For building the API documentation and JavaScript client
+- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`,
+  where `%u` stands for the requester) may be created by whom
+  (`target_user_filter`: single addresses or `*@domain`), under which
+  authoritative zone (`zone_soa`), and whether subdomains and co-ownership are
+  permitted. Users can create exactly what a rule grants them — nothing else.
+- **Per-zone TSIG keys.** Each zone gets its own key. It is what `nsupdate`,
+  [external-dns](https://github.com/kubernetes-sigs/external-dns) or
+  [cert-manager](https://cert-manager.io/) use to write records, and it cannot
+  touch any other zone. Keys can be rotated.
+- **Records in the browser or over the API.** The same records can be edited in
+  the web UI or written by machines via RFC 2136.
+- **PowerDNS as the authoritative server.** The service configures PowerDNS
+  through its HTTP API and never edits zone files or the backend database itself.
+  Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS
+  configuration, not this service's business.
+- **Upstream delegation.** For the managed zones to resolve globally, the parent
+  zone must delegate to this nameserver. Either configure that once upstream, or
+  let this service keep an `A`/`NS` record current in the upstream zone via
+  RFC 2136 itself.
+- **Shared zones and delegated policy administration.** A zone may have several
+  owners; a *delegation* lets named people manage policy rules for one zone and
+  its subdomains without being a global administrator.
+- **API tokens** for automation, optionally read-only (a read-only token is
+  refused on anything but `GET`).
 
-### Development Setup
+### Zones, rules and "orphaned" zones
 
-1. **Clone the repository**
+A zone's relationship to a policy rule is **recomputed, never stored**. A zone is
+*orphaned* when no current rule would produce that name for that owner — which
+happens when a rule is edited or deleted. The zone and its records keep working;
+what the owner loses is the right to manage it.
 
-    See GitHub's URL for cloning the repository.
+The remedy is therefore to **fix the rule**, not to delete the zone. A single typo
+in a `target_user_filter` orphans every zone that rule covered, and deleting the
+zones would destroy records that were never the problem. The UI lists orphaned
+zones for administrators so the mistake is visible.
 
-1. **Start PowerDNS**:
+## API
 
-    Create a PowerDNS configuration file (e.g., `pdns.conf`) with the following content:
+The service is served under `/v1` and publishes its own OpenAPI description — that
+spec is the authoritative reference, so it cannot drift from the implementation the
+way a hand-written endpoint list does:
 
-    ```ini
-    # PowerDNS configuration file
-    local-address=0.0.0.0
-    local-port=53
+- **`GET /swagger.json`** — the OpenAPI spec
+- **`/client/`** — a generated TypeScript client (the web UI imports it at runtime)
 
-    # logLevel: 0 = emergency, 1 = alert, 2 = critical, 3 = error, 4 = warning, 5 = notice, 6 = info, 7 = debug
-    loglevel=7
+[self-service-ui](https://github.com/pfisterer/self-service-ui) renders the same
+spec in the browser under *DNS Zones → API Documentation*, which is usually the
+quickest way to look something up and try it out.
 
-    # SQLite3
-    launch=gsqlite3
-    gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+## Running it locally
 
-    # API
-    webserver-address=0.0.0.0
-    webserver-port=8080
-    webserver-allow-from=0.0.0.0/0
-    webserver-loglevel=normal # none, normal, detailed
-    api=yes
-    api-key=my-default-api-key # Replace with a secure key
+**Prerequisites:** Go 1.24+, Node.js (for the docs and client bundle),
+a reachable PowerDNS with its API enabled, and optionally
+[air](https://github.com/air-verse/air) for live reload.
 
-    # Allow DSN updates but deny from any source here
-    # cf. https://doc.powerdns.com/authoritative/dnsupdate.html#dnsupdate-metadata
-    dnsupdate=yes
-    allow-dnsupdate-from=
-    dnsupdate-require-tsig=true
-    ```
+A minimal PowerDNS for development (SQLite backend, API on 8080, DNS on 15353):
 
-    Start PowerDNS (e.g, using Docker):
-
-    ```bash
-    docker run --rm -it \
-    --name pdns-lua \
-    -v $(pwd)/pdns.conf:/etc/powerdns/pdns.conf \
-    -p 15353:53 \
-    -p 15353:53/udp \
-    -p 8080:8080 \
-    powerdns/pdns-auth-master 
-    ```
-
-1. **Run with Air (development mode)**:
-
-    ```bash
-    air
-    ```
-
-1. **Run manually (production mode)**:
-
-    ```bash
-    make
-    ./build/dynamic-zones-api
-    ```
-## Usage
-
-### Docker-based Setup
-
-#### Run using Docker
-
-There are pre-built Docker images [available on GitHub Container Registry](https://github.com/pfisterer/dynamic-zones/pkgs/container/dynamic-zones). Check there for available tags or use the `latest` tag. Replace `KEY=VALUE` with the necessary environment variables as described in the [Configuration](#configuration) section.
-
-You can then run it with:
-
-```bash
-docker run -d -p 8082:8082 -e KEY=VALUE \
-    ghcr.io/pfisterer/dynamic-zones:latest
+```ini
+launch=gsqlite3
+gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+local-address=0.0.0.0
+local-port=53
+webserver-address=0.0.0.0
+webserver-port=8080
+webserver-allow-from=0.0.0.0/0
+api=yes
+api-key=my-default-api-key
+dnsupdate=yes
 ```
 
- or put the variables in a `.env` file and use `--env-file .env`.
+Then:
 
 ```bash
-docker run -d -p 8082:8082 --env-file .env \
-    ghcr.io/pfisterer/dynamic-zones:latest
+make dev     # live-reload server on :8082 (API_MODE=development)
+make test
+make all     # swagger + client bundle + binary
 ```
 
-#### Build Local Docker Image
+`API_MODE=development` **bypasses authentication**: the caller asserts an identity
+with the `X-Dummy-Auth-User` header. That is the whole login in development — and
+the reason `API_MODE` must be `production` everywhere else. A production
+deployment that accidentally ran in development mode showed empty zone and policy
+lists, because every request was a different, unknown user.
 
-To build and run the API using Docker, you can use the provided `Makefile`:
+The deployment repo's `run-development.sh` starts PowerDNS, this API, the
+role-provider and the web UI together.
 
-```bash
-make docker-build
-```
+## Configuration
 
-This will create a Docker image for the API service. 
+All configuration is environment variables (`.env` is loaded in development).
 
-#### Build and Push multi-architecture Docker image
+### Service
 
-To build and push a multi-architecture Docker image, you can use the `Makefile`:
+| Variable | Default | Purpose |
+|---|---|---|
+| `API_MODE` | `production` | `development` = auth bypass, see above |
+| `API_BIND` | `:8082` | Listen address |
+| `API_BASE_URL` | `http://localhost:8082` | Public URL, used in generated instructions |
+| `API_TOKEN_TTL_HOURS` | `24` | Lifetime of issued API tokens |
+| `DB_TYPE` | `sqlite` | `sqlite` \| `postgres` \| `mysql` |
+| `DB_CONNECTION_STRING` | in-memory SQLite | DSN for the chosen backend |
+| `CORS_ALLOWED_ORIGINS` | — | Comma-separated origins for the browser client |
+| `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` | — | Bearer-token verification |
+| `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy |
+| `INITIAL_DATA_SCRIPT_PATH` | — | JS file that seeds rules/zones on first start |
 
-```bash
-make multi-arch-build
-```
+### PowerDNS
 
-## Configuration Settings
+| Variable | Default | Purpose |
+|---|---|---|
+| `PDNS_URL` | `http://localhost:8080` | PowerDNS HTTP API |
+| `PDNS_API_KEY` | `my-default-api-key` | API key |
+| `PDNS_VHOST` | `localhost` | Virtual host in the API path |
+| `PDNS_SERVER_ADDRESS`, `PDNS_SERVER_PORT` | `127.0.0.1`, `15353` | Where RFC 2136 updates are sent |
+| `PDNS_ADVERTISED_NAMESERVER` | — | Nameserver name handed to users and put into NS records |
+| `PDNS_SERVER_DEFAULT_TTL` | 1 year | Default record TTL |
 
-Configuration is done through environment variables. 
+### Upstream delegation (optional)
 
-For a full list of available configuration options, refer to the `GetAppConfigFromEnvironment` function in `internal/app_setup.go`.
+`UPSTREAM_DNS_SERVER`, `UPSTREAM_DNS_PORT`, `UPSTREAM_DNS_NAME`,
+`UPSTREAM_DNS_ZONE`, `UPSTREAM_DNS_TSIG_NAME/_ALG/_SECRET`, `UPSTREAM_DNS_TTL`,
+`UPSTREAM_DNS_UPDATE_INTERVAL` — when set, the service keeps its own record in the
+parent zone current instead of relying on a one-off manual delegation.
 
-## Releasing a New Version
+### Zone defaults
 
-To release a new version of the API, follow these steps:
-- Update the file `internal/helper/VERSION` with the new version number.
-- Commit and push the changes to Github.
-- Github Actions will automatically build the new version and create a release.
-- Create a new version of the helm chart `make update-helm` and commit the changes.
-- Push the updated helm chart to the `docs/` folder in the `master` branch
+`ZONE_DEFAULTS_SOA_RECORDS` and `ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records
+written into every newly created zone, with
+`ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` for the key used to write them.
+
+This is where **CAA** belongs. A `CAA` record must name the certificate authority
+that actually signs — not the ACME endpoint in front of it. Naming the proxy host
+instead makes every wildcard issuance fail with an opaque CA error, and
+`issuewild` must be present alongside `issue` or wildcard requests are refused.
+
+## Build & CI
+
+- `make all` — swagger + TypeScript client + binary
+- `make test` — Go test suite
+- `make dev` — live reload (needs `air`)
+
+GitHub Actions builds and pushes the `linux/amd64` image to
+`ghcr.io/pfisterer/dynamic-zones`. Tests are not part of the image build; run them
+locally. Image tags: `X.Y.Z-test.N` → staging, `X.Y.Z` → production.
+
+## Deployment
+
+A Helm chart lives in [`helm-chart/`](helm-chart) and is deployed via ArgoCD from
+the `dhbw-deployment` repo.
+
+### What "hardened PowerDNS" means here
+
+An authoritative nameserver on the public internet is a reflection amplifier
+waiting to be used, so PowerDNS is not exposed directly. In the DHBW installation
+[dnsdist](https://dnsdist.org/) sits in front of it and PowerDNS itself is only
+reachable inside the cluster:
+
+- **ANY over UDP is truncated** (`TC=1`), which forces a legitimate client to retry
+  over TCP and gives a spoofed reflection source nothing worth amplifying.
+- **Per-source rate limiting** over UDP, likewise answered with `TC=1` rather than a
+  drop, so rate-limited but genuine clients still get through over TCP.
+- **Bogon and blocklist sources are dropped** outright.
+- **RFC 2136 UPDATE traffic and internal networks** are routed to the PowerDNS pool
+  — that is the path this service and its users' keys take.
+- PowerDNS's **HTTP API is cluster-internal**. Only this service talks to it; the
+  API key never leaves the namespace.
+
+Two things that will bite whoever hardens it further:
+
+- **`disable-axfr` breaks this service.** It uses zone transfers internally, so
+  switching them off wholesale is not an option — restrict them by address instead.
+- **dnsdist has to run with `hostNetwork`.** Behind the cluster's service proxy the
+  source address of every query is rewritten, which silently defeats both the rate
+  limiting and the blocklists above, since every packet then appears to come from
+  the same host.
+
+### PowerDNS backend
+
+`gsqlite3` and `gpgsql` are both supported and chosen per environment. With
+`gpgsql`, authoritative DNS depends on the database: if Postgres is gone, the
+nameserver stops answering. On a single-node installation that matters less than it
+sounds, but it is a coupling that did not exist with SQLite.
+
+## Related projects
+
+- [self-service-ui](https://github.com/pfisterer/self-service-ui) — the web interface
+- [openstack-management-api](https://github.com/pfisterer/openstack-management-api) — the compute half of the platform
 
 ## License
 
- Apache License Version 2.0. See `LICENSE` file for details.
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+See [LICENSE](./LICENSE).
