@@ -13,3 +13,6 @@ ansible-deployment-example/inventory.yaml
 kubeconfig-*.yaml
 internal/generated_docs/
 private/
+# Generated npm client package (built by `make npm-package`)
+client-npm/
+*.tgz
