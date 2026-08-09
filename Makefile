@@ -96,6 +96,14 @@ build: check-modules
 	@set -e; CGO_ENABLED=1 go build -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)/main.go
 	@echo "✅ Go binary built (./$(BUILD_DIR)/$(BINARY_NAME))"
 
+# Run the Go tests. Note these are integration tests: they start a PowerDNS
+# container via testcontainers and bind the app's usual port, so a running
+# development stack makes them fail with "address already in use".
+test: check-modules
+	@echo "🧪 Running tests..."
+	@go test ./...
+	@echo "✅ Tests passed"
+
 # Check for go.mod file
 check-modules:
 	@test -f $(GO_MOD) || (echo "❌ $(GO_MOD) is missing; run 'go mod init' first."; exit 1)
