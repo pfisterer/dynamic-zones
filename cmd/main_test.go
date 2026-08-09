@@ -20,6 +20,9 @@ func TestRoundtrip(t *testing.T) {
 
 	time.Sleep(2 * time.Second) // Wait for the server to start
 
+	// The zones this test expects come from policy rules; nothing seeds them.
+	app.SeedPolicyRulesForTests(t)
+
 	// Run the tests
 	testGetIndexPage(t)
 	available_zones := testGetAvailableZones(t)
@@ -30,7 +33,7 @@ func TestRoundtrip(t *testing.T) {
 }
 
 func testGetIndexPage(t *testing.T) {
-	resp, err := http.Get(app.GetBaseURLForTests() + "/")
+	resp, err := app.DoRequestForTests(t, http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatalf("testGetIndexPage: Failed to send request: %v", err)
 	}
@@ -45,7 +48,7 @@ func testGetIndexPage(t *testing.T) {
 // Get the available zones
 func testGetAvailableZones(t *testing.T) []app.ZoneStatus {
 	// Send a GET request to the available zones endpoint
-	resp, err := http.Get(app.GetBaseURLForTests() + "/v1/zones/")
+	resp, err := app.DoRequestForTests(t, http.MethodGet, "/v1/zones/", nil)
 	if err != nil {
 		t.Fatalf("testGetAvailableZones: Failed to send request: %v", err)
 	}
@@ -63,13 +66,21 @@ func testGetAvailableZones(t *testing.T) []app.ZoneStatus {
 		t.Fatalf("testGetAvailableZones: Failed to unmarshal response body: %v", err)
 	}
 
-	// Check if the response contains the expected zones
-	expectedZones := app.GetExpectedZonesForTests()[:]
-	for i, zone := range expectedZones {
-		expectedZones[i] = app.GetExpectedUserNameForTests() + "." + zone
+	// Compare NAMES: the endpoint answers with ZoneStatus values, and comparing
+	// those against a list of strings could never match. Built into a fresh
+	// slice, because `expectedZones[:]` shares its array with the package-level
+	// list and the loop used to rewrite it in place.
+	expectedZones := make([]string, 0, len(app.GetExpectedZonesForTests()))
+	for _, zone := range app.GetExpectedZonesForTests() {
+		expectedZones = append(expectedZones, app.GetExpectedUserNameForTests()+"."+zone)
 	}
 
-	assert.ElementsMatch(t, expectedZones, response.Zones, "testGetAvailableZones: Expected zones do not match the response zones")
+	actualZones := make([]string, 0, len(response.Zones))
+	for _, zone := range response.Zones {
+		actualZones = append(actualZones, zone.Name)
+	}
+
+	assert.ElementsMatch(t, expectedZones, actualZones, "testGetAvailableZones: Expected zones do not match the response zones")
 
 	// Check if the status code is 200 OK
 	if resp.StatusCode != http.StatusOK {
@@ -81,7 +92,7 @@ func testGetAvailableZones(t *testing.T) []app.ZoneStatus {
 
 func testCreateZone(t *testing.T, zone string) {
 	// Send a POST request to create a new zone
-	resp, err := http.Post(app.GetBaseURLForTests()+"/v1/zones/"+zone, "application/json", nil)
+	resp, err := app.DoRequestForTests(t, http.MethodPost, "/v1/zones/"+zone, nil)
 	if err != nil {
 		t.Fatalf("testCreateZone: Failed to send request: %v", err)
 	}
@@ -98,7 +109,7 @@ func testCreateZone(t *testing.T, zone string) {
 }
 
 func testGetZone(t *testing.T, zone string) app.ZoneDataResponse {
-	resp, err := http.Get(app.GetBaseURLForTests() + "/v1/zones/" + zone)
+	resp, err := app.DoRequestForTests(t, http.MethodGet, "/v1/zones/"+zone, nil)
 	if err != nil {
 		t.Fatalf("testGetZone: ailed to send request: %v", err)
 	}
@@ -114,30 +125,28 @@ func testGetZone(t *testing.T, zone string) app.ZoneDataResponse {
 		t.Fatalf("testGetZone: Expected status code 200, got %d", resp.StatusCode)
 	}
 
-	// unmarshal the response body
-	var response app.ZoneDataResponse
+	// The zone itself is nested under "zoneData"; the response also carries the
+	// external-dns snippet, the owners and the sharing flag. Unmarshalling the
+	// whole body into ZoneDataResponse silently produced an empty struct.
+	var response struct {
+		ZoneData app.ZoneDataResponse `json:"zoneData"`
+	}
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		t.Fatalf("testGetZone: Failed to unmarshal response body: %v, response body = %s", err, body)
 	}
 
 	// Check if the response contains the expected zone
-	if response.Zone != zone {
-		t.Fatalf("testGetZone: Expected zone %s, got %s", zone, response.Zone)
+	if response.ZoneData.Zone != zone {
+		t.Fatalf("testGetZone: Expected zone %s, got %s", zone, response.ZoneData.Zone)
 	}
 
-	return response
+	return response.ZoneData
 }
 
 func testDeleteZone(t *testing.T, zone string) {
 	// Send a DELETE request to delete the zone
-	req, err := http.NewRequest(http.MethodDelete, app.GetBaseURLForTests()+"/v1/zones/"+zone, nil)
-	if err != nil {
-		t.Fatalf("testDeleteZone: Failed to create request: %v", err)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := app.DoRequestForTests(t, http.MethodDelete, "/v1/zones/"+zone, nil)
 	if err != nil {
 		t.Fatalf("testDeleteZone: Failed to send request: %v", err)
 	}
@@ -151,7 +160,7 @@ func testDeleteZone(t *testing.T, zone string) {
 	t.Logf("testDeleteZone: Zone %s deleted successfully", zone)
 
 	// Check if the zone is deleted
-	resp, err = http.Get(app.GetBaseURLForTests() + "/v1/zones/" + zone)
+	resp, err = app.DoRequestForTests(t, http.MethodGet, "/v1/zones/"+zone, nil)
 	if err != nil {
 		t.Fatalf("testDeleteZone: Failed to send request: %v", err)
 	}

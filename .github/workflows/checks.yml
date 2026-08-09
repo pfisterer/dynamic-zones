@@ -41,17 +41,25 @@ jobs:
       # Runs even after a failed vet, so one push reports both problems
       # instead of hiding the second behind the first.
       #
-      # NO test step here yet, unlike the sibling services — and that is a
-      # statement about the tests, not about this workflow.
+      # The tests start the real application against a PowerDNS container, so
+      # they need three things a clean checkout cannot supply on its own:
       #
-      # They are integration tests that start the real application against a
-      # PowerDNS container, and they are wired to a developer's gitignored
-      # .env: a clean checkout dies first on missing required configuration,
-      # then on a placeholder OIDC issuer (startup fetches the discovery
-      # document), then on absent dummy policy data, and TestUpstreamDnsUpdate
-      # wants a real upstream TSIG key — which is a secret and has no business
-      # in a public workflow. Two of them also idle for 61 s and time out.
+      #   - a REAL OIDC issuer, because startup fetches its discovery document
+      #     and gives up if that fails. sso.dhbw.cloud is public and only read.
+      #   - the upstream announcement's zone and name, which configuration
+      #     validation insists on even when no upstream is configured (without
+      #     one TestUpstreamDnsUpdate skips itself).
+      #   - the PowerDNS image, because TestContainerLifecycle creates a
+      #     container without pulling first.
       #
-      # Getting there is a job on the test suite (see d8 in the deployment
-      # repo's TODOs). Until then `go vet` type-checks the whole module on
-      # every push, which is more than this repo had before.
+      # Everything else the fixture now sets itself (internal/test_helpers.go).
+      - name: Tests
+        if: '!cancelled()'
+        env:
+          OIDC_ISSUER_URL: https://sso.dhbw.cloud/realms/dhbw-main
+          OIDC_CLIENT_ID: dhbw-cloud-dns
+          UPSTREAM_DNS_ZONE: example.test.
+          UPSTREAM_DNS_NAME: ns
+        run: |
+          docker pull powerdns/pdns-auth-master:latest
+          make test
