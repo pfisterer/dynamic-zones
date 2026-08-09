@@ -45,26 +45,17 @@ jobs:
       # Runs even after a failed vet, so one push reports both problems
       # instead of hiding the second behind the first.
       #
-      # The tests start the real application, and locally its configuration
-      # comes from a gitignored .env — so they only ever ran on a machine that
-      # happened to have one. The issuer has to be a REAL one: startup fetches
-      # its OpenID discovery document and gives up if that fails, so a
-      # placeholder URL is not enough. sso.dhbw.cloud is publicly reachable and
-      # is only read, never authenticated against.
+      # NO test step here yet, unlike the sibling services — and that is a
+      # statement about the tests, not about this workflow.
       #
-      # TestContainerLifecycle calls StartContainer without pulling first, which
-      # passes on a developer machine that already has the image and nowhere
-      # else — hence the pull below.
-      - name: Tests
-        if: '!cancelled()'
-        env:
-          UPSTREAM_DNS_ZONE: example.test.
-          UPSTREAM_DNS_NAME: ns
-          OIDC_ISSUER_URL: https://sso.dhbw.cloud/realms/dhbw-main
-          OIDC_CLIENT_ID: dhbw-cloud-dns
-          # TestRoundtrip asserts on the zones the dummy policy produces
-          # ("fakestudent.…"), so without this it compares against nothing.
-          DNS_POLICY_ADD_DUMMY_DATA: "true"
-        run: |
-          docker pull powerdns/pdns-auth-master:latest
-          make test
+      # They are integration tests that start the real application against a
+      # PowerDNS container, and they are wired to a developer's gitignored
+      # .env: a clean checkout dies first on missing required configuration,
+      # then on a placeholder OIDC issuer (startup fetches the discovery
+      # document), then on absent dummy policy data, and TestUpstreamDnsUpdate
+      # wants a real upstream TSIG key — which is a secret and has no business
+      # in a public workflow. Two of them also idle for 61 s and time out.
+      #
+      # Getting there is a job on the test suite (see d8 in the deployment
+      # repo's TODOs). Until then `go vet` type-checks the whole module on
+      # every push, which is more than this repo had before.
