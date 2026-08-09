@@ -2,8 +2,8 @@ apiVersion: v2
 name: cloud-self-service
 description: Self-Service Deployment for OpenStack environments
 type: application
-version: 0.7.5-test.1
-appVersion: "0.7.5-test.1"
+version: 0.7.5-test.3
+appVersion: "0.7.5-test.3"
 maintainers:
   - name: Dennis Pfisterer
     email: dennis.pfisterer@dhbw.de
