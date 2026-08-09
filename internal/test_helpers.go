@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"testing"
 
@@ -116,18 +115,15 @@ func StartEphemeralContainerAndAppForTests(t *testing.T) *test_helpers.PdnsConta
 	baseUrl := pdns_docker.GetBaseUrl()
 	t.Logf("app.StartEphemeralContainerAndAppForTests: PDNS test container started at %s", baseUrl)
 
-	//extract hostname from baseurl
-	u, err := url.Parse(baseUrl)
-	if err != nil {
-		t.Fatal("app.StartEphemeralContainerAndAppForTests: Error parsing URL:", err)
-	}
-	hostname := u.Hostname()
-
 	os.Setenv("PDNS_URL", baseUrl)
-	os.Setenv("PDNS_VHOST", hostname)
+	// PDNS_VHOST is PowerDNS' SERVER ID, not a network host — the API path is
+	// /api/v1/servers/<id>, and that id is "localhost" in every stock install.
+	// It used to be derived from the base URL's hostname, which only happened
+	// to work while that hostname read "localhost" too.
+	os.Setenv("PDNS_VHOST", "localhost")
 	os.Setenv("PDNS_API_KEY", pdns_docker.GetApiKey())
 
-	t.Logf("app.StartEphemeralContainerAndAppForTests: Updated env to use PDNS test container: PDNS_URL=%s, PDNS_VHOST=%s, PDNS_API_KEY=%s", baseUrl, hostname, pdns_docker.GetApiKey())
+	t.Logf("app.StartEphemeralContainerAndAppForTests: Updated env to use PDNS test container: PDNS_URL=%s, PDNS_API_KEY=%s", baseUrl, pdns_docker.GetApiKey())
 
 	// Start the application
 	go RunApplication()

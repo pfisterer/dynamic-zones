@@ -142,7 +142,11 @@ func StartPndsTestContainer(ctx context.Context) (instance *PdnsContainerTestIns
 		dockerController: dc,
 		apiPort:          externalApiPort,
 		externalDnsPort:  uint16(externalDnsPort),
-		baseUrl:          fmt.Sprintf("http://localhost:%d", externalApiPort),
+		// 127.0.0.1, not localhost: on a GitHub runner that name resolves to ::1
+		// first, while the container publishes its port on IPv4 only — every
+		// connection then fails with "dial tcp [::1]:<port>: connection refused".
+		// Docker Desktop binds both, which is why this only ever broke in CI.
+		baseUrl: fmt.Sprintf("http://127.0.0.1:%d", externalApiPort),
 		cleanupHooks: []func() error{
 			func() error {
 				// Remove the temporary configuration file

@@ -2,7 +2,6 @@ package app
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
@@ -29,14 +28,14 @@ func newPdnsTestApp(t *testing.T) *AppData {
 	t.Cleanup(func() { _ = pdnsDocker.Cleanup() })
 
 	baseURL := pdnsDocker.GetBaseUrl()
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		t.Fatalf("failed to parse PowerDNS URL %q: %v", baseURL, err)
-	}
 	waitForPdns(t, baseURL, pdnsDocker.GetApiKey())
 
 	log := zap.NewNop().Sugar()
-	pdns, err := NewPowerDnsClient(baseURL, u.Hostname(), pdnsDocker.GetApiKey(), 60,
+	// "localhost" is PowerDNS' SERVER ID (the API path is /api/v1/servers/<id>),
+	// not the host to connect to. Taking it from the URL only worked while the
+	// container was addressed as localhost; against 127.0.0.1 every call came
+	// back "Not Found".
+	pdns, err := NewPowerDnsClient(baseURL, "localhost", pdnsDocker.GetApiKey(), 60,
 		[]string{"ns.example.com."}, "admin-key", "c3VwZXJzZWNyZXRhZG1pbmtleQ==", "hmac-sha256",
 		nil, nil, log)
 	if err != nil {
