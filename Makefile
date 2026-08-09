@@ -97,11 +97,13 @@ build: check-modules
 	@echo "✅ Go binary built (./$(BUILD_DIR)/$(BINARY_NAME))"
 
 # Run the Go tests. Note these are integration tests: they start a PowerDNS
-# container via testcontainers and bind the app's usual port, so a running
-# development stack makes them fail with "address already in use".
+# container and the real application, which binds the app's usual port. Two
+# consequences: a running development stack makes them fail with "address
+# already in use", and the packages must not run concurrently — hence -p 1,
+# without which cmd and internal race for :8082.
 test: check-modules
 	@echo "🧪 Running tests..."
-	@go test ./...
+	@go test -p 1 ./...
 	@echo "✅ Tests passed"
 
 # Check for go.mod file

@@ -62,6 +62,9 @@ jobs:
           UPSTREAM_DNS_NAME: ns
           OIDC_ISSUER_URL: https://sso.dhbw.cloud/realms/dhbw-main
           OIDC_CLIENT_ID: dhbw-cloud-dns
+          # TestRoundtrip asserts on the zones the dummy policy produces
+          # ("fakestudent.…"), so without this it compares against nothing.
+          DNS_POLICY_ADD_DUMMY_DATA: "true"
         run: |
           docker pull powerdns/pdns-auth-master:latest
           make test
