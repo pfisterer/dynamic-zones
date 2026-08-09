@@ -111,6 +111,15 @@ func StartPndsTestContainer(ctx context.Context) (instance *PdnsContainerTestIns
 		return nil, err
 	}
 
+	// os.CreateTemp makes the file 0600, owned by whoever runs the tests. PowerDNS
+	// runs as an unprivileged user inside the container and then cannot read its
+	// own configuration — it exits 99 before binding anything, which looks from
+	// the outside like "the port is not published". Docker Desktop hides this by
+	// remapping ownership on its file shares; a Linux runner does not.
+	if err := os.Chmod(tempConfigFile.Name(), 0o644); err != nil {
+		return nil, fmt.Errorf("test_helpers.StartPndsTestContainer: making the config readable in the container: %w", err)
+	}
+
 	// Convert to an absolute path
 	absolutePathToConfig, err := filepath.Abs(tempConfigFile.Name())
 	if err != nil {
