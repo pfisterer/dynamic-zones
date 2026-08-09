@@ -44,6 +44,17 @@ jobs:
 
       # Runs even after a failed vet, so one push reports both problems
       # instead of hiding the second behind the first.
+      #
+      # The app validates its configuration before it will start, and locally
+      # that configuration comes from a gitignored .env — so the tests only ever
+      # ran on a machine that happened to have one. These four are the fields
+      # the validator insists on; the values are placeholders, no test reaches
+      # an issuer or an upstream nameserver.
       - name: Tests
         if: '!cancelled()'
+        env:
+          UPSTREAM_DNS_ZONE: example.test.
+          UPSTREAM_DNS_NAME: ns
+          OIDC_ISSUER_URL: https://sso.example.test/realms/test
+          OIDC_CLIENT_ID: test-client
         run: make test
