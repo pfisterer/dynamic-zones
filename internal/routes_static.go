@@ -1,7 +1,6 @@
 package app
 
 import (
-	"io/fs"
 	"net/http"
 	"strings"
 
@@ -21,10 +20,6 @@ func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 		c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, strings.ReplaceAll(helper.IndexHTML, "__VERSION__", appVersion))
 	})
-
-	// Serve JS client
-	subFS, _ := fs.Sub(generated_docs.ClientDist, "client-dist")
-	group.StaticFS("/client", http.FS(subFS))
 
 	// Swagger JSON endpoint
 	group.GET("/swagger.json", func(c *gin.Context) {
