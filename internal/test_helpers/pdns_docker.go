@@ -42,6 +42,23 @@ var containerLabels = map[string]string{
 	"de.farberg.dynamic-zones-dns-api": "pdns-auth-test",
 }
 
+// Diagnose reports what the container is actually doing. A readiness check
+// that only says "did not become ready" leaves the reader guessing whether the
+// port is wrong, the process crashed, or the image never started — and that
+// guess costs a CI round trip each time.
+func (p *PdnsContainerTestInstance) Diagnose(ctx context.Context) string {
+	info, err := p.dockerController.GetContainerById(ctx, p.containerId)
+	if err != nil {
+		return fmt.Sprintf("container %s could not be inspected: %v", p.containerId[:12], err)
+	}
+	if info.State == nil {
+		return fmt.Sprintf("container %s has no state", p.containerId[:12])
+	}
+	return fmt.Sprintf("container %s: status=%s running=%t exitCode=%d oomKilled=%t error=%q",
+		p.containerId[:12], info.State.Status, info.State.Running, info.State.ExitCode,
+		info.State.OOMKilled, info.State.Error)
+}
+
 type PdnsContainerTestInstance struct {
 	containerId      string
 	dockerController *DockerController

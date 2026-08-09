@@ -28,7 +28,7 @@ func newPdnsTestApp(t *testing.T) *AppData {
 	t.Cleanup(func() { _ = pdnsDocker.Cleanup() })
 
 	baseURL := pdnsDocker.GetBaseUrl()
-	waitForPdns(t, baseURL, pdnsDocker.GetApiKey())
+	waitForPdns(t, pdnsDocker, baseURL, pdnsDocker.GetApiKey())
 
 	log := zap.NewNop().Sugar()
 	// "localhost" is PowerDNS' SERVER ID (the API path is /api/v1/servers/<id>),
@@ -52,7 +52,7 @@ func newPdnsTestApp(t *testing.T) *AppData {
 
 // waitForPdns blocks until the container answers API calls. Talking to it right
 // after start yields a connection reset, so poll instead of sleeping blindly.
-func waitForPdns(t *testing.T, baseURL, apiKey string) {
+func waitForPdns(t *testing.T, pdnsDocker *test_helpers.PdnsContainerTestInstance, baseURL, apiKey string) {
 	t.Helper()
 
 	deadline := time.Now().Add(60 * time.Second)
@@ -71,7 +71,7 @@ func waitForPdns(t *testing.T, baseURL, apiKey string) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("PowerDNS at %s did not become ready: %v", baseURL, err)
+			t.Fatalf("PowerDNS at %s did not become ready: %v\n%s", baseURL, err, pdnsDocker.Diagnose(t.Context()))
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
