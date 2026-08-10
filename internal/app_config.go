@@ -41,10 +41,21 @@ type PowerDnsConfig struct {
 	PdnsVhost string `json:"pdns_vhost" validate:"required"`
 	// The API key for authenticating with PowerDNS
 	PdnsApiKey string `json:"pdns_api_key" validate:"required"`
-	// The address where the Power DNS server listens for queries (e.g., 127.0.0.53)
+	// DnsServerAddress is the PUBLICLY reachable address of this nameserver. It
+	// is announced upstream as its A/AAAA record and shown to users in the dig /
+	// cert-manager / external-dns examples, so it must be an address that works
+	// from outside the cluster — hence the `ip` validation, a name never fits.
+	// It is NOT where this service sends its own queries; see DnsQueryTarget.
 	DnsServerAddress string `json:"dns_server_address" validate:"required,ip"`
-	// The port where the Power DNS server listens for queries (e.g., 15353)
+	// DnsServerPort belongs to DnsServerAddress: the PUBLIC port, which is what
+	// the dig / external-dns / cert-manager examples in the UI are built from.
 	DnsServerPort uint16 `json:"dns_server_port" validate:"required,port"`
+	// DnsQueryTarget is where this service sends its OWN AXFR and RFC 2136
+	// traffic — a host:port that only has to resolve from here. In the cluster
+	// that is the PowerDNS Service ("pdns-dns:53"), which keeps the traffic
+	// internal; it used to reuse DnsServerAddress, so every zone transfer left
+	// via the public address and came back in through dnsdist.
+	DnsQueryTarget string `json:"dns_query_target" validate:"required,hostname_port"`
 	// The default TTL for DNS records served by PowerDNS when they are created by this application
 	DefaultTTLSeconds uint32 `json:"default_ttl_seconds"`
 	// AdvertisedNameserver is the public NS hostname (e.g. ns.cloud-ns.dhbw-mannheim.de.)
@@ -158,8 +169,9 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			// literal IP — it is the address published upstream as this
 			// nameserver's A/AAAA record, so a hostname never fits. ::1 works
 			// just as well when the local PowerDNS is reachable over IPv6.
-			DnsServerAddress:     helper.GetEnvString("PDNS_SERVER_ADDRESS", "127.0.0.1"),
-			DnsServerPort:        uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
+			DnsServerAddress: helper.GetEnvString("PDNS_SERVER_ADDRESS", "127.0.0.1"),
+			DnsServerPort:    uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
+			DnsQueryTarget:   helper.GetEnvString("PDNS_QUERY_TARGET", "127.0.0.1:15353"),
 			DefaultTTLSeconds:    uint32(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
 			AdvertisedNameserver: helper.GetEnvString("PDNS_ADVERTISED_NAMESERVER", ""),
 		},

@@ -173,6 +173,10 @@ spec:
               value: {{ .Values.powerDNS.server.ip | quote }}
             - name: PDNS_SERVER_PORT
               value: {{ .Values.powerDNS.server.port | quote }}
+            # Where the API's own AXFR/RFC2136 traffic goes. A Service name, not
+            # the public address above — Go re-resolves it on every connection.
+            - name: PDNS_QUERY_TARGET
+              value: {{ .Values.powerDNS.server.queryTarget | quote }}
             {{- if .Values.powerDNS.server.advertisedNameserver }}
             # Public NS hostname shown in the dig / cert-manager / external-dns
             # examples. The API still talks to PDNS_SERVER_ADDRESS internally.

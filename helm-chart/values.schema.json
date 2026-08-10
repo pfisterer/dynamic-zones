@@ -116,7 +116,8 @@
           "properties": {
             "ip": { "type": "string" },
             "port": { "type": "integer" },
-            "advertisedNameserver": { "type": "string" }
+            "advertisedNameserver": { "type": "string" },
+            "queryTarget": { "type": "string" }
           }
         }
       }

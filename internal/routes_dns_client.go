@@ -2,9 +2,7 @@ package app
 
 import (
 	"fmt"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -104,9 +102,12 @@ func canonicalRecordName(name, zone string) string {
 
 // --- New Utility Functions ---
 
-// GetServerAddress constructs the server address string (host:port) from AppData config.
+// GetServerAddress returns where THIS service sends its own AXFR and RFC 2136
+// traffic. Deliberately not the advertised public address: that one points at
+// dnsdist on the node, so every zone transfer used to leave the cluster and come
+// back in through the public entrance.
 func GetServerAddress(app *AppData) string {
-	return net.JoinHostPort(app.Config.PowerDns.DnsServerAddress, strconv.Itoa(int(app.Config.PowerDns.DnsServerPort)))
+	return app.Config.PowerDns.DnsQueryTarget
 }
 
 // GetTSIGCredentials extracts and validates TSIG credentials from HTTP headers for AXFR.
@@ -403,7 +404,7 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 
 		name := canonicalRecordName(req.Name, req.Zone)
 
-		dnsServer := net.JoinHostPort(app.Config.PowerDns.DnsServerAddress, strconv.Itoa(int(app.Config.PowerDns.DnsServerPort)))
+		dnsServer := GetServerAddress(app)
 
 		switch strings.ToUpper(req.Type) {
 		case "A":

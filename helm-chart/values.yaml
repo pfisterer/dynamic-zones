@@ -86,12 +86,20 @@ powerDNS:
   logLevel: 7
   # Server configuration
   server:
+    # PUBLIC endpoint of this nameserver: announced upstream as its A/AAAA
+    # record and used to build the dig / cert-manager / external-dns examples.
+    # Must be an address that works from outside the cluster.
     ip: "141.1.2.3"
     port: 53
     # Optional public NS hostname (e.g. ns.cloud-ns.dhbw-mannheim.de.) shown to
-    # users in the dig / cert-manager / external-dns examples. The API still
-    # queries `ip` internally. Empty -> examples use `ip`.
+    # users in the examples instead of the bare IP. Empty -> examples use `ip`.
     advertisedNameserver: ""
+    # Where the API sends its OWN zone transfers and RFC 2136 updates. Only has
+    # to resolve from inside the cluster, so it is the PowerDNS Service — a name,
+    # re-resolved on every connection. Keeping this separate from `ip` is what
+    # stops that traffic from leaving via the public address and coming back in
+    # through dnsdist.
+    queryTarget: "pdns-dns:53"
 
 #------------------------------------
 # Ingress Configuration
