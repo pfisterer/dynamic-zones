@@ -185,6 +185,8 @@ locally. Image tags: `X.Y.Z-test.N` → staging, `X.Y.Z` → production.
 
 ## Deployment
 
+**Normally deployed as part of [cloud-self-service](https://github.com/pfisterer/cloud-self-service)**, the umbrella chart that composes this service with the other three and pins it by version — and a pinned chart version pins its `appVersion`, which pins the image tag. Installing this chart on its own works, but then nothing keeps it in step with the services it talks to.
+
 A Helm chart lives in [`helm-chart/`](helm-chart) and is deployed via ArgoCD from
 the `dhbw-deployment` repo.
 
@@ -194,11 +196,7 @@ The chart is published as an OCI artifact on every push to `main`:
 helm pull oci://ghcr.io/pfisterer/charts/dynamic-zones --version 0.7.8-test.1
 ```
 
-It is normally not installed on its own. The DHBW deployment composes all four
-services with the [cloud-self-service](https://github.com/pfisterer/cloud-self-service)
-umbrella chart, which pins this chart by version — and a pinned chart version
-pins its `appVersion`, which pins the image tag. Values for this chart go under
-its chart name there:
+Values for this chart go under its chart name in the umbrella:
 
 ```yaml
 dynamic-zones:
