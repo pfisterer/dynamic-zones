@@ -184,6 +184,24 @@ locally. Image tags: `X.Y.Z-test.N` → staging, `X.Y.Z` → production.
 A Helm chart lives in [`helm-chart/`](helm-chart) and is deployed via ArgoCD from
 the `dhbw-deployment` repo.
 
+The chart is published as an OCI artifact on every push to `main`:
+
+```sh
+helm pull oci://ghcr.io/pfisterer/charts/dynamic-zones --version 0.7.8-test.1
+```
+
+It is normally not installed on its own. The DHBW deployment composes all four
+services with the [cloud-self-service](https://github.com/pfisterer/cloud-self-service)
+umbrella chart, which pins this chart by version — and a pinned chart version
+pins its `appVersion`, which pins the image tag. Values for this chart go under
+its chart name there:
+
+```yaml
+dynamic-zones:
+  dynamicZonesAPI:
+    ...
+```
+
 ### What "hardened PowerDNS" means here
 
 An authoritative nameserver on the public internet is a reflection amplifier
@@ -219,6 +237,7 @@ sounds, but it is a coupling that did not exist with SQLite.
 
 ## Related projects
 
+- [cloud-self-service](https://github.com/pfisterer/cloud-self-service) — the umbrella chart that composes all four
 - [self-service-ui](https://github.com/pfisterer/self-service-ui) — the web interface
 - [openstack-management-api](https://github.com/pfisterer/openstack-management-api) — the compute half of the platform
 
