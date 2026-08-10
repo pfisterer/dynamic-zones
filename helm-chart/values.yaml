@@ -5,7 +5,8 @@
 dynamicZonesAPI:
   image: ghcr.io/pfisterer/dynamic-zones
   imagePullPolicy: Always
-  version: "latest"
+  # Empty -> the chart's appVersion is used (see the deployment template).
+  version: ""
   hostname: "dyndnsapi.example.com"
   replicas: 1
 
