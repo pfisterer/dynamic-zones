@@ -1,6 +1,6 @@
 apiVersion: v2
-name: cloud-self-service
-description: Self-Service Deployment for OpenStack environments
+name: dynamic-zones
+description: Self-service DNS zone management on top of PowerDNS
 type: application
 version: 0.7.5
 appVersion: "0.7.5"
