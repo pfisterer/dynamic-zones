@@ -77,7 +77,10 @@ spec is the authoritative reference, so it cannot drift from the implementation 
 way a hand-written endpoint list does:
 
 - **`GET /swagger.json`** — the OpenAPI spec
-- **`/client/`** — a generated TypeScript client (the web UI imports it at runtime)
+- A generated TypeScript client is published to npm as `@dhbw-cloud/dynamic-zones-client`.
+  It used to be served from `/client/` and loaded by the browser at startup; consumers
+  now depend on a version at build time, so a missing operation is a build error there
+  instead of a silent no-op in the browser.
 
 [self-service-ui](https://github.com/pfisterer/self-service-ui) renders the same
 spec in the browser under *DNS Zones → API Documentation*, which is usually the
@@ -146,8 +149,9 @@ All configuration is environment variables (`.env` is loaded in development).
 |---|---|---|
 | `PDNS_URL` | `http://localhost:8080` | PowerDNS HTTP API |
 | `PDNS_API_KEY` | `my-default-api-key` | API key |
-| `PDNS_VHOST` | `localhost` | Virtual host in the API path |
-| `PDNS_SERVER_ADDRESS`, `PDNS_SERVER_PORT` | `127.0.0.1`, `15353` | Where RFC 2136 updates are sent |
+| `PDNS_VHOST` | `localhost` | The PowerDNS *server id* in the API path (`/api/v1/servers/<id>`), which is `localhost` in a stock install — not a network host |
+| `PDNS_SERVER_ADDRESS`, `PDNS_SERVER_PORT` | `127.0.0.1`, `15353` | The **publicly reachable** address of this nameserver: announced upstream as its A/AAAA record and used to build the `dig` / cert-manager / external-dns examples. Validated as an IP, because a name would not work in either place |
+| `PDNS_QUERY_TARGET` | `127.0.0.1:15353` | Where this service sends its **own** AXFR and RFC 2136 traffic. A `host:port` that only has to resolve from here, so in a cluster it is the PowerDNS Service — kept separate from the address above, which points at whatever fronts the nameserver publicly |
 | `PDNS_ADVERTISED_NAMESERVER` | — | Nameserver name handed to users and put into NS records |
 | `PDNS_SERVER_DEFAULT_TTL` | 1 year | Default record TTL |
 
