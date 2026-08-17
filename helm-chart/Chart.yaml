@@ -2,8 +2,8 @@ apiVersion: v2
 name: dynamic-zones
 description: Self-service DNS zone management on top of PowerDNS
 type: application
-version: 0.7.8
-appVersion: "0.7.8"
+version: 0.7.9
+appVersion: "0.7.9"
 maintainers:
   - name: Dennis Pfisterer
     email: dennis.pfisterer@dhbw.de
