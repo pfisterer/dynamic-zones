@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"testing"
@@ -10,7 +11,15 @@ import (
 	"github.com/farberg/dynamic-zones/internal/test_helpers"
 )
 
-var baseURL = "http://localhost:8082"
+// Where the test server ended up. SetupEnvironmentForTests fills this in; the
+// value below only stands in for the window before it runs.
+//
+// It used to be a constant :8082, which is fine within one package and breaks
+// across two: `go test ./...` runs cmd and internal as separate processes at
+// the same time, both of them start the application, and the second one dies
+// with "address already in use". `make test` passes -p 1 and never saw it,
+// which is why this survived — it only bit whoever ran go test by hand.
+var baseURL = "http://127.0.0.1:8082"
 
 var expectedZones = []string{"example1.com", "test.org"}
 
@@ -73,7 +82,35 @@ func SetupEnvironmentForTests(t *testing.T) {
 	t.Setenv("API_MODE", "development")
 	t.Setenv("DB_TYPE", "sqlite")
 	t.Setenv("DB_CONNECTION_STRING", "file::memory:?cache=shared")
-	t.Setenv("API_BIND", ":8082")
+
+	// A port the kernel just handed out, not a fixed one, so two test packages
+	// running at the same time cannot collide. .env does not set API_BIND, so
+	// godotenv.Overload leaves this alone — if it ever does set it, this is
+	// where the collision comes back.
+	addr := freeLoopbackAddr(t)
+	t.Setenv("API_BIND", addr)
+	baseURL = "http://" + addr
+}
+
+// freeLoopbackAddr asks the kernel for an unused port and gives it straight
+// back, so the application can bind it a moment later.
+//
+// Not airtight — something else could take the port in between — but the
+// application binds within milliseconds, and the alternative is a fixed port,
+// which collides every single time instead of approximately never.
+func freeLoopbackAddr(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("app.freeLoopbackAddr: no free port: %v", err)
+	}
+	addr := listener.Addr().String()
+
+	if err := listener.Close(); err != nil {
+		t.Fatalf("app.freeLoopbackAddr: releasing %s: %v", addr, err)
+	}
+	return addr
 }
 
 // SeedPolicyRulesForTests gives the test user the zones the roundtrip expects.
