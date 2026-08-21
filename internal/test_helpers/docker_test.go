@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/cloud-self-service-golib/logging"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 func TestContainerLifecycle(t *testing.T) {
-	_, log := helper.InitLogger(true)
+	_, log := logging.Init(true)
 	ctx := context.Background()
 	dc, err := NewDockerController(log)
 

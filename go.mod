@@ -14,7 +14,7 @@ require (
 	github.com/joeig/go-powerdns/v3 v3.22.0
 	github.com/joho/godotenv v1.5.1
 	github.com/miekg/dns v1.1.72
-	github.com/sirupsen/logrus v1.9.4
+	github.com/pfisterer/cloud-self-service-golib v0.1.0
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/swag v1.16.6
 	go.uber.org/zap v1.28.0
@@ -87,6 +87,7 @@ require (
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.7.0 // indirect

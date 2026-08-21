@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/cloud-self-service-golib/logging"
 )
 
 const (
@@ -84,7 +85,7 @@ func StartPndsTestContainer(ctx context.Context) (instance *PdnsContainerTestIns
 	testContainerName := testContainerNamePrefix + "-" + helper.RandomString(10)
 
 	// Create a new Docker controller
-	_, log := helper.InitLogger(true)
+	_, log := logging.Init(true)
 
 	dc, err := NewDockerController(log)
 	if err != nil {

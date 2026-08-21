@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-contrib/cors"
 	"github.com/joho/godotenv"
+	"github.com/pfisterer/cloud-self-service-golib/logging"
 	"go.uber.org/zap"
 
 	ginzap "github.com/gin-contrib/zap"
@@ -29,7 +29,7 @@ type AppData struct {
 }
 
 func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
-	logger, log := helper.InitLogger(appConfig.DevMode)
+	logger, log := logging.Init(appConfig.DevMode)
 	if appConfig.DevMode {
 		log.Warn("app.SetupComponents: Running in development mode. This is not secure for production!")
 	} else {
@@ -139,7 +139,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	}
 
 	// Direct Gin's standard and error output streams to our custom Zap writer
-	ginLogWriter := &helper.ZapWriter{SugarLogger: app.Log, Level: app.Log.Level()}
+	ginLogWriter := &logging.Writer{Logger: app.Log, Level: app.Log.Level()}
 	gin.DefaultWriter = ginLogWriter
 	gin.DefaultErrorWriter = ginLogWriter
 	router.Use(ginzap.RecoveryWithZap(app.Logger, true))

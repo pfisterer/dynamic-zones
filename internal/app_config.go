@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/go-playground/validator/v10"
+	"github.com/pfisterer/cloud-self-service-golib/envconf"
 )
 
 type UpstreamDnsUpdateConfig struct {
@@ -151,49 +151,49 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 
 	appConfig := AppConfig{
 		UpstreamDns: UpstreamDnsUpdateConfig{
-			Server:                helper.GetEnvString("UPSTREAM_DNS_SERVER", ""),
-			Port:                  uint16(helper.GetEnvInt("UPSTREAM_DNS_PORT", 53)),
-			Zone:                  helper.GetEnvString("UPSTREAM_DNS_ZONE", ""),
-			Name:                  helper.GetEnvString("UPSTREAM_DNS_NAME", ""),
-			Tsig_Name:             helper.GetEnvString("UPSTREAM_DNS_TSIG_NAME", ""),
-			Tsig_Alg:              helper.GetEnvString("UPSTREAM_DNS_TSIG_ALG", ""),
-			Tsig_Secret:           helper.GetEnvString("UPSTREAM_DNS_TSIG_SECRET", ""),
-			Ttl:                   helper.GetEnvInt("UPSTREAM_DNS_TTL", 900),
-			UpdateIntervalSeconds: helper.GetEnvInt("UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
+			Server:                envconf.String("UPSTREAM_DNS_SERVER", ""),
+			Port:                  uint16(envconf.Int("UPSTREAM_DNS_PORT", 53)),
+			Zone:                  envconf.String("UPSTREAM_DNS_ZONE", ""),
+			Name:                  envconf.String("UPSTREAM_DNS_NAME", ""),
+			Tsig_Name:             envconf.String("UPSTREAM_DNS_TSIG_NAME", ""),
+			Tsig_Alg:              envconf.String("UPSTREAM_DNS_TSIG_ALG", ""),
+			Tsig_Secret:           envconf.String("UPSTREAM_DNS_TSIG_SECRET", ""),
+			Ttl:                   envconf.Int("UPSTREAM_DNS_TTL", 900),
+			UpdateIntervalSeconds: envconf.Int("UPSTREAM_DNS_UPDATE_INTERVAL", 60*60),
 		},
 		PowerDns: PowerDnsConfig{
-			PdnsUrl:    helper.GetEnvString("PDNS_URL", "http://localhost:8080"),
-			PdnsVhost:  helper.GetEnvString("PDNS_VHOST", "localhost"),
-			PdnsApiKey: helper.GetEnvString("PDNS_API_KEY", "my-default-api-key"),
+			PdnsUrl:    envconf.String("PDNS_URL", "http://localhost:8080"),
+			PdnsVhost:  envconf.String("PDNS_VHOST", "localhost"),
+			PdnsApiKey: envconf.String("PDNS_API_KEY", "my-default-api-key"),
 			// Loopback, not "localhost": this is validated as (and used as) a
 			// literal IP — it is the address published upstream as this
 			// nameserver's A/AAAA record, so a hostname never fits. ::1 works
 			// just as well when the local PowerDNS is reachable over IPv6.
-			DnsServerAddress: helper.GetEnvString("PDNS_SERVER_ADDRESS", "127.0.0.1"),
-			DnsServerPort:    uint16(helper.GetEnvInt("PDNS_SERVER_PORT", 15353)),
-			DnsQueryTarget:   helper.GetEnvString("PDNS_QUERY_TARGET", "127.0.0.1:15353"),
-			DefaultTTLSeconds:    uint32(helper.GetEnvInt("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
-			AdvertisedNameserver: helper.GetEnvString("PDNS_ADVERTISED_NAMESERVER", ""),
+			DnsServerAddress:     envconf.String("PDNS_SERVER_ADDRESS", "127.0.0.1"),
+			DnsServerPort:        uint16(envconf.Int("PDNS_SERVER_PORT", 15353)),
+			DnsQueryTarget:       envconf.String("PDNS_QUERY_TARGET", "127.0.0.1:15353"),
+			DefaultTTLSeconds:    uint32(envconf.Int("PDNS_SERVER_DEFAULT_TTL", int((365 * 24 * time.Hour).Seconds()))),
+			AdvertisedNameserver: envconf.String("PDNS_ADVERTISED_NAMESERVER", ""),
 		},
 		Storage: StorageConfig{
-			DbType:             helper.GetEnvString("DB_TYPE", "sqlite"),
-			DbConnectionString: helper.GetEnvString("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
+			DbType:             envconf.String("DB_TYPE", "sqlite"),
+			DbConnectionString: envconf.String("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
 		},
 		WebServer: WebServerConfig{
-			ApiTokenTTLHours:   helper.GetEnvInt("API_TOKEN_TTL_HOURS", 24),
-			OIDCIssuerURL:      helper.GetEnvString("OIDC_ISSUER_URL", ""),
-			OIDCClientID:       helper.GetEnvString("OIDC_CLIENT_ID", ""),
-			GinBindString:      helper.GetEnvString("API_BIND", ":8082"),
-			WebserverBaseUrl:   helper.GetEnvString("API_BASE_URL", "http://localhost:8082"),
-			ExternalDnsVersion: helper.GetEnvString("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
-			CORSAllowedOrigins: helper.GetEnvStringArray("CORS_ALLOWED_ORIGINS", []string{}, ",", false),
+			ApiTokenTTLHours:   envconf.Int("API_TOKEN_TTL_HOURS", 24),
+			OIDCIssuerURL:      envconf.String("OIDC_ISSUER_URL", ""),
+			OIDCClientID:       envconf.String("OIDC_CLIENT_ID", ""),
+			GinBindString:      envconf.String("API_BIND", ":8082"),
+			WebserverBaseUrl:   envconf.String("API_BASE_URL", "http://localhost:8082"),
+			ExternalDnsVersion: envconf.String("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
+			CORSAllowedOrigins: envconf.StringSlice("CORS_ALLOWED_ORIGINS", []string{}),
 		},
 		ZoneDefaults: ZoneDefaults{
-			DefaultAdminTsigKeyName: helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),
-			DefaultAdminTsigKey:     helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_KEY", ""),
-			DefaultAdminTsigAlg:     helper.GetEnvString("ZONE_DEFAULTS_ADMIN_TSIG_ALG", ""),
+			DefaultAdminTsigKeyName: envconf.String("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),
+			DefaultAdminTsigKey:     envconf.String("ZONE_DEFAULTS_ADMIN_TSIG_KEY", ""),
+			DefaultAdminTsigAlg:     envconf.String("ZONE_DEFAULTS_ADMIN_TSIG_ALG", ""),
 			DefaultRecords: func() []DefaultRecord {
-				raw := helper.GetEnvString("ZONE_DEFAULTS_ADMIN_RECORDS", "[]")
+				raw := envconf.String("ZONE_DEFAULTS_ADMIN_RECORDS", "[]")
 				var records []DefaultRecord
 				if err = json.Unmarshal([]byte(raw), &records); err != nil {
 					err = fmt.Errorf("failed to parse ZONE_DEFAULTS_ADMIN_RECORDS: %w", err)
@@ -201,7 +201,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 				return records
 			}(),
 			DefaultRecordsSoa: func() []DefaultRecord {
-				raw := helper.GetEnvString("ZONE_DEFAULTS_SOA_RECORDS", "[]")
+				raw := envconf.String("ZONE_DEFAULTS_SOA_RECORDS", "[]")
 				var records []DefaultRecord
 				if err = json.Unmarshal([]byte(raw), &records); err != nil {
 					err = fmt.Errorf("failed to parse ZONE_DEFAULTS_SOA_RECORDS: %w", err)
@@ -210,11 +210,11 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			}(),
 		},
 		DnsPolicyConfig: DnsPolicyConfig{
-			SuperAdminEmails: helper.GetEnvStringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, ",", true),
+			SuperAdminEmails: envconf.StringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, strings.ToLower),
 		},
 
-		InitialDataScriptPath: helper.GetEnvString("INITIAL_DATA_SCRIPT_PATH", ""),
-		DevMode:               helper.GetEnvString("API_MODE", "production") == "development",
+		InitialDataScriptPath: envconf.String("INITIAL_DATA_SCRIPT_PATH", ""),
+		DevMode:               envconf.String("API_MODE", "production") == "development",
 	}
 
 	//Validate the configuration
