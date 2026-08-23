@@ -9,18 +9,19 @@ import (
 
 	"github.com/coreos/go-oidc"
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/authn"
 	"go.uber.org/zap"
 )
 
 const UserDataKey = "__api_userData"
 
 // UserClaims holds the relevant user information extracted from the ID token.
-type UserClaims struct {
-	Subject           string `json:"sub"`
-	Email             string `json:"email,omitempty"`
-	PreferredUsername string `json:"preferred_username,omitempty"`
-	Name              string `json:"name,omitempty"`
-}
+//
+// An alias rather than a type of its own: the identity of a caller has to mean
+// the same thing in every service — a token issued here and a group resolved
+// elsewhere only line up if both agree on the string. The definition lives in
+// the shared module; this name stays because the call sites read well with it.
+type UserClaims = authn.Claims
 
 // OIDCVerifierConfig holds the minimal configuration for OIDC token verification.
 type OIDCVerifierConfig struct {
@@ -74,7 +75,7 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 		}
 
 		// Check if the header uses the Bearer scheme (case-insensitive per RFC 7235)
-		rawIDToken, ok := cutBearerPrefix(authHeader)
+		rawIDToken, ok := authn.CutBearerPrefix(authHeader)
 		if !ok {
 			m.Logger.Debug("Authorization header does not use the Bearer scheme. Denying access.")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unsupported authorization type. Use Bearer token."})
@@ -146,12 +147,12 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		// Get the Authorization header
 		authHeader := c.GetHeader("Authorization")
 
-		tokenString, ok := cutBearerPrefix(authHeader)
+		tokenString, ok := authn.CutBearerPrefix(authHeader)
 		if !ok {
 			// The header value itself is never logged: a client sending a valid
 			// token under an unexpected scheme would write its credential into
 			// the log. The scheme alone is what makes this diagnosable.
-			log.Warnf("Missing or invalid Authorization header (scheme %q)", authScheme(authHeader))
+			log.Warnf("Missing or invalid Authorization header (scheme %q)", authn.Scheme(authHeader))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization Bearer header"})
 			return
 		}
@@ -194,22 +195,4 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		oidcVerifier.BearerTokenAuthMiddleware()(c)
 
 	}
-}
-
-// cutBearerPrefix strips the "Bearer " prefix and returns the token. The scheme
-// is matched case-insensitively: RFC 7235 defines it that way, and a client
-// sending "bearer <token>" was previously rejected as unauthenticated.
-func cutBearerPrefix(header string) (string, bool) {
-	const prefix = "bearer "
-	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return "", false
-	}
-	return strings.TrimSpace(header[len(prefix):]), true
-}
-
-// authScheme returns the scheme of an Authorization header ("Basic", "Token", …)
-// without the credentials that follow it — safe to log, unlike the header.
-func authScheme(header string) string {
-	scheme, _, _ := strings.Cut(strings.TrimSpace(header), " ")
-	return scheme
 }
