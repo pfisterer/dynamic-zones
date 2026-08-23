@@ -113,6 +113,22 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Temporary probe, to be removed once it has answered its question.
+		//
+		// This service identifies people by preferred_username (zone ownership,
+		// token ownership) while matching policy rules on the e-mail — an
+		// inconsistency that is invisible for as long as the two claims carry
+		// the same string, which every stored value suggests they do. Moving
+		// both onto one identity is only safe if that holds for every account,
+		// and no database here can show it: each stores one of the two.
+		//
+		// So: say so when they differ, and let real traffic answer it. Silence
+		// over a few days means the migration touches nothing.
+		if claims.Email != "" && claims.PreferredUsername != "" && claims.Email != claims.PreferredUsername {
+			m.Logger.Warnw("identity probe: email and preferred_username differ",
+				"email", claims.Email, "preferred_username", claims.PreferredUsername)
+		}
+
 		// Store user claims in Gin context for access in subsequent handlers
 		c.Set(UserDataKey, &claims)
 		//m.Logger.Debugf("Token verified for user '%s' (sub: %s, email: %s).", claims.PreferredUsername, claims.Subject, claims.Email)
