@@ -2,14 +2,16 @@ package app
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/pfisterer/cloud-self-service-golib/token"
 )
 
-// An expired token must not authenticate. The lazy cleanup in GetTokens only
-// runs when the owner lists their tokens, so the expiry has to be enforced on
-// the lookup path itself.
+// An expired token must not authenticate. The lazy cleanup in List only runs
+// when the owner lists their tokens, so the expiry has to be enforced on the
+// lookup path itself.
 func TestExpiredTokenDoesNotAuthenticate(t *testing.T) {
 	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
 	if err != nil {
@@ -17,66 +19,70 @@ func TestExpiredTokenDoesNotAuthenticate(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	valid, err := db.CreateToken(ctx, "alice", time.Hour, false)
+	valid, err := db.Tokens.Issue(ctx, "alice", time.Hour, false)
 	if err != nil {
 		t.Fatalf("create valid token: %v", err)
 	}
-	expired, err := db.CreateToken(ctx, "alice", -time.Minute, false)
-	if err != nil {
-		t.Fatalf("create expired token: %v", err)
+
+	if _, err := db.Tokens.Lookup(ctx, valid.Secret); err != nil {
+		t.Fatalf("valid token did not authenticate: %v", err)
 	}
 
-	got, err := db.GetToken(ctx, valid.TokenString)
-	if err != nil || got == nil {
-		t.Fatalf("valid token should authenticate, got (%v, %v)", got, err)
-	}
-
-	got, err = db.GetToken(ctx, expired.TokenString)
-	if err != nil {
-		t.Fatalf("lookup of expired token errored: %v", err)
-	}
-	if got != nil {
-		t.Errorf("expired token still authenticates: %+v", got)
+	// Issue refuses a negative TTL, so age the service instead of the token.
+	aged := db.Tokens.WithClock(func() time.Time { return time.Now().Add(2 * time.Hour) })
+	if _, err := aged.Lookup(ctx, valid.Secret); !errors.Is(err, token.ErrNotFound) {
+		t.Errorf("expired token: err = %v, want ErrNotFound", err)
 	}
 }
 
-// The database must never hold a usable token: only its hash, plus a short
-// prefix for identification. The token itself exists once, in the create call.
-func TestTokensAreStoredHashed(t *testing.T) {
+// The secret must be reachable exactly once, and never out of the database.
+func TestTokenSecretIsNotStored(t *testing.T) {
 	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}
 	ctx := context.Background()
 
-	created, err := db.CreateToken(ctx, "alice", time.Hour, false)
+	created, err := db.Tokens.Issue(ctx, "alice", time.Hour, false)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
-	if created.TokenString == "" {
-		t.Fatal("create must return the token exactly once")
+
+	if created.Secret == "" {
+		t.Fatal("Issue returned no secret")
+	}
+	if created.Hash == created.Secret {
+		t.Error("the secret was stored as its own hash")
 	}
 
-	var stored Token
-	if err := db.db.WithContext(ctx).Where("id = ?", created.ID).Take(&stored).Error; err != nil {
-		t.Fatalf("read back token: %v", err)
+	// Listing gives records, never the secret again.
+	list, err := db.Tokens.List(ctx, "alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
 	}
-	if stored.TokenString != "" {
-		t.Errorf("token was persisted in the clear: %q", stored.TokenString)
+	if len(list) != 1 {
+		t.Fatalf("got %d tokens, want 1", len(list))
 	}
-	if stored.TokenHash != HashToken(created.TokenString) {
-		t.Errorf("stored hash %q does not match the token", stored.TokenHash)
-	}
-	if !strings.HasPrefix(created.TokenString, stored.TokenPrefix) || len(stored.TokenPrefix) >= len(created.TokenString) {
-		t.Errorf("prefix %q is not a proper identifying head of the token", stored.TokenPrefix)
+	if list[0].Hash != token.Hash(created.Secret) {
+		t.Error("stored hash does not match the secret")
 	}
 
-	// And the hashed token still authenticates.
-	if got, err := db.GetToken(ctx, created.TokenString); err != nil || got == nil {
-		t.Fatalf("hashed token should authenticate, got (%v, %v)", got, err)
+	if _, err := db.Tokens.Lookup(ctx, created.Secret+"x"); !errors.Is(err, token.ErrNotFound) {
+		t.Error("a modified secret authenticated")
 	}
-	// A wrong token does not.
-	if got, _ := db.GetToken(ctx, created.TokenString+"x"); got != nil {
-		t.Error("a modified token must not authenticate")
+}
+
+// The prefix is what routes a credential to the token path instead of OIDC.
+func TestTokensOwnsOnlyThisServicesPrefix(t *testing.T) {
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+
+	if !db.Tokens.Owns(ApiTokenPrefix + "whatever") {
+		t.Error("did not recognise its own prefix")
+	}
+	if db.Tokens.Owns("os_mgt_whatever") {
+		t.Error("claimed another service's token")
 	}
 }

@@ -2,14 +2,15 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc"
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/authn"
+	"github.com/pfisterer/cloud-self-service-golib/token"
 	"go.uber.org/zap"
 )
 
@@ -158,33 +159,34 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		}
 
 		// Check if token is an API key (starts with your prefix)
-		if strings.HasPrefix(tokenString, ApiTokenPrefix) {
+		if store.Tokens.Owns(tokenString) {
 
-			// Look up the token in storage
-			token, err := store.GetToken(ctx, tokenString)
+			// Look up the token in storage. An expired one is not found, so the
+			// answer here needs no expiry check of its own.
+			rec, err := store.Tokens.Lookup(ctx, tokenString)
+			if errors.Is(err, token.ErrNotFound) {
+				log.Warn("Invalid API token, returning unauthorized")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
 			if err != nil {
 				log.Warnf("storage error: %v", err)
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 				return
 			}
 
-			// Check if a token was found
-			if token == nil {
-				log.Warn("Invalid API token, got nil token, returning unauthorized")
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-				return
-			}
-
 			// Check whether the operation is GET (read-only) and the token is read-only
-			if c.Request.Method != http.MethodGet && token.ReadOnly {
+			if c.Request.Method != http.MethodGet && rec.ReadOnly {
 				log.Warnf("Attempt to use read-only token for non-GET operation: %s %s", c.Request.Method, c.Request.URL.Path)
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token is read-only"})
 				return
 			}
 
-			// Set user info in context
+			// The subject goes back into the claim it was issued under — see
+			// tokenSubject. Anything else and the request would resolve to a
+			// different owner's zones.
 			c.Set(UserDataKey, &UserClaims{
-				PreferredUsername: token.Username,
+				PreferredUsername: rec.Subject,
 			})
 
 			c.Next()

@@ -2,14 +2,11 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/token"
+	"github.com/pfisterer/cloud-self-service-golib/tokengorm"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -23,29 +20,6 @@ type Zone struct {
 	Zone              string    `gorm:"primaryKey" json:"domain"`
 	Username          string    `gorm:"index" json:"user"`
 	RequiresRefreshAt time.Time `json:"requires_refresh_at"`
-}
-
-type Token struct {
-	ID        uint       `gorm:"primaryKey" json:"id" example:"1" swagger:"desc(The token ID)"`
-	CreatedAt time.Time  `json:"created_at" example:"2025-11-04T12:00:00Z" swagger:"desc(Creation timestamp)"`
-	UpdatedAt time.Time  `json:"updated_at" example:"2025-11-04T12:00:00Z" swagger:"desc(Last update timestamp)"`
-	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty" example:"2025-12-31T23:59:59Z" swagger:"desc(Deletion timestamp, if soft-deleted)"`
-
-	Username string `gorm:"index" json:"user" example:"alice" swagger:"desc(User that owns the token)"`
-	// TokenHash is the SHA-256 of the token. The token itself is NEVER stored:
-	// whoever reads the database (backup, pgweb, a pod in the same network) would
-	// otherwise hold working DNS write credentials for every user. Tokens carry
-	// 128 bits of entropy from crypto/rand, so a plain hash is enough — there is
-	// nothing to brute-force and no need for a slow KDF.
-	TokenHash string `gorm:"uniqueIndex" json:"-"`
-	// TokenPrefix is the first few characters of the token, kept in the clear so
-	// the UI can tell two tokens apart in a list without holding either of them.
-	TokenPrefix string `json:"token_prefix" example:"dynz_token_ab12cd34" swagger:"desc(First characters of the token, for identification)"`
-	// TokenString carries the generated token OUT of CreateToken exactly once and
-	// is never persisted (gorm:"-"): after the response it cannot be recovered.
-	TokenString string    `gorm:"-" json:"token_string,omitempty" example:"dynz_token_abcdef123456" swagger:"desc(The API token — returned ONLY when it is created)"`
-	ExpiresAt   time.Time `json:"expires_at" example:"2025-12-31T23:59:59Z" swagger:"desc(Token expiration date and time)"`
-	ReadOnly    bool      `json:"read_only" gorm:"default:false" example:"false"`
 }
 
 // PolicyRule represents a DNS policy rule.
@@ -81,6 +55,9 @@ type DelegationPolicy struct {
 
 type Storage struct {
 	db *gorm.DB
+	// Tokens issues and checks this service's API tokens. Only the prefix and
+	// the table are ours; the credential logic is shared.
+	Tokens *token.Service
 }
 
 func NewStorage(dbType string, connectionString string) (*Storage, error) {
@@ -131,12 +108,20 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetMaxIdleConns(5)
 
-	err = db.AutoMigrate(&Zone{}, &Token{}, &PolicyRule{}, &DelegationPolicy{})
+	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to auto-migrate database: %w", err)
 	}
 
-	return &Storage{db: db}, nil
+	// Separate from AutoMigrate above because it is not one: the tokens table
+	// still had its owner column named `username`, and AutoMigrate does not
+	// rename. NewService performs it.
+	tokens, err := tokengorm.NewService(ApiTokenPrefix, db)
+	if err != nil {
+		return nil, fmt.Errorf("storage.NewStorage: %w", err)
+	}
+
+	return &Storage{db: db, Tokens: tokens}, nil
 }
 
 func (storage *Storage) GetAllZones(ctx context.Context, ch chan<- Zone) error {
@@ -256,121 +241,6 @@ func (storage *Storage) DeleteAllZoneOwners(zone string) error {
 		return fmt.Errorf("storage.DeleteAllZoneOwners: Failed to delete owners of zone ('%s'): %w", zone, err)
 	}
 	return nil
-}
-
-// GetToken looks up a token for authentication. Expired tokens are treated as
-// absent: the lazy cleanup in GetTokens only runs when the OWNER happens to list
-// their tokens, so without this condition an expired token kept authenticating
-// indefinitely — an expiry date that nothing enforces is not an expiry date.
-func (storage *Storage) GetToken(ctx context.Context, tokenString string) (*Token, error) {
-	var token Token
-	err := storage.db.WithContext(ctx).
-		Where("token_hash = ? AND expires_at > ?", HashToken(tokenString), time.Now()).
-		Take(&token).Error
-
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
-		}
-		// The token string itself is never part of the error: this error is logged
-		// by the auth middleware, and a credential does not belong in a log line.
-		return nil, fmt.Errorf("storage.GetToken: lookup failed: %w", err)
-	}
-
-	return &token, nil
-}
-
-func (storage *Storage) GetTokens(ctx context.Context, username string) ([]Token, error) {
-	var tokens []Token
-
-	err := storage.db.WithContext(ctx).
-		Where("username = ?", username).
-		Find(&tokens).Error
-
-	if err != nil {
-		return nil, fmt.Errorf("storage.GetTokens: failed to get tokens for user '%s': %w", username, err)
-	}
-
-	// Delete expired tokens before returning them
-	now := time.Now()
-	var validTokens []Token
-
-	for _, token := range tokens {
-		if token.ExpiresAt.After(now) {
-			validTokens = append(validTokens, token)
-		} else {
-			// Token is expired, delete it
-			if delErr := storage.db.WithContext(ctx).
-				Where("id = ?", token.ID).
-				Delete(&Token{}).Error; delErr != nil {
-				return nil, fmt.Errorf("storage.GetTokens: failed to delete expired token ID %d for user '%s': %w", token.ID, username, delErr)
-			}
-		}
-	}
-
-	return validTokens, nil
-}
-
-// HashToken is the one-way mapping from a token to what the database stores.
-func HashToken(tokenString string) string {
-	sum := sha256.Sum256([]byte(tokenString))
-	return hex.EncodeToString(sum[:])
-}
-
-// tokenDisplayPrefix returns the identifying head of a token: the fixed prefix
-// plus the first 8 random characters. Short enough to reveal nothing usable
-// (2^96 remain), long enough to pick a token out of a list.
-func tokenDisplayPrefix(tokenString string) string {
-	const shown = len(ApiTokenPrefix) + 8
-	if len(tokenString) <= shown {
-		return tokenString
-	}
-	return tokenString[:shown]
-}
-
-func (storage *Storage) CreateToken(ctx context.Context, username string, ttl time.Duration, readOnly bool) (*Token, error) {
-	// Generate a secure random token string
-	b := make([]byte, 16) // 16 bytes → 32 hex chars
-	if _, err := rand.Read(b); err != nil {
-		return nil, fmt.Errorf("storage.CreateToken: failed to generate token: %w", err)
-	}
-
-	tokenString := ApiTokenPrefix + hex.EncodeToString(b)
-
-	token := &Token{
-		Username:    username,
-		TokenHash:   HashToken(tokenString),
-		TokenPrefix: tokenDisplayPrefix(tokenString),
-		ExpiresAt:   time.Now().Add(ttl),
-		ReadOnly:    readOnly,
-	}
-
-	if err := storage.db.WithContext(ctx).Create(token).Error; err != nil {
-		return nil, fmt.Errorf("storage.CreateToken: failed to create token for user '%s': %w", username, err)
-	}
-
-	// The only moment the caller can ever see the token. It is not persisted.
-	token.TokenString = tokenString
-	return token, nil
-}
-
-func (storage *Storage) DeleteToken(ctx context.Context, username string, id int) (int, gin.H, error) {
-	result := storage.db.WithContext(ctx).
-		Where("username = ? AND id = ?", username, id).
-		Delete(&Token{})
-
-	if result.Error != nil {
-		return http.StatusInternalServerError, gin.H{"error": "Failed to delete token"}, fmt.Errorf(
-			"storage.DeleteToken: delete failed for user '%s' token '%d': %w",
-			username, id, result.Error,
-		)
-	}
-
-	if result.RowsAffected == 0 {
-		return http.StatusNotFound, gin.H{"status": "not found"}, nil
-	}
-
-	return http.StatusOK, gin.H{"status": "deleted"}, nil
 }
 
 // --- CRUD Operations for PolicyRule ---
