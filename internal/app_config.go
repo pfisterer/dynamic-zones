@@ -90,8 +90,19 @@ type WebServerConfig struct {
 	GinBindString string `json:"gin_bind_string" validate:"required"`
 	// The base URL for the web server (e.g., "http://localhost:8082")
 	WebserverBaseUrl string `json:"webserver_base_url" validate:"required,url"`
-	// The TTL (in hours) for API tokens
+	// The TTL (in hours) for API tokens, used when the request names none.
 	ApiTokenTTLHours int `json:"api_token_ttl_hours"`
+	// ApiTokenMaxTTLHours is the longest lifetime a caller may ask for. It
+	// bounds what the UI offers; a request over it is refused rather than
+	// silently shortened, because a token that expires earlier than the person
+	// was told is an outage they will not connect to this.
+	ApiTokenMaxTTLHours int `json:"api_token_max_ttl_hours"`
+	// ApiTokenAllowNeverExpires decides whether a token may be issued with no
+	// expiry at all. Off by default: a permanent credential is an operator's
+	// decision, not a user's. On for this deployment because the typical DNS
+	// token lives in a home router, where an expiry nobody is reminded of is a
+	// silent failure months later.
+	ApiTokenAllowNeverExpires bool `json:"api_token_allow_never_expires"`
 	// The version of the external DNS image to use
 	ExternalDnsVersion string `json:"external_dns_version" validate:"required"`
 	// CORSAllowedOrigins lists the exact browser origins allowed to call this
@@ -180,13 +191,15 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			DbConnectionString: envconf.String("DB_CONNECTION_STRING", "file::memory:?cache=shared"),
 		},
 		WebServer: WebServerConfig{
-			ApiTokenTTLHours:   envconf.Int("API_TOKEN_TTL_HOURS", 24),
-			OIDCIssuerURL:      envconf.String("OIDC_ISSUER_URL", ""),
-			OIDCClientID:       envconf.String("OIDC_CLIENT_ID", ""),
-			GinBindString:      envconf.String("API_BIND", ":8082"),
-			WebserverBaseUrl:   envconf.String("API_BASE_URL", "http://localhost:8082"),
-			ExternalDnsVersion: envconf.String("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
-			CORSAllowedOrigins: envconf.StringSlice("CORS_ALLOWED_ORIGINS", []string{}),
+			ApiTokenTTLHours:          envconf.Int("API_TOKEN_TTL_HOURS", 24),
+			ApiTokenMaxTTLHours:       envconf.Int("API_TOKEN_MAX_TTL_HOURS", 8760),
+			ApiTokenAllowNeverExpires: envconf.Bool("API_TOKEN_ALLOW_NEVER_EXPIRES", false),
+			OIDCIssuerURL:             envconf.String("OIDC_ISSUER_URL", ""),
+			OIDCClientID:              envconf.String("OIDC_CLIENT_ID", ""),
+			GinBindString:             envconf.String("API_BIND", ":8082"),
+			WebserverBaseUrl:          envconf.String("API_BASE_URL", "http://localhost:8082"),
+			ExternalDnsVersion:        envconf.String("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
+			CORSAllowedOrigins:        envconf.StringSlice("CORS_ALLOWED_ORIGINS", []string{}),
 		},
 		ZoneDefaults: ZoneDefaults{
 			DefaultAdminTsigKeyName: envconf.String("ZONE_DEFAULTS_ADMIN_TSIG_NAME", ""),

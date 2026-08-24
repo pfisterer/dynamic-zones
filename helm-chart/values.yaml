@@ -45,7 +45,18 @@ dynamicZonesAPI:
   # proxy. dyndns clients are not browsers and are unaffected either way.
   corsAllowedOrigins: []
   initialDataProviderScript: ""
+  # Lifetime of an API token when the request does not ask for one, and the
+  # longest one a caller may ask for. A request over the maximum is refused
+  # rather than shortened: a token that stops working earlier than the person was
+  # told is an outage nobody connects to the moment they created it.
   apiTokenTtlHours: 8760 # 1 year
+  apiTokenMaxTtlHours: 8760
+  # Whether a token may be issued with no expiry at all. On here, unlike in
+  # openstack-management-api: the typical token for this API sits in a home
+  # router or a cron job, where an expiry nobody is reminded of surfaces months
+  # later as DNS that quietly stopped updating. Revoking is one click; noticing
+  # is the hard part.
+  apiTokenAllowNeverExpires: true
   apiBindString: "" # Optional
   apiBaseUrl: "" # Will default to https://<hostname>
 

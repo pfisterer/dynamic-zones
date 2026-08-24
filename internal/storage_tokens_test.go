@@ -19,7 +19,7 @@ func TestExpiredTokenDoesNotAuthenticate(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	valid, err := db.Tokens.Issue(ctx, "alice", time.Hour, false)
+	valid, err := db.Tokens.Issue(ctx, "alice", token.IssueOptions{TTL: time.Hour})
 	if err != nil {
 		t.Fatalf("create valid token: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestTokenSecretIsNotStored(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	created, err := db.Tokens.Issue(ctx, "alice", time.Hour, false)
+	created, err := db.Tokens.Issue(ctx, "alice", token.IssueOptions{TTL: time.Hour})
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}

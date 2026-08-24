@@ -29,19 +29,42 @@ type Token struct {
 	// TokenString is set only in the response that creates a token. It is not
 	// stored and cannot be recovered afterwards.
 	TokenString string    `json:"token_string,omitempty" example:"dynz_token_abcdef123456" swagger:"desc(The API token — returned ONLY when it is created)"`
-	ExpiresAt   time.Time `json:"expires_at" example:"2025-12-31T23:59:59Z" swagger:"desc(Token expiration date and time)"`
-	ReadOnly    bool      `json:"read_only" example:"false"`
-	CreatedAt   time.Time `json:"created_at" example:"2025-11-04T12:00:00Z"`
+	// ExpiresAt is null for a token that does not expire.
+	//
+	// A pointer, so that "no expiry" is null and not the year 1: Go's zero time
+	// serialises to 0001-01-01T00:00:00Z, and a client comparing that against
+	// now would read a permanent token as long expired.
+	ExpiresAt *time.Time `json:"expires_at" example:"2025-12-31T23:59:59Z" swagger:"desc(When the token expires; null means it never does)"`
+	ReadOnly  bool       `json:"read_only" example:"false"`
+	CreatedAt time.Time  `json:"created_at" example:"2025-11-04T12:00:00Z"`
+	// Description is what the owner wrote down about this token. A memory aid,
+	// never a permission.
+	Description string `json:"description" example:"ddclient on the router at home"`
+	// LastUsedAt is when the token last authenticated a request, to the nearest
+	// minute, or null if it never has — which is what makes revoking a
+	// forgotten token safe to do.
+	LastUsedAt *time.Time `json:"last_used_at" example:"2025-11-05T08:30:00Z"`
+}
+
+// nilIfZero maps Go's zero time to a JSON null. Both callers say something
+// specific with it: no expiry, and never used.
+func nilIfZero(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func toAPIToken(rec token.Record) Token {
 	return Token{
-		ID:        rec.ID,
-		User:      rec.Subject,
-		Prefix:    rec.Prefix,
-		ExpiresAt: rec.ExpiresAt,
-		ReadOnly:  rec.ReadOnly,
-		CreatedAt: rec.CreatedAt,
+		ID:          rec.ID,
+		User:        rec.Subject,
+		Prefix:      rec.Prefix,
+		ExpiresAt:   nilIfZero(rec.ExpiresAt),
+		ReadOnly:    rec.ReadOnly,
+		CreatedAt:   rec.CreatedAt,
+		Description: rec.Description,
+		LastUsedAt:  nilIfZero(rec.LastUsedAt),
 	}
 }
 
@@ -67,6 +90,31 @@ type TokensResponse struct {
 
 type CreateTokenRequest struct {
 	ReadOnly bool `json:"read_only"`
+	// Description is the owner's note about the token, at most 100 characters.
+	Description string `json:"description" example:"ddclient on the router at home"`
+	// TTLHours is how long the token should live. Omitted or 0 means the
+	// configured default; -1 means it never expires, and is refused unless the
+	// deployment allows it.
+	//
+	// -1 rather than a separate boolean, because that is what NeverExpires is in
+	// the shared library: one convention for "no expiry" across the request, the
+	// service and the database beats two that have to be kept in step.
+	TTLHours int `json:"ttl_hours" example:"720"`
+}
+
+// ttlPolicy is the configured lifetime policy. The decision table lives in the
+// shared library, because os-mgt-api needs exactly the same one; what belongs
+// here are the values, which are the deployment's answer — for this platform,
+// both services permit tokens without an expiry, because the callers they exist
+// for (a router, a cron job, a CI pipeline) have nobody to notice a quiet
+// expiry. What carries that is visibility, not expiry: description and last use
+// are listed, and revoking is one request.
+func ttlPolicy(cfg WebServerConfig) token.TTLPolicy {
+	return token.TTLPolicy{
+		Default:    time.Duration(cfg.ApiTokenTTLHours) * time.Hour,
+		Max:        time.Duration(cfg.ApiTokenMaxTTLHours) * time.Hour,
+		AllowNever: cfg.ApiTokenAllowNeverExpires,
+	}
 }
 
 // getTokens retrieves all tokens for the authenticated user
@@ -104,10 +152,13 @@ func getTokens(app *AppData) gin.HandlerFunc {
 
 // createToken creates a new API token for the authenticated user
 // @Summary Create a new API token
-// @Description Generate a new API token for the authenticated user with TTL defined in configuration
+// @Description Generate a new API token for the authenticated user. The lifetime comes from ttl_hours, or from the configured default when it is omitted; -1 asks for a token that never expires and is refused unless the deployment allows it.
 // @Tags tokens
+// @Accept json
 // @Produce json
+// @Param request body CreateTokenRequest false "Token options"
 // @Success 201 {object} Token
+// @Failure 400 {object} map[string]string "Invalid lifetime or description"
 // @Failure 500 {object} map[string]string "Failed to retrieve tokens"
 // @Security ApiKeyAuth
 // @ID createToken
@@ -122,8 +173,26 @@ func createToken(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		ttl := time.Duration(app.Config.WebServer.ApiTokenTTLHours) * time.Hour
-		issued, err := app.Storage.Tokens.Issue(c.Request.Context(), subject, ttl, input.ReadOnly)
+		ttl, err := ttlPolicy(app.Config.WebServer).Resolve(input.TTLHours)
+		if err != nil {
+			// The caller asked for something this deployment does not grant, and
+			// the message says which limit — nothing here is a server fault.
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		issued, err := app.Storage.Tokens.Issue(c.Request.Context(), subject, token.IssueOptions{
+			TTL:         ttl,
+			ReadOnly:    input.ReadOnly,
+			Description: input.Description,
+		})
+		// A description over the limit is the caller's mistake, not a server
+		// fault, and the message says which limit. The description itself is
+		// never echoed into the log — it is arbitrary text from a request body.
+		if errors.Is(err, token.ErrDescriptionTooLong) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		if err != nil {
 			app.Log.Errorf("Error creating token for %s: %v", subject, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create token"})

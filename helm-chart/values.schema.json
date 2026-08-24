@@ -36,6 +36,8 @@
         },
         "initialDataProviderScript": { "type": "string" },
         "apiTokenTtlHours": { "type": "integer", "minimum": 1 },
+        "apiTokenMaxTtlHours": { "type": "integer", "minimum": 1 },
+        "apiTokenAllowNeverExpires": { "type": "boolean" },
         "apiBindString": { "type": "string" },
         "apiBaseUrl": { "type": "string" },
         "upstreamDNS": {
