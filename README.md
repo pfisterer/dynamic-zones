@@ -86,6 +86,17 @@ way a hand-written endpoint list does:
 spec in the browser under *DNS Zones → API Documentation*, which is usually the
 quickest way to look something up and try it out.
 
+### MCP
+
+`POST /mcp` speaks the Model Context Protocol, so an LLM client can work with zones and records on a person's behalf. It authenticates exactly like `/v1` — an API token from the tokens page — and every tool calls the same service method the REST handler calls, so an agent is bound by the same rules as the browser.
+
+Two things differ from `/v1`, and both are deliberate:
+
+- **The read-only rule is per operation, not per HTTP method.** Every MCP call is a POST, reads included, so `RejectWritesForReadOnlyTokens` (which sits on the `/v1` group) is not mounted here. A read-only token is simply not shown the mutating tools — a model picks from what it sees, and offering it a tool that always fails only invites retries.
+- **No tool ever returns a TSIG key.** The record tools resolve the caller's own key inside the service (`AppData.OwnerTSIG`) and hand it straight to PowerDNS. The REST routes take the key from the request because the browser holds it already; a model must not be put in that position, since anything handed to it lands in its context, its transcript and its client's storage.
+
+The destructive tools (`delete_zone`, `delete_policy_rule`, `delete_delegation`) require a distinguishing field to be echoed back. That is not a defence against prompt injection — injected text can quote a zone name as easily as invent one — and is not sold as one. It catches the likelier failure: a model that resolved "the old one" to the wrong zone. There is deliberately **no** tool that deletes an orphaned zone: an orphaned zone is nearly always a mistyped rule, and the remedy is to fix the rule.
+
 ## Running it locally
 
 **Prerequisites:** Go 1.24+, Node.js (for the docs and client bundle),

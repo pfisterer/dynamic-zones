@@ -20,6 +20,15 @@ import (
 // with a fresh in-memory database.
 func newPdnsTestApp(t *testing.T) *AppData {
 	t.Helper()
+	app, _ := newPdnsTestAppWithContainer(t)
+	return app
+}
+
+// newPdnsTestAppWithContainer is the same fixture, plus the container itself —
+// which a test needs when it talks DNS rather than only using the client (the
+// published DNS port is not derivable from the API URL).
+func newPdnsTestAppWithContainer(t *testing.T) (*AppData, *test_helpers.PdnsContainerTestInstance) {
+	t.Helper()
 
 	pdnsDocker, err := test_helpers.StartPndsTestContainer(t.Context())
 	if err != nil {
@@ -47,7 +56,7 @@ func newPdnsTestApp(t *testing.T) *AppData {
 		t.Fatalf("failed to create test storage: %v", err)
 	}
 
-	return &AppData{Storage: db, PowerDns: pdns, Log: log, RefreshTime: 3600}
+	return &AppData{Storage: db, PowerDns: pdns, Log: log, RefreshTime: 3600}, pdnsDocker
 }
 
 // waitForPdns blocks until the container answers API calls. Talking to it right

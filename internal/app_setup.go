@@ -171,10 +171,23 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	apiV1Group := router.Group("/v1")
 	enableCors(apiV1Group, app.Config.WebServer.CORSAllowedOrigins, app.Config.DevMode, app.Log)
 	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
+
+	// The read-only rule for REST, mounted here rather than inside the auth
+	// middleware: "anything but GET is a write" is true of these routes and of
+	// nothing else, so it belongs to the group it describes.
+	apiV1Group.Use(RejectWritesForReadOnlyTokens(app.Log))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
 	CreatePolicyApiGroup(apiV1Group, app)
+
+	// The MCP endpoint: same authentication as /v1, deliberately WITHOUT
+	// RejectWritesForReadOnlyTokens. Every MCP call is a POST, so the method
+	// cannot say whether an operation writes — the tool does, and mcp.go checks
+	// it there. No CORS: this is for an MCP client, not a browser.
+	mcpGroup := router.Group("/mcp")
+	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
+	RegisterMCPRoutes(mcpGroup, app)
 
 	return router
 }
