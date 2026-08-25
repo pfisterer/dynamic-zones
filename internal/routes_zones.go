@@ -194,139 +194,11 @@ func getZones(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		userZones, err := app.PolicyGetUserZones(user)
+		zonesWithStatus, err := app.ZoneList(user)
 		if err != nil {
-			app.Log.Errorf("Error getting user zones: %v", err)
+			app.Log.Errorf("Error listing zones: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
 			return
-		}
-
-		app.Log.Debugf("Zones for user by policy: %+v", userZones)
-		zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
-
-		for _, zone := range userZones {
-			existsInStorage, err := app.Storage.ZoneExists(zone.Zone)
-			if err != nil {
-				app.Log.Errorf("Error checking if zone exists in storage: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone existence"})
-				return
-			}
-
-			// Exists (manageable) = created AND the user already owns it. A created
-			// zone the user does not own is either joinable (policy-entitled +
-			// sharing on -> explicit join) or "already taken" (sharing off).
-			isOwner, owners := false, []string(nil)
-			if existsInStorage {
-				if isOwner, err = app.Storage.IsZoneOwner(user.PreferredUsername, zone.Zone); err != nil {
-					app.Log.Errorf("Error checking zone ownership: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone ownership"})
-					return
-				}
-				// Only reveal the owner list to an actual owner. A policy-
-				// entitled non-owner (including the "already taken by someone else"
-				// case) must not be able to enumerate the current owners' emails.
-				if isOwner {
-					if owners, err = app.Storage.ListZoneOwners(zone.Zone); err != nil {
-						app.Log.Errorf("Error listing zone owners: %v", err)
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone owners"})
-						return
-					}
-				}
-			}
-			canJoin := existsInStorage && !isOwner && zone.SharingAllowed
-
-			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
-				Name:                      zone.Zone,
-				Exists:                    existsInStorage && isOwner,
-				CanJoin:                   canJoin,
-				AlreadyTakenBySomeoneElse: existsInStorage && !isOwner && !zone.SharingAllowed,
-				AllowSubdomains:           zone.AllowSubdomains,
-				SharingAllowed:            zone.SharingAllowed,
-				Owners:                    owners,
-			})
-		}
-
-		// Add the user's created subzones (delegated under an allow_subdomains base
-		// zone) so the UI can show them indented under their parent.
-		baseNames := make(map[string]bool, len(userZones))
-		baseSharing := make(map[string]bool, len(userZones))
-		allowSubBases := make([]string, 0)
-		for _, z := range userZones {
-			baseNames[z.Zone] = true
-			baseSharing[z.Zone] = z.SharingAllowed
-			if z.AllowSubdomains {
-				allowSubBases = append(allowSubBases, z.Zone)
-			}
-		}
-
-		createdZones, err := app.Storage.ListUserZones(user.PreferredUsername)
-		if err != nil {
-			app.Log.Errorf("Error listing user zones: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list user zones"})
-			return
-		}
-
-		// A zone held through SHARING rather than policy is a base zone too, so
-		// resolve the governing rule of every owned zone up front and let those
-		// that allow subdomains act as parents below. Without this a co-owner's
-		// subzones would render top-level instead of indented under their parent.
-		govDefs := make(map[string]*ZoneResponse, len(createdZones))
-		for _, cz := range createdZones {
-			if baseNames[cz.Zone] {
-				continue
-			}
-			def, err := app.zoneGoverningDef(cz.Zone)
-			if err != nil {
-				app.Log.Errorf("Error resolving governing rule: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve zone policy"})
-				return
-			}
-			govDefs[cz.Zone] = def
-			if def != nil && def.AllowSubdomains {
-				allowSubBases = append(allowSubBases, cz.Zone)
-				baseSharing[cz.Zone] = def.SharingAllowed
-			}
-		}
-
-		for _, cz := range createdZones {
-			if baseNames[cz.Zone] {
-				continue // already listed as a policy base zone
-			}
-			// Find the most specific allow_subdomains parent this zone sits under.
-			parent := ""
-			for _, base := range allowSubBases {
-				if isSubdomainOf(cz.Zone, base) && len(base) > len(parent) {
-					parent = base
-				}
-			}
-			zOwners, err := app.Storage.ListZoneOwners(cz.Zone)
-			if err != nil {
-				app.Log.Errorf("Error listing zone owners: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone owners"})
-				return
-			}
-			if parent == "" {
-				// A zone the user owns that is neither a policy base zone nor a
-				// subzone of one -> a zone SHARED with them (or orphaned). Show it as
-				// a top-level managed zone, using its governing rule's flags.
-				def := govDefs[cz.Zone]
-				zonesWithStatus = append(zonesWithStatus, ZoneStatus{
-					Name:            cz.Zone,
-					Exists:          true,
-					AllowSubdomains: def != nil && def.AllowSubdomains,
-					SharingAllowed:  def != nil && def.SharingAllowed,
-					Owners:          zOwners,
-				})
-				continue
-			}
-			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
-				Name:            cz.Zone,
-				Exists:          true,
-				AllowSubdomains: true,                // subzones inherit the parent's allow_subdomains
-				SharingAllowed:  baseSharing[parent], // and the parent's sharing setting
-				Parent:          parent,
-				Owners:          zOwners,
-			})
 		}
 
 		zones := AvailableZonesResponse{Zones: zonesWithStatus}
@@ -434,42 +306,15 @@ func postZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		isAllowed, zoneDef, err := app.PolicyIsZoneAllowedForUser(zone, user)
+		zoneData, err := app.ZoneCreateAuthorized(ctx, user, zone)
 		if err != nil {
-			app.Log.Errorf("Error getting user zones: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
+			app.Log.Warnf("postZone: %v", err)
+			c.JSON(StatusOf(err), gin.H{"error": MessageOf(err)})
 			return
 		}
 
-		if !isAllowed {
-			// Second path: the user owns a zone above this one that allows
-			// subdomains. A co-owner shared into a zone manages it, so they may
-			// delegate below it even without their own policy entitlement — which is
-			// also what the "Subzone" button in the UI offers them.
-			zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.PreferredUsername)
-			if err != nil {
-				app.Log.Errorf("Error resolving owned parent zone: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve parent zone"})
-				return
-			}
-			isAllowed = zoneDef != nil
-		}
-
-		if !isAllowed {
-			app.Log.Error("User is not allowed to create zone: ", zone, " for user: ", user.PreferredUsername)
-			c.JSON(http.StatusForbidden, gin.H{"error": "User is not allowed to create this zone"})
-			return
-		}
-
-		app.Log.Infof("User is allowed to create zone: %s for user: %s", zone, user.PreferredUsername)
-
-		statusCode, returnValue, err := app.ZoneCreate(ctx, user.PreferredUsername, *zoneDef)
-		if err != nil {
-			app.Log.Error("Failed: ", err)
-		}
-
-		app.Log.Debugf("🟢 Created zone '%s', returning %s", zone, returnValue)
-		c.JSON(statusCode, returnValue)
+		app.Log.Debugf("🟢 Created zone '%s'", zone)
+		c.JSON(http.StatusCreated, gin.H{"success": zoneData})
 	}
 }
 
@@ -495,27 +340,13 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("🚀 Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		// Deleting the whole zone (for everyone) requires being an owner — NOT policy
-		// entitlement (a co-owner shared in without policy is still an owner). Shared
-		// zones are protected from single-owner deletion in ZoneDelete (co-owners
-		// should leave instead).
-		isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, zone)
-		if err != nil {
-			app.Log.Errorf("Error checking zone ownership: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone ownership"})
-			return
-		}
-		if !isOwner {
-			c.JSON(http.StatusForbidden, gin.H{"error": "You are not an owner of this zone"})
+		if err := app.ZoneDeleteAuthorized(ctx, user, zone); err != nil {
+			app.Log.Warnf("deleteZone: %v", err)
+			c.JSON(StatusOf(err), gin.H{"error": MessageOf(err)})
 			return
 		}
 
-		statusCode, returnValue, err := app.ZoneDelete(ctx, user.PreferredUsername, zone)
-		if err != nil {
-			app.Log.Error("deleteZone failed: ", err)
-		}
-
-		app.Log.Debugf("🟢 Deleted zone '%s', returning %s", zone, returnValue)
-		c.JSON(statusCode, returnValue)
+		app.Log.Debugf("🟢 Deleted zone '%s'", zone)
+		c.Status(http.StatusNoContent)
 	}
 }

@@ -1,12 +1,9 @@
 package app
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"github.com/miekg/dns"
 )
@@ -27,6 +24,18 @@ type DNSRecordRequest struct {
 	KeyName      string `json:"key_name"`
 	KeyAlgorithm string `json:"key_algorithm"`
 	Key          string `json:"key"`
+}
+
+// record is the request without its credentials — what the service operates on.
+func (r DNSRecordRequest) record() DNSRecord {
+	return DNSRecord{Zone: r.Zone, Name: r.Name, Type: r.Type, TTL: r.TTL, Value: r.Value}
+}
+
+// credentials is the other half: the TSIG key the caller supplied. A REST
+// client holds the zone's key already, so it sends one; the MCP tools resolve
+// theirs with AppData.OwnerTSIG instead of ever seeing it.
+func (r DNSRecordRequest) credentials() TSIGCredentials {
+	return TSIGCredentials{KeyName: r.KeyName, Algorithm: r.KeyAlgorithm, Key: r.Key}
 }
 
 // Response format
@@ -51,34 +60,6 @@ func CreateRfc2136ClientApiGroup(v1 *gin.RouterGroup, app *AppData) *gin.RouterG
 	v1.POST("/dns/records/delete", deleteDNSRecord(app))
 
 	return v1
-}
-
-// requireZoneOwner refuses to act on a zone the caller does not own.
-//
-// The TSIG key in the request is what PowerDNS checks, so this endpoint used to
-// authorize on key possession alone — turning the API into an open RFC2136 relay
-// that any logged-in user could point at any zone: convenient for probing keys
-// against an internal DNS server that is otherwise unreachable from outside, and
-// for generating load in someone else's name. Ownership is the same rule the
-// zone endpoints apply, so nothing legitimate changes.
-func requireZoneOwner(app *AppData, c *gin.Context, user *UserClaims, zone string) bool {
-	name := strings.TrimSuffix(strings.TrimSpace(zone), ".")
-	if name == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "zone is required"})
-		return false
-	}
-	isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, name)
-	if err != nil {
-		app.Log.Errorf("requireZoneOwner: ownership check failed for zone '%s': %v", name, err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to check zone ownership"})
-		return false
-	}
-	if !isOwner {
-		app.Log.Warnf("requireZoneOwner: user '%s' is not an owner of zone '%s'", user.PreferredUsername, name)
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: "you are not an owner of this zone"})
-		return false
-	}
-	return true
 }
 
 // canonicalRecordName ensures a record name is fully qualified (FQDN) relative to a zone.
@@ -110,29 +91,21 @@ func GetServerAddress(app *AppData) string {
 	return app.Config.PowerDns.DnsQueryTarget
 }
 
-// GetTSIGCredentials extracts and validates TSIG credentials from HTTP headers for AXFR.
-// It ensures FQDN formatting for KeyName and KeyAlgorithm.
-func GetTSIGCredentials(c *gin.Context) (keyNameFQDN, keyAlgoFQDN, key string, err *ErrorResponse) {
-	keyName := strings.TrimSpace(c.GetHeader("X-DNS-Key-Name"))
-	keyAlgo := strings.TrimSpace(c.GetHeader("X-DNS-Key-Algorithm"))
-	key = strings.TrimSpace(c.GetHeader("X-DNS-Key"))
-
-	if keyName == "" || keyAlgo == "" || key == "" {
-		return "", "", "", &ErrorResponse{
+// GetTSIGCredentials extracts and validates TSIG credentials from HTTP headers
+// for AXFR. Qualification of the key name and algorithm is left to the service,
+// which has to do it for its own callers anyway.
+func GetTSIGCredentials(c *gin.Context) (TSIGCredentials, *ErrorResponse) {
+	creds := TSIGCredentials{
+		KeyName:   strings.TrimSpace(c.GetHeader("X-DNS-Key-Name")),
+		Algorithm: strings.TrimSpace(c.GetHeader("X-DNS-Key-Algorithm")),
+		Key:       strings.TrimSpace(c.GetHeader("X-DNS-Key")),
+	}
+	if !creds.complete() {
+		return TSIGCredentials{}, &ErrorResponse{
 			Error: "TSIG headers required: X-DNS-Key-Name, X-DNS-Key-Algorithm, X-DNS-Key",
 		}
 	}
-
-	// Ensure the TSIG Key Name is Fully Qualified.
-	keyNameFQDN = keyName
-	if !strings.HasSuffix(keyNameFQDN, ".") {
-		keyNameFQDN = keyNameFQDN + "."
-	}
-
-	// Ensure the TSIG Algorithm Name is Fully Qualified.
-	keyAlgoFQDN = dns.Fqdn(keyAlgo)
-
-	return keyNameFQDN, keyAlgoFQDN, key, nil
+	return creds, nil
 }
 
 // CheckTSIGRequestData validates TSIG credentials from a JSON request body for UPDATEs.
@@ -174,107 +147,25 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		if !requireZoneOwner(app, c, user, zone) {
-			return
-		}
-
-		// Ensure Zone Name is FQDN
-		zoneFQDN := dns.Fqdn(zone)
-
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 List DNS records called for zone: %s by user: %s", zoneFQDN, user.PreferredUsername)
+		app.Log.Infof("🚀 List DNS records called for zone: %s by user: %s", zone, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Get TSIG credentials from headers
-		keyNameFQDN, keyAlgoFQDN, key, tsigErr := GetTSIGCredentials(c)
+		creds, tsigErr := GetTSIGCredentials(c)
 		if tsigErr != nil {
 			app.Log.Error("TSIG headers missing")
 			c.JSON(http.StatusBadRequest, tsigErr)
 			return
 		}
 
-		dnsServer := GetServerAddress(app)
-
-		msg := new(dns.Msg)
-		msg.SetAxfr(zoneFQDN)
-		msg.SetTsig(keyNameFQDN, keyAlgoFQDN, 300, time.Now().Unix())
-
-		tr := new(dns.Transfer)
-		tr.TsigSecret = map[string]string{keyNameFQDN: key}
-
-		app.Log.Debugf("Sending AXFR request to DNS server %s for zone %s", dnsServer, zoneFQDN)
-
-		envChan, err := tr.In(msg, dnsServer)
+		records, err := app.RecordsList(c.Request.Context(), user.PreferredUsername, zone, creds)
 		if err != nil {
-			app.Log.Errorf("Error performing AXFR for zone '%s': %v", zoneFQDN, err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			app.Log.Warnf("listDNSRecords: %v", err)
+			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
 			return
 		}
 
-		var records []DNSRecord
-
-		for env := range envChan {
-			if env.Error != nil {
-				app.Log.Errorf("AXFR environment error for zone '%s': %v", zoneFQDN, env.Error)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: env.Error.Error()})
-				return
-			}
-
-			for _, rr := range env.RR {
-				h := rr.Header()
-
-				if h.Rrtype == dns.TypeSOA ||
-					h.Rrtype == dns.TypeRRSIG ||
-					h.Rrtype == dns.TypeDNSKEY {
-					continue
-				}
-
-				var recordValue string
-				switch t := rr.(type) {
-				case *dns.A:
-					recordValue = t.A.String()
-				case *dns.AAAA:
-					recordValue = t.AAAA.String()
-				case *dns.CNAME:
-					recordValue = t.Target
-				case *dns.NS:
-					recordValue = t.Ns
-				case *dns.MX:
-					// MX records need both the preference and the target
-					recordValue = fmt.Sprintf("%d %s", t.Preference, t.Mx)
-				case *dns.TXT:
-					// TXT records have multiple strings in the slice 'Txt'
-					recordValue = strings.Join(t.Txt, " ")
-				default:
-					// Fallback for types not explicitly handled
-					recordValue = rr.String()
-				}
-
-				// The name of the record should be normalized if it's the zone apex
-				recordName := h.Name
-
-				if h.Name == zoneFQDN || strings.Trim(h.Name, ".") == strings.Trim(zoneFQDN, ".") {
-					// For the apex record, use the consistently FQDN version
-					recordName = zoneFQDN
-				} else if strings.HasPrefix(h.Name, `\@`) {
-					// If the name starts with the escaped apex, replace it with the FQDN apex.
-					recordName = zoneFQDN
-				}
-				records = append(records, DNSRecord{
-					Zone:  zoneFQDN,
-					Name:  recordName,
-					Type:  dns.TypeToString[h.Rrtype],
-					TTL:   h.Ttl,
-					Value: recordValue,
-				})
-			}
-		}
-
-		// Dump all records for debugging
-		for _, rec := range records {
-			app.Log.Debugf("Retrieved record: Zone=%s Name=%s Type=%s TTL=%d Value=%s",
-				rec.Zone, rec.Name, rec.Type, rec.TTL, rec.Value)
-		}
 		c.JSON(http.StatusOK, DNSRecordsResponse{Records: records})
 	}
 }
@@ -315,34 +206,10 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		if !requireZoneOwner(app, c, user, req.Zone) {
-			return
-		}
-
-		zone := dns.Fqdn(req.Zone)
-		name := canonicalRecordName(req.Name, req.Zone)
-		dnsServer := GetServerAddress(app)
-
-		// UPSERT = delete first, then add
-		switch strings.ToUpper(req.Type) {
-		case "A":
-			_, _ = helper.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			_, err := helper.Rfc2136AddARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-
-		case "AAAA":
-			_, _ = helper.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			_, err := helper.Rfc2136AddAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name, req.Value, req.TTL)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-
-		default:
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "unsupported type (supported: A, AAAA)"})
+		record, err := app.RecordUpsert(c.Request.Context(), user.PreferredUsername, req.record(), req.credentials())
+		if err != nil {
+			app.Log.Warnf("createDNSRecord: %v", err)
+			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
 			return
 		}
 
@@ -352,7 +219,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 		c.JSON(http.StatusCreated, gin.H{
 			"status": "ok",
 			"action": "upserted",
-			"record": DNSRecord{Zone: zone, Name: name, Type: strings.ToUpper(req.Type), TTL: req.TTL, Value: req.Value},
+			"record": record,
 		})
 	}
 }
@@ -384,11 +251,8 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		// TSIG check
-		if req.KeyName == "" || req.KeyAlgorithm == "" || req.Key == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: "TSIG credentials required: key_name, key_algorithm, key",
-			})
+		if tsigErr := CheckTSIGRequestData(&req); tsigErr != nil {
+			c.JSON(http.StatusBadRequest, tsigErr)
 			return
 		}
 
@@ -396,40 +260,19 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 		app.Log.Infof("🚀 Delete record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		if !requireZoneOwner(app, c, user, req.Zone) {
+		record, err := app.RecordDelete(c.Request.Context(), user.PreferredUsername, req.record(), req.credentials())
+		if err != nil {
+			app.Log.Warnf("deleteDNSRecord: %v", err)
+			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
 			return
 		}
 
-		zone := dns.Fqdn(req.Zone)
-
-		name := canonicalRecordName(req.Name, req.Zone)
-
-		dnsServer := GetServerAddress(app)
-
-		switch strings.ToUpper(req.Type) {
-		case "A":
-			_, err := helper.Rfc2136DeleteARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-
-		case "AAAA":
-			_, err := helper.Rfc2136DeleteAAAARecord(req.KeyName, req.KeyAlgorithm, req.Key, dnsServer, zone, name)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-
-		default:
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "unsupported type (supported: A, AAAA)"})
-			return
-		}
-
+		// The record, not the request: req carries the caller's TSIG key, and
+		// echoing it would write a credential into the response body.
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"action": "deleted",
-			"record": req,
+			"record": record,
 		})
 	}
 }

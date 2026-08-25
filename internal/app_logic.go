@@ -875,3 +875,214 @@ func rulesToUserZones(rules []PolicyRule, user *UserClaims) []ZoneResponse {
 
 	return zones
 }
+
+// ZoneList assembles the zones a user may see: the ones their policy rules
+// grant, plus the ones they own (delegated subzones, and zones shared with
+// them), each with the status flags the callers render.
+//
+// Lifted out of the HTTP handler because it is the answer to "what zones do I
+// have", and more than one kind of caller asks that question — the REST route
+// and the MCP tool both, and neither should own the logic.
+func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
+	userZones, err := app.PolicyGetUserZones(user)
+	if err != nil {
+		return nil, fmt.Errorf("get user zones: %w", err)
+	}
+
+	zonesWithStatus := make([]ZoneStatus, 0, len(userZones))
+
+	for _, zone := range userZones {
+		existsInStorage, err := app.Storage.ZoneExists(zone.Zone)
+		if err != nil {
+			return nil, fmt.Errorf("check zone existence for %q: %w", zone.Zone, err)
+		}
+
+		// Exists (manageable) = created AND the user already owns it. A created
+		// zone the user does not own is either joinable (policy-entitled +
+		// sharing on -> explicit join) or "already taken" (sharing off).
+		isOwner, owners := false, []string(nil)
+		if existsInStorage {
+			if isOwner, err = app.Storage.IsZoneOwner(user.PreferredUsername, zone.Zone); err != nil {
+				return nil, fmt.Errorf("check zone ownership for %q: %w", zone.Zone, err)
+			}
+			// Only reveal the owner list to an actual owner. A policy-entitled
+			// non-owner (including the "already taken by someone else" case)
+			// must not be able to enumerate the current owners' emails.
+			if isOwner {
+				if owners, err = app.Storage.ListZoneOwners(zone.Zone); err != nil {
+					return nil, fmt.Errorf("list zone owners for %q: %w", zone.Zone, err)
+				}
+			}
+		}
+		canJoin := existsInStorage && !isOwner && zone.SharingAllowed
+
+		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+			Name:                      zone.Zone,
+			Exists:                    existsInStorage && isOwner,
+			CanJoin:                   canJoin,
+			AlreadyTakenBySomeoneElse: existsInStorage && !isOwner && !zone.SharingAllowed,
+			AllowSubdomains:           zone.AllowSubdomains,
+			SharingAllowed:            zone.SharingAllowed,
+			Owners:                    owners,
+		})
+	}
+
+	// Add the user's created subzones (delegated under an allow_subdomains base
+	// zone) so a caller can show them indented under their parent.
+	baseNames := make(map[string]bool, len(userZones))
+	baseSharing := make(map[string]bool, len(userZones))
+	allowSubBases := make([]string, 0)
+	for _, z := range userZones {
+		baseNames[z.Zone] = true
+		baseSharing[z.Zone] = z.SharingAllowed
+		if z.AllowSubdomains {
+			allowSubBases = append(allowSubBases, z.Zone)
+		}
+	}
+
+	createdZones, err := app.Storage.ListUserZones(user.PreferredUsername)
+	if err != nil {
+		return nil, fmt.Errorf("list user zones: %w", err)
+	}
+
+	// A zone held through SHARING rather than policy is a base zone too, so
+	// resolve the governing rule of every owned zone up front and let those
+	// that allow subdomains act as parents below. Without this a co-owner's
+	// subzones would render top-level instead of indented under their parent.
+	govDefs := make(map[string]*ZoneResponse, len(createdZones))
+	for _, cz := range createdZones {
+		if baseNames[cz.Zone] {
+			continue
+		}
+		def, err := app.zoneGoverningDef(cz.Zone)
+		if err != nil {
+			return nil, fmt.Errorf("resolve governing rule for %q: %w", cz.Zone, err)
+		}
+		govDefs[cz.Zone] = def
+		if def != nil && def.AllowSubdomains {
+			allowSubBases = append(allowSubBases, cz.Zone)
+			baseSharing[cz.Zone] = def.SharingAllowed
+		}
+	}
+
+	for _, cz := range createdZones {
+		if baseNames[cz.Zone] {
+			continue // already listed as a policy base zone
+		}
+		// Find the most specific allow_subdomains parent this zone sits under.
+		parent := ""
+		for _, base := range allowSubBases {
+			if isSubdomainOf(cz.Zone, base) && len(base) > len(parent) {
+				parent = base
+			}
+		}
+		zOwners, err := app.Storage.ListZoneOwners(cz.Zone)
+		if err != nil {
+			return nil, fmt.Errorf("list zone owners for %q: %w", cz.Zone, err)
+		}
+		if parent == "" {
+			// A zone the user owns that is neither a policy base zone nor a
+			// subzone of one -> a zone SHARED with them (or orphaned). Show it
+			// as a top-level managed zone, using its governing rule's flags.
+			def := govDefs[cz.Zone]
+			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+				Name:            cz.Zone,
+				Exists:          true,
+				AllowSubdomains: def != nil && def.AllowSubdomains,
+				SharingAllowed:  def != nil && def.SharingAllowed,
+				Owners:          zOwners,
+			})
+			continue
+		}
+		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+			Name:            cz.Zone,
+			Exists:          true,
+			AllowSubdomains: true,                // subzones inherit the parent's allow_subdomains
+			SharingAllowed:  baseSharing[parent], // and the parent's sharing setting
+			Parent:          parent,
+			Owners:          zOwners,
+		})
+	}
+
+	return zonesWithStatus, nil
+}
+
+// ZoneCreateAuthorized decides whether a user may create a zone and creates it.
+//
+// The decision used to live in the HTTP handler, which was fine while HTTP was
+// the only way in. It is not any more: an MCP tool has to reach the same verdict
+// through the same code, or "who may create this zone" has two answers.
+//
+// Two paths lead to yes, and the second is easy to miss: a policy rule that
+// grants the zone, OR ownership of a zone above it that allows subdomains — a
+// co-owner shared into a zone manages it, so they may delegate below it without
+// an entitlement of their own.
+func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, zone string) (*ZoneDataResponse, error) {
+	isAllowed, zoneDef, err := app.PolicyIsZoneAllowedForUser(zone, user)
+	if err != nil {
+		return nil, statusErr(http.StatusInternalServerError, "Failed to get user zones", err)
+	}
+
+	if !isAllowed {
+		zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.PreferredUsername)
+		if err != nil {
+			return nil, statusErr(http.StatusInternalServerError, "Failed to resolve parent zone", err)
+		}
+		isAllowed = zoneDef != nil
+	}
+
+	if !isAllowed {
+		return nil, statusErr(http.StatusForbidden, "User is not allowed to create this zone",
+			fmt.Errorf("app.ZoneCreateAuthorized: %q not allowed for %q", zone, user.PreferredUsername))
+	}
+
+	status, body, err := app.ZoneCreate(ctx, user.PreferredUsername, *zoneDef)
+	if err != nil || status >= http.StatusBadRequest {
+		return nil, statusErr(status, messageFromBody(body, "Failed to create zone"), err)
+	}
+
+	// The body carries the created zone INCLUDING its TSIG key. Callers that may
+	// see it (the REST handler) pass the body on; callers that may not (MCP) take
+	// only the name from it, which is why this returns the typed value rather
+	// than the gin.H.
+	if h, ok := body.(gin.H); ok {
+		if zoneData, ok := h["success"].(*ZoneDataResponse); ok {
+			return zoneData, nil
+		}
+	}
+	return nil, nil
+}
+
+// ZoneDeleteAuthorized deletes a zone for everyone, if the caller owns it.
+//
+// Ownership, NOT policy entitlement: a co-owner shared in without a rule of
+// their own is still an owner. Shared zones are protected from single-owner
+// deletion inside ZoneDelete — a co-owner is expected to leave instead.
+func (app *AppData) ZoneDeleteAuthorized(ctx context.Context, user *UserClaims, zone string) error {
+	isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, zone)
+	if err != nil {
+		return statusErr(http.StatusInternalServerError, "Failed to check zone ownership", err)
+	}
+	if !isOwner {
+		return statusErr(http.StatusForbidden, "You are not an owner of this zone",
+			fmt.Errorf("app.ZoneDeleteAuthorized: %q not owned by %q", zone, user.PreferredUsername))
+	}
+
+	status, body, err := app.ZoneDelete(ctx, user.PreferredUsername, zone)
+	if err != nil || status >= http.StatusBadRequest {
+		return statusErr(status, messageFromBody(body, "Failed to delete zone"), err)
+	}
+	return nil
+}
+
+// messageFromBody digs the message out of the gin.H the older app methods
+// answer with, so a caller that has no HTTP response to write still gets the
+// sentence that would have been in one.
+func messageFromBody(body any, fallback string) string {
+	if h, ok := body.(gin.H); ok {
+		if msg, ok := h["error"].(string); ok && msg != "" {
+			return msg
+		}
+	}
+	return fallback
+}
