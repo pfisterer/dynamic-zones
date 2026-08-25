@@ -16,6 +16,44 @@ import (
 
 const UserDataKey = "__api_userData"
 
+// ReadOnlyKey carries whether the caller authenticated with a read-only API
+// token. Set on every authenticated request, including OIDC ones (false there),
+// so a handler asking the question never has to tell "not read-only" from
+// "nobody set it".
+const ReadOnlyKey = "__api_readOnly"
+
+// IsReadOnlyToken reports whether this request was authenticated with a
+// read-only API token. For routes where the HTTP method does not say what the
+// operation does, this is the question to ask, once per operation, against that
+// operation's own answer.
+func IsReadOnlyToken(c *gin.Context) bool {
+	v, ok := c.Get(ReadOnlyKey)
+	if !ok {
+		return false
+	}
+	readOnly, ok := v.(bool)
+	return ok && readOnly
+}
+
+// RejectWritesForReadOnlyTokens refuses anything but GET for a read-only token.
+//
+// This is the REST rule, and it lives on the REST group rather than in the auth
+// middleware because it is an approximation: the method stands in for "does this
+// change anything", which holds for these routes and nowhere else. Inside the
+// auth middleware it looked like a property of the credential, and it would
+// refuse every call on a route where reads are POSTs too.
+func RejectWritesForReadOnlyTokens(log *zap.SugaredLogger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && IsReadOnlyToken(c) {
+			log.Warnf("Attempt to use read-only token for non-GET operation: %s %s",
+				c.Request.Method, c.Request.URL.Path)
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token is read-only"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // UserClaims holds the relevant user information extracted from the ID token.
 //
 // An alias rather than a type of its own: the identity of a caller has to mean
@@ -156,6 +194,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			if dummyUser := c.GetHeader("X-Dummy-Auth-User"); dummyUser != "" {
 				log.Warnf("DEV MODE: trusting X-Dummy-Auth-User '%s' without token verification", dummyUser)
 				c.Set(UserDataKey, &UserClaims{Subject: dummyUser, Email: dummyUser, PreferredUsername: dummyUser})
+				c.Set(ReadOnlyKey, false)
 				c.Next()
 				return
 			}
@@ -191,17 +230,30 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 				return
 			}
 
-			// Check whether the operation is GET (read-only) and the token is read-only
-			if c.Request.Method != http.MethodGet && rec.ReadOnly {
-				log.Warnf("Attempt to use read-only token for non-GET operation: %s %s", c.Request.Method, c.Request.URL.Path)
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token is read-only"})
-				return
-			}
+			// Recorded here, enforced by the route group: what counts as a
+			// write is a property of the OPERATION, and only the REST routes
+			// can read that off the HTTP method (see
+			// RejectWritesForReadOnlyTokens).
+			c.Set(ReadOnlyKey, rec.ReadOnly)
 
 			// The subject goes back into the claim it was issued under — see
 			// tokenSubject. Anything else and the request would resolve to a
 			// different owner's zones.
+			//
+			// It goes into the e-mail as well, and that is not cosmetic: this
+			// service matches policy rules and expands the %u pattern on
+			// Claims.Email (filterUserRules, ruleToZoneResponse), so a token
+			// that filled only preferred_username authenticated cleanly and
+			// then matched NO rule — its holder could see zones they already
+			// owned but was entitled to nothing, and creating a zone was
+			// refused every time. Writing both is what app_logic.go already
+			// does when it rebuilds claims from a zone row, and it rests on the
+			// same assumption the identity probe is there to check: that the two
+			// claims carry the same string. Once that probe has answered, both
+			// halves collapse into Claims.Identity() and this note goes away.
 			c.Set(UserDataKey, &UserClaims{
+				Subject:           rec.Subject,
+				Email:             rec.Subject,
 				PreferredUsername: rec.Subject,
 			})
 
@@ -209,7 +261,10 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			return
 		}
 
-		// Otherwise, treat it as an OIDC Bearer JWT
+		// Otherwise, treat it as an OIDC Bearer JWT. Set before handing over:
+		// BearerTokenAuthMiddleware calls Next() itself, so anything set after
+		// it would land once the handlers have already run.
+		c.Set(ReadOnlyKey, false)
 		oidcVerifier.BearerTokenAuthMiddleware()(c)
 
 	}
