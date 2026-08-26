@@ -1,13 +1,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // legacyZone is the model as it was: gorm.Model embedded, and with it the
@@ -153,5 +157,32 @@ func TestDropSoftDelete_LeavesTokensIntactWhileDroppingTheirColumn(t *testing.T)
 	}
 	if n != 1 {
 		t.Errorf("%d tokens, want 1", n)
+	}
+}
+
+// The purge is the one moment rows disappear, and on production it takes 33 of
+// them. Its only trace is a log line — which the first staging run did NOT
+// produce: GORM's logger defaults to Warn and dropped it, so the migration ran
+// correctly and said nothing.
+//
+// So this uses a REAL GORM logger at that default level, writing into a buffer,
+// rather than a fake that records everything. A fake would pass whether or not
+// the migration raises the level, which is precisely the bug.
+func TestDropSoftDelete_SaysHowManyRowsItRemoved(t *testing.T) {
+	db := openLegacy(t)
+
+	var buf bytes.Buffer
+	db.Logger = gormlogger.New(log.New(&buf, "", 0), gormlogger.Config{LogLevel: gormlogger.Warn})
+
+	if err := dropSoftDelete(db); err != nil {
+		t.Fatalf("dropSoftDelete: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "removed") {
+		t.Fatalf("the purge left no trace in the log at the default level; got %q", out)
+	}
+	if !strings.Contains(out, "2") {
+		t.Errorf("log output %q does not name the 2 rows it removed", out)
 	}
 }

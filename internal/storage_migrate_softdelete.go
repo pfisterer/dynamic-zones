@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // The one-way migration off soft delete.
@@ -45,10 +46,16 @@ func dropSoftDelete(db *gorm.DB) error {
 		}
 		if res.RowsAffected > 0 {
 			// Worth a line in the log: this is the one moment rows disappear,
-			// and the number should match what was counted beforehand.
-			// context.Background(), not db.Statement.Context: this runs during
-			// startup, outside any request, and that field can be nil there.
-			db.Logger.Info(context.Background(),
+			// and the number should match what was counted beforehand. On
+			// production that is 33 rows, and this line is the only trace the
+			// migration leaves.
+			//
+			// LogMode(Info) explicitly, because GORM's logger defaults to Warn
+			// and would drop this — which it did on the first staging run, where
+			// the migration worked and said nothing. context.Background(), not
+			// db.Statement.Context: this runs during startup, outside any
+			// request, and that field can be nil there.
+			db.Logger.LogMode(gormlogger.Info).Info(context.Background(),
 				"dropSoftDelete: removed %d zone row(s) that were marked deleted", res.RowsAffected)
 		}
 		if err := m.DropColumn(&Zone{}, "deleted_at"); err != nil {
