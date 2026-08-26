@@ -64,7 +64,7 @@ func listZoneOwners(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		zone := c.Param("zone")
-		isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, zone)
+		isOwner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check ownership"})
 			return
@@ -191,7 +191,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 Called with user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Called with user: ", user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		zonesWithStatus, err := app.ZoneList(user)
@@ -232,7 +232,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		statusCode, returnValue, err := app.ZoneGet(ctx, user, zone, externalDnsVersion)
@@ -303,7 +303,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Create zone called for zone: ", zone, " and user: ", user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		zoneData, err := app.ZoneCreateAuthorized(ctx, user, zone)
@@ -337,7 +337,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Debug("🚀 Delete zone called for zone: ", zone, " and user: ", user.PreferredUsername)
+		app.Log.Debug("🚀 Delete zone called for zone: ", zone, " and user: ", user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		if err := app.ZoneDeleteAuthorized(ctx, user, zone); err != nil {

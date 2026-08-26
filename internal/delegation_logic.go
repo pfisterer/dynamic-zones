@@ -76,7 +76,7 @@ func (app *AppData) userCanManageZoneSoa(user *UserClaims, zoneSoa string) (bool
 		return false, err
 	}
 	for _, d := range delegations {
-		if ok, _ := userCanAccessRule(user.Email, d.TargetUserFilter); ok && zoneInScope(zoneSoa, d.ZoneSuffix) {
+		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok && zoneInScope(zoneSoa, d.ZoneSuffix) {
 			return true, nil
 		}
 	}

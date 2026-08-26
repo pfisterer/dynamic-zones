@@ -58,7 +58,7 @@ func listPolicyRules(app *AppData) gin.HandlerFunc {
 		response, err := app.PolicyGetAllUserRules(user)
 
 		if err != nil {
-			errorMessage := fmt.Sprintf("Failed to retrieve policy rules for user %s: %v", user.Email, err)
+			errorMessage := fmt.Sprintf("Failed to retrieve policy rules for user %s: %v", user.Identity(), err)
 			app.Log.Warnf(errorMessage)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": errorMessage})
 			return

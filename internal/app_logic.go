@@ -65,7 +65,7 @@ func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesRespons
 	}
 	var userDelegations []DelegationPolicy
 	for _, d := range delegations {
-		if ok, _ := userCanAccessRule(user.Email, d.TargetUserFilter); ok {
+		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok {
 			userDelegations = append(userDelegations, d)
 		}
 	}
@@ -111,7 +111,7 @@ func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (b
 	// Exact match: the requested zone is one of the user's base zones.
 	for i := range zones {
 		if zones[i].Zone == zone {
-			app.Log.Debugf("User %s is allowed to use zone %s", user.PreferredUsername, zone)
+			app.Log.Debugf("User %s is allowed to use zone %s", user.Identity(), zone)
 			return true, &zones[i], nil
 		}
 	}
@@ -128,13 +128,13 @@ func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (b
 		}
 	}
 	if bestParent != nil {
-		app.Log.Debugf("User %s is allowed to use subzone %s under %s", user.PreferredUsername, zone, bestParent.Zone)
+		app.Log.Debugf("User %s is allowed to use subzone %s under %s", user.Identity(), zone, bestParent.Zone)
 		// Delegate the subzone under its parent (ZoneSOA = parent zone); the
 		// subzone inherits the parent's sharing setting.
 		return true, &ZoneResponse{Zone: zone, ZoneSOA: bestParent.Zone, AllowSubdomains: true, SharingAllowed: bestParent.SharingAllowed}, nil
 	}
 
-	app.Log.Debugf("User %s is not allowed to use zone %s", user.PreferredUsername, zone)
+	app.Log.Debugf("User %s is not allowed to use zone %s", user.Identity(), zone)
 	return false, nil, nil
 }
 
@@ -232,7 +232,7 @@ func (app *AppData) PolicyDeleteRule(id int64) error {
 // zone and the governing rule has sharing enabled — in which case the caller
 // auto-joins as a co-owner (own row + own TSIG key created lazily here).
 func (app *AppData) ZoneGet(ctx context.Context, user *UserClaims, zone, externalDnsVersion string) (int, any, error) {
-	username := user.PreferredUsername
+	username := user.Identity()
 
 	// The zone must have been created by someone.
 	exists, err := app.Storage.ZoneExists(zone)
@@ -321,7 +321,7 @@ func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int,
 // own TSIG key). Requires the zone to exist, the caller to be policy-entitled to
 // it, and sharing to be enabled. Idempotent for existing owners.
 func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string) (int, any, error) {
-	username := user.PreferredUsername
+	username := user.Identity()
 
 	exists, err := app.Storage.ZoneExists(zone)
 	if err != nil {
@@ -378,7 +378,7 @@ func (app *AppData) zoneGoverningDef(zone string) (*ZoneResponse, error) {
 		return nil, err
 	}
 	for _, o := range owners {
-		allowed, def, err := app.PolicyIsZoneAllowedForUser(zone, &UserClaims{Email: o, PreferredUsername: o})
+		allowed, def, err := app.PolicyIsZoneAllowedForUser(zone, &UserClaims{Email: o})
 		if err != nil {
 			return nil, err
 		}
@@ -407,7 +407,7 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 		return errorResult(http.StatusBadRequest, "Invalid owner email", fmt.Errorf("app.ZoneAddOwner: %w", err))
 	}
 
-	isOwner, err := app.Storage.IsZoneOwner(caller.PreferredUsername, zone)
+	isOwner, err := app.Storage.IsZoneOwner(caller.Identity(), zone)
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to check ownership", err)
 	}
@@ -433,7 +433,7 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 		if err := app.PowerDns.AddOwnerKey(ctx, zone, newOwner); err != nil {
 			return errorResult(http.StatusInternalServerError, "Failed to provision owner key", err)
 		}
-		app.Log.Infof("app.ZoneAddOwner: %s added %s as owner of %s", caller.PreferredUsername, newOwner, zone)
+		app.Log.Infof("app.ZoneAddOwner: %s added %s as owner of %s", caller.Identity(), newOwner, zone)
 	}
 
 	// Unconditional (not only for a fresh owner): sharing covers the subtree, so
@@ -458,7 +458,7 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zone, owner string) (int, any, error) {
 	owner = strings.ToLower(strings.TrimSpace(owner))
 
-	isOwner, err := app.Storage.IsZoneOwner(caller.PreferredUsername, zone)
+	isOwner, err := app.Storage.IsZoneOwner(caller.Identity(), zone)
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to check ownership", err)
 	}
@@ -493,7 +493,7 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to revoke subzone access", err)
 	}
-	app.Log.Infof("app.ZoneRemoveOwner: %s removed %s from %s (%d subzone(s) revoked)", caller.PreferredUsername, owner, zone, len(revoked))
+	app.Log.Infof("app.ZoneRemoveOwner: %s removed %s from %s (%d subzone(s) revoked)", caller.Identity(), owner, zone, len(revoked))
 	for _, sub := range kept {
 		app.Log.Warnf("app.ZoneRemoveOwner: %s stays the only owner of subzone '%s' — removing them would orphan it", owner, sub)
 	}
@@ -509,7 +509,7 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 // suspected key compromise). The caller must be an owner; all owners must
 // re-fetch their key afterwards.
 func (app *AppData) ZoneRotateKeys(ctx context.Context, caller *UserClaims, zone string) (int, any, error) {
-	isOwner, err := app.Storage.IsZoneOwner(caller.PreferredUsername, zone)
+	isOwner, err := app.Storage.IsZoneOwner(caller.Identity(), zone)
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to check ownership", err)
 	}
@@ -523,7 +523,7 @@ func (app *AppData) ZoneRotateKeys(ctx context.Context, caller *UserClaims, zone
 	if err := app.PowerDns.RotateZoneKeys(ctx, zone, owners); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to rotate keys", err)
 	}
-	app.Log.Infof("app.ZoneRotateKeys: %s rotated %d key(s) for %s", caller.PreferredUsername, len(owners), zone)
+	app.Log.Infof("app.ZoneRotateKeys: %s rotated %d key(s) for %s", caller.Identity(), len(owners), zone)
 	return http.StatusOK, gin.H{"rotated": len(owners)}, nil
 }
 
@@ -543,7 +543,7 @@ func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
 	}
 	orphaned := make([]OrphanedZone, 0)
 	for _, z := range zones {
-		owner := &UserClaims{Email: z.Username, PreferredUsername: z.Username}
+		owner := &UserClaims{Email: z.Username}
 		allowed, _, err := app.PolicyIsZoneAllowedForUser(z.Zone, owner)
 		if err != nil {
 			return nil, err
@@ -803,7 +803,7 @@ func validateUserFilter(filter string) error {
 func isSuperAdmin(app *AppData, user *UserClaims) bool {
 	superAdmins := app.Config.DnsPolicyConfig.SuperAdminEmails
 
-	if _, exists := superAdmins[strings.ToLower(user.Email)]; exists {
+	if _, exists := superAdmins[strings.ToLower(user.Identity())]; exists {
 		return true
 	}
 
@@ -832,7 +832,7 @@ func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
 
 	// Only include rules the user can access
 	for _, rule := range rules {
-		if canAccess, err := userCanAccessRule(user.Email, rule.TargetUserFilter); err == nil && canAccess {
+		if canAccess, err := userCanAccessRule(user.Identity(), rule.TargetUserFilter); err == nil && canAccess {
 			filteredRules = append(filteredRules, rule)
 		}
 	}
@@ -842,7 +842,7 @@ func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
 
 func ruleToZoneResponse(rule PolicyRule, user *UserClaims) ZoneResponse {
 	// Prepare data for pattern replacement
-	userDnsLabel := helper.DnsMakeCompliant(user.Email)
+	userDnsLabel := helper.DnsMakeCompliant(user.Identity())
 	zone := strings.ReplaceAll(rule.ZonePattern, "%u", userDnsLabel)
 
 	return ZoneResponse{
@@ -902,7 +902,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 		// sharing on -> explicit join) or "already taken" (sharing off).
 		isOwner, owners := false, []string(nil)
 		if existsInStorage {
-			if isOwner, err = app.Storage.IsZoneOwner(user.PreferredUsername, zone.Zone); err != nil {
+			if isOwner, err = app.Storage.IsZoneOwner(user.Identity(), zone.Zone); err != nil {
 				return nil, fmt.Errorf("check zone ownership for %q: %w", zone.Zone, err)
 			}
 			// Only reveal the owner list to an actual owner. A policy-entitled
@@ -940,7 +940,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 		}
 	}
 
-	createdZones, err := app.Storage.ListUserZones(user.PreferredUsername)
+	createdZones, err := app.Storage.ListUserZones(user.Identity())
 	if err != nil {
 		return nil, fmt.Errorf("list user zones: %w", err)
 	}
@@ -1024,7 +1024,7 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 	}
 
 	if !isAllowed {
-		zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.PreferredUsername)
+		zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.Identity())
 		if err != nil {
 			return nil, statusErr(http.StatusInternalServerError, "Failed to resolve parent zone", err)
 		}
@@ -1033,10 +1033,10 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 
 	if !isAllowed {
 		return nil, statusErr(http.StatusForbidden, "User is not allowed to create this zone",
-			fmt.Errorf("app.ZoneCreateAuthorized: %q not allowed for %q", zone, user.PreferredUsername))
+			fmt.Errorf("app.ZoneCreateAuthorized: %q not allowed for %q", zone, user.Identity()))
 	}
 
-	status, body, err := app.ZoneCreate(ctx, user.PreferredUsername, *zoneDef)
+	status, body, err := app.ZoneCreate(ctx, user.Identity(), *zoneDef)
 	if err != nil || status >= http.StatusBadRequest {
 		return nil, statusErr(status, messageFromBody(body, "Failed to create zone"), err)
 	}
@@ -1059,16 +1059,16 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 // their own is still an owner. Shared zones are protected from single-owner
 // deletion inside ZoneDelete — a co-owner is expected to leave instead.
 func (app *AppData) ZoneDeleteAuthorized(ctx context.Context, user *UserClaims, zone string) error {
-	isOwner, err := app.Storage.IsZoneOwner(user.PreferredUsername, zone)
+	isOwner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
 	if err != nil {
 		return statusErr(http.StatusInternalServerError, "Failed to check zone ownership", err)
 	}
 	if !isOwner {
 		return statusErr(http.StatusForbidden, "You are not an owner of this zone",
-			fmt.Errorf("app.ZoneDeleteAuthorized: %q not owned by %q", zone, user.PreferredUsername))
+			fmt.Errorf("app.ZoneDeleteAuthorized: %q not owned by %q", zone, user.Identity()))
 	}
 
-	status, body, err := app.ZoneDelete(ctx, user.PreferredUsername, zone)
+	status, body, err := app.ZoneDelete(ctx, user.Identity(), zone)
 	if err != nil || status >= http.StatusBadRequest {
 		return statusErr(status, messageFromBody(body, "Failed to delete zone"), err)
 	}

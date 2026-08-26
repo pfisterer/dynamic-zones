@@ -151,25 +151,19 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Temporary probe, to be removed once it has answered its question.
+		// The probe that used to sit here is gone, together with the question it
+		// asked. It watched for a verified ID token whose `email` and
+		// `preferred_username` disagreed, because this service keyed zone and
+		// token ownership on one and policy rules on the other — and no database
+		// here could prove they always matched, since each stores only one.
 		//
-		// This service identifies people by preferred_username (zone ownership,
-		// token ownership) while matching policy rules on the e-mail — an
-		// inconsistency that is invisible for as long as the two claims carry
-		// the same string, which every stored value suggests they do. Moving
-		// both onto one identity is only safe if that holds for every account,
-		// and no database here can show it: each stores one of the two.
-		//
-		// So: say so when they differ, and let real traffic answer it. Silence
-		// over a few days means the migration touches nothing.
-		if claims.Email != "" && claims.PreferredUsername != "" && claims.Email != claims.PreferredUsername {
-			m.Logger.Warnw("identity probe: email and preferred_username differ",
-				"email", claims.Email, "preferred_username", claims.PreferredUsername)
-		}
-
-		// Store user claims in Gin context for access in subsequent handlers
+		// It never answered: over 36 hours of production it saw 8 authenticated
+		// requests and not one login, which is what a semester break looks like.
+		// Keycloak answered it instead, and completely rather than by sample —
+		// 260 accounts in `dhbw-main`, zero with an `email` differing from the
+		// username, zero without an address at all (2026-08-26). Everything now
+		// reads Claims.Identity() and there is nothing left to compare.
 		c.Set(UserDataKey, &claims)
-		//m.Logger.Debugf("Token verified for user '%s' (sub: %s, email: %s).", claims.PreferredUsername, claims.Subject, claims.Email)
 
 		c.Next() // Continue to the next handler in the chain
 	}
@@ -193,7 +187,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		if devMode {
 			if dummyUser := c.GetHeader("X-Dummy-Auth-User"); dummyUser != "" {
 				log.Warnf("DEV MODE: trusting X-Dummy-Auth-User '%s' without token verification", dummyUser)
-				c.Set(UserDataKey, &UserClaims{Subject: dummyUser, Email: dummyUser, PreferredUsername: dummyUser})
+				c.Set(UserDataKey, &UserClaims{Email: dummyUser})
 				c.Set(ReadOnlyKey, false)
 				c.Next()
 				return
@@ -236,26 +230,17 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			// RejectWritesForReadOnlyTokens).
 			c.Set(ReadOnlyKey, rec.ReadOnly)
 
-			// The subject goes back into the claim it was issued under — see
-			// tokenSubject. Anything else and the request would resolve to a
-			// different owner's zones.
+			// One field, because there is one identity. The token was issued
+			// under this subject (see tokenSubject) and Identity() reads Email
+			// first, so this is the string every later lookup resolves to —
+			// zone ownership, policy matching and the %u expansion alike.
 			//
-			// It goes into the e-mail as well, and that is not cosmetic: this
-			// service matches policy rules and expands the %u pattern on
-			// Claims.Email (filterUserRules, ruleToZoneResponse), so a token
-			// that filled only preferred_username authenticated cleanly and
-			// then matched NO rule — its holder could see zones they already
-			// owned but was entitled to nothing, and creating a zone was
-			// refused every time. Writing both is what app_logic.go already
-			// does when it rebuilds claims from a zone row, and it rests on the
-			// same assumption the identity probe is there to check: that the two
-			// claims carry the same string. Once that probe has answered, both
-			// halves collapse into Claims.Identity() and this note goes away.
-			c.Set(UserDataKey, &UserClaims{
-				Subject:           rec.Subject,
-				Email:             rec.Subject,
-				PreferredUsername: rec.Subject,
-			})
+			// It used to fill all three claims, and that was not tidiness: for a
+			// while it filled only preferred_username, while policy rules matched
+			// on Email. Such a token authenticated cleanly and then matched NO
+			// rule — its holder saw the zones they already owned and was entitled
+			// to nothing, and every create was refused.
+			c.Set(UserDataKey, &UserClaims{Email: rec.Subject})
 
 			c.Next()
 			return

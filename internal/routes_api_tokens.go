@@ -70,17 +70,19 @@ func toAPIToken(rec token.Record) Token {
 
 // tokenSubject is the identity a token belongs to here.
 //
-// preferred_username, NOT authn.Claims.Identity — which would prefer the
-// e-mail. This service keys zone ownership on preferred_username
-// (Storage.IsZoneOwner, Zone.Username), and the authentication path turns a
-// token back into exactly this claim. Issuing tokens under a different string
-// would leave them authenticating fine while resolving to somebody else's
-// zones, and would hide every existing token from its owner's list.
+// It is Claims.Identity(), and so is everything else now: zone ownership
+// (Storage.IsZoneOwner, Zone.Username), policy matching, the %u expansion, and
+// the claims the authentication path rebuilds from a token. This function stays
+// as the one place that names WHICH identity a token is issued under, because
+// issuing under a different string would leave tokens authenticating fine while
+// resolving to somebody else's zones — and would hide every existing token from
+// its owner's list.
 //
-// That this service matches policy rules on the e-mail instead is a genuine
-// inconsistency, and an older one than this change.
+// It used to read preferred_username deliberately, while policy rules matched on
+// the e-mail. On the 260 accounts in this realm the two strings are identical, so
+// the change moves nothing on disk.
 func tokenSubject(user *UserClaims) string {
-	return user.PreferredUsername
+	return user.Identity()
 }
 
 // TokensResponse represents a list of tokens returned by GET /tokens

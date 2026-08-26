@@ -296,7 +296,7 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"they own that allows subdomains. The zone gets its own TSIG key, which stays on the server.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		app.Log.Infow("MCP create_zone", "user", caller.user.PreferredUsername, "zone", zone)
+		app.Log.Infow("MCP create_zone", "user", caller.user.Identity(), "zone", zone)
 		if _, err := app.ZoneCreateAuthorized(ctx, caller.user, zone); err != nil {
 			return nil, mcpStatus{}, toolErr("create zone", err)
 		}
@@ -315,7 +315,7 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := mcpserve.ConfirmEcho("confirm_zone", normalizeZone(in.ConfirmZone), zone, "the zone"); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		app.Log.Infow("MCP delete_zone", "user", caller.user.PreferredUsername, "zone", zone)
+		app.Log.Infow("MCP delete_zone", "user", caller.user.Identity(), "zone", zone)
 		if err := app.ZoneDeleteAuthorized(ctx, caller.user, zone); err != nil {
 			return nil, mcpStatus{}, toolErr("delete zone", err)
 		}
@@ -335,7 +335,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	// come back as the service's own message: an owner without a key is a zone
 	// in a broken state, not a permissions problem, and the two read differently.
 	withKey := func(ctx context.Context, zone string, f func(TSIGCredentials) error) error {
-		creds, err := app.OwnerTSIG(ctx, caller.user.PreferredUsername, zone)
+		creds, err := app.OwnerTSIG(ctx, caller.user.Identity(), zone)
 		if err != nil {
 			return toolErr("resolve the zone key", err)
 		}
@@ -349,7 +349,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpRecordList, error) {
 		var out mcpRecordList
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
-			records, err := app.RecordsList(ctx, caller.user.PreferredUsername, in.Zone, creds)
+			records, err := app.RecordsList(ctx, caller.user.Identity(), in.Zone, creds)
 			if err != nil {
 				return toolErr("list records", err)
 			}
@@ -370,10 +370,10 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		}
 		rec := DNSRecord{Zone: in.Zone, Name: in.Name, Type: in.Type, TTL: ttl, Value: in.Value}
 		var out mcpRecord
-		app.Log.Infow("MCP set_dns_record", "user", caller.user.PreferredUsername,
+		app.Log.Infow("MCP set_dns_record", "user", caller.user.Identity(),
 			"zone", in.Zone, "name", in.Name, "type", in.Type)
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
-			written, err := app.RecordUpsert(ctx, caller.user.PreferredUsername, rec, creds)
+			written, err := app.RecordUpsert(ctx, caller.user.Identity(), rec, creds)
 			if err != nil {
 				return toolErr("set record", err)
 			}
@@ -390,10 +390,10 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpRecordDeleteInput) (*mcp.CallToolResult, mcpRecord, error) {
 		rec := DNSRecord{Zone: in.Zone, Name: in.Name, Type: in.Type}
 		var out mcpRecord
-		app.Log.Infow("MCP delete_dns_record", "user", caller.user.PreferredUsername,
+		app.Log.Infow("MCP delete_dns_record", "user", caller.user.Identity(),
 			"zone", in.Zone, "name", in.Name, "type", in.Type)
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
-			deleted, err := app.RecordDelete(ctx, caller.user.PreferredUsername, rec, creds)
+			deleted, err := app.RecordDelete(ctx, caller.user.Identity(), rec, creds)
 			if err != nil {
 				return toolErr("delete record", err)
 			}
@@ -417,7 +417,7 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "List who manages a zone. Only an owner may ask.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		isOwner, err := app.Storage.IsZoneOwner(caller.user.PreferredUsername, zone)
+		isOwner, err := app.Storage.IsZoneOwner(caller.user.Identity(), zone)
 		if err != nil {
 			return nil, mcpStatus{}, fmt.Errorf("check ownership: %w", err)
 		}
@@ -437,7 +437,7 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"sharing. list_my_zones marks those with can_join.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		app.Log.Infow("MCP join_zone", "user", caller.user.PreferredUsername, "zone", zone)
+		app.Log.Infow("MCP join_zone", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneJoin(ctx, caller.user, zone)
 		if err := legacyResult(status, body, err, "join zone"); err != nil {
 			return nil, mcpStatus{}, err
@@ -451,7 +451,7 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"the caller does. Owner-only, and the zone must allow sharing.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		app.Log.Infow("MCP add_zone_owner", "user", caller.user.PreferredUsername, "zone", zone, "new_owner", in.Email)
+		app.Log.Infow("MCP add_zone_owner", "user", caller.user.Identity(), "zone", zone, "new_owner", in.Email)
 		status, body, err := app.ZoneAddOwner(ctx, caller.user, zone, in.Email)
 		if err := legacyResult(status, body, err, "add owner"); err != nil {
 			return nil, mcpStatus{}, err
@@ -465,7 +465,7 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"deleting the zone is a separate, destructive act. Pass the caller's own address to leave a shared zone.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		app.Log.Infow("MCP remove_zone_owner", "user", caller.user.PreferredUsername, "zone", zone, "owner", in.Email)
+		app.Log.Infow("MCP remove_zone_owner", "user", caller.user.Identity(), "zone", zone, "owner", in.Email)
 		status, body, err := app.ZoneRemoveOwner(ctx, caller.user, zone, in.Email)
 		if err := legacyResult(status, body, err, "remove owner"); err != nil {
 			return nil, mcpStatus{}, err
@@ -479,7 +479,7 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"using an old key (external-dns, ACME clients) stops updating until it is reconfigured. Nothing is lost.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone := normalizeZone(in.Zone)
-		app.Log.Infow("MCP rotate_zone_keys", "user", caller.user.PreferredUsername, "zone", zone)
+		app.Log.Infow("MCP rotate_zone_keys", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneRotateKeys(ctx, caller.user, zone)
 		if err := legacyResult(status, body, err, "rotate keys"); err != nil {
 			return nil, mcpStatus{}, err
@@ -554,7 +554,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := mayManage(in.ZoneSoa); err != nil {
 			return nil, PolicyRule{}, err
 		}
-		app.Log.Infow("MCP create_policy_rule", "user", caller.user.Email, "zone_pattern", in.ZonePattern)
+		app.Log.Infow("MCP create_policy_rule", "user", caller.user.Identity(), "zone_pattern", in.ZonePattern)
 		rule, err := app.PolicyCreateRule(toRuleRequest(in))
 		if err != nil {
 			return nil, PolicyRule{}, fmt.Errorf("create rule: %w", err)
@@ -578,7 +578,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := mayManage(in.ZoneSoa); err != nil {
 			return nil, PolicyRule{}, err
 		}
-		app.Log.Infow("MCP update_policy_rule", "user", caller.user.Email, "rule_id", in.ID)
+		app.Log.Infow("MCP update_policy_rule", "user", caller.user.Identity(), "rule_id", in.ID)
 		rule, err := app.PolicyUpdateRule(in.ID, toRuleRequest(in.mcpRuleInput))
 		if err != nil {
 			return nil, PolicyRule{}, fmt.Errorf("update rule %d: %w", in.ID, err)
@@ -602,7 +602,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := mayManage(existing.ZoneSoa); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		app.Log.Infow("MCP delete_policy_rule", "user", caller.user.Email, "rule_id", in.ID)
+		app.Log.Infow("MCP delete_policy_rule", "user", caller.user.Identity(), "rule_id", in.ID)
 		if err := app.PolicyDeleteRule(in.ID); err != nil {
 			return nil, mcpStatus{}, fmt.Errorf("delete rule %d: %w", in.ID, err)
 		}
@@ -632,7 +632,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := requireSuperAdmin(); err != nil {
 			return nil, DelegationPolicy{}, err
 		}
-		app.Log.Infow("MCP create_delegation", "user", caller.user.Email, "zone_suffix", in.ZoneSuffix)
+		app.Log.Infow("MCP create_delegation", "user", caller.user.Identity(), "zone_suffix", in.ZoneSuffix)
 		delegation, err := app.DelegationCreate(DelegationPolicyRequest{
 			TargetUserFilter: in.TargetUserFilter,
 			ZoneSuffix:       in.ZoneSuffix,
@@ -651,7 +651,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err := requireSuperAdmin(); err != nil {
 			return nil, DelegationPolicy{}, err
 		}
-		app.Log.Infow("MCP update_delegation", "user", caller.user.Email, "delegation_id", in.ID)
+		app.Log.Infow("MCP update_delegation", "user", caller.user.Identity(), "delegation_id", in.ID)
 		delegation, err := app.DelegationUpdate(in.ID, DelegationPolicyRequest{
 			TargetUserFilter: in.TargetUserFilter,
 			ZoneSuffix:       in.ZoneSuffix,
@@ -689,7 +689,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			fmt.Sprintf("delegation %d", in.ID)); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		app.Log.Infow("MCP delete_delegation", "user", caller.user.Email, "delegation_id", in.ID)
+		app.Log.Infow("MCP delete_delegation", "user", caller.user.Identity(), "delegation_id", in.ID)
 		if err := app.DelegationDelete(in.ID); err != nil {
 			return nil, mcpStatus{}, fmt.Errorf("delete delegation %d: %w", in.ID, err)
 		}

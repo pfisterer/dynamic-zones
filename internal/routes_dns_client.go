@@ -148,7 +148,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 List DNS records called for zone: %s by user: %s", zone, user.PreferredUsername)
+		app.Log.Infof("🚀 List DNS records called for zone: %s by user: %s", zone, user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		// Get TSIG credentials from headers
@@ -159,7 +159,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		records, err := app.RecordsList(c.Request.Context(), user.PreferredUsername, zone, creds)
+		records, err := app.RecordsList(c.Request.Context(), user.Identity(), zone, creds)
 		if err != nil {
 			app.Log.Warnf("listDNSRecords: %v", err)
 			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
@@ -198,7 +198,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 Create record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
+		app.Log.Infof("🚀 Create record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		if tsigErr := CheckTSIGRequestData(&req); tsigErr != nil {
@@ -206,7 +206,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		record, err := app.RecordUpsert(c.Request.Context(), user.PreferredUsername, req.record(), req.credentials())
+		record, err := app.RecordUpsert(c.Request.Context(), user.Identity(), req.record(), req.credentials())
 		if err != nil {
 			app.Log.Warnf("createDNSRecord: %v", err)
 			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
@@ -257,10 +257,10 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
-		app.Log.Infof("🚀 Delete record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.PreferredUsername)
+		app.Log.Infof("🚀 Delete record called for record %s, zone: %s by user: %s", req.Name, req.Zone, user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		record, err := app.RecordDelete(c.Request.Context(), user.PreferredUsername, req.record(), req.credentials())
+		record, err := app.RecordDelete(c.Request.Context(), user.Identity(), req.record(), req.credentials())
 		if err != nil {
 			app.Log.Warnf("deleteDNSRecord: %v", err)
 			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})

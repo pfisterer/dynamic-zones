@@ -219,7 +219,7 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 			return
 		}
 		// Safety: only delete through this endpoint if the zone really is orphaned.
-		owner := &UserClaims{Email: z.Username, PreferredUsername: z.Username}
+		owner := &UserClaims{Email: z.Username}
 		allowed, _, err := app.PolicyIsZoneAllowedForUser(zoneName, owner)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone"})
