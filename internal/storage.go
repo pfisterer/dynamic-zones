@@ -28,13 +28,23 @@ const ApiTokenPrefix = "dynz_token_"
 // describes something that no longer exists, keeps its owner's e-mail address,
 // and is invisible to the application while plainly visible to anything reading
 // the database directly.
+//
+// Two fields that were here are gone, and both were measured before they went
+// (see dropUnusedZoneColumns): RequiresRefreshAt was declared in January and
+// never written by anything — 0 of 102 production rows carried a value — while
+// UpdatedAt was maintained by GORM and said nothing, because a zone row is
+// written once and never touched again: 0 of those 102 rows had an UpdatedAt
+// later than their CreatedAt. Record changes happen in PowerDNS and never reach
+// this table.
+//
+// What RequiresRefreshAt was reaching for is already recorded, one system over:
+// every SOA in PowerDNS carries a YYYYMMDDnn serial, so "when did this zone last
+// change" is a substring of a record we already keep.
 type Zone struct {
-	ID                uint      `gorm:"primaryKey" json:"-"`
-	CreatedAt         time.Time `json:"-"`
-	UpdatedAt         time.Time `json:"-"`
-	Zone              string    `gorm:"primaryKey" json:"domain"`
-	Username          string    `gorm:"index" json:"user"`
-	RequiresRefreshAt time.Time `json:"requires_refresh_at"`
+	ID        uint      `gorm:"primaryKey" json:"-"`
+	CreatedAt time.Time `json:"-"`
+	Zone      string    `gorm:"primaryKey" json:"domain"`
+	Username  string    `gorm:"index" json:"user"`
 }
 
 // PolicyRule represents a DNS policy rule.
@@ -129,6 +139,14 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	}
 
 	if err := dropSoftDelete(db); err != nil {
+		return nil, fmt.Errorf("storage.NewStorage: %w", err)
+	}
+
+	// Both of these run BEFORE anything can insert a row, and that is not an
+	// accident: a column the model no longer declares is invisible to GORM, so
+	// if it were NOT NULL without a default, the first insert after startup
+	// would fail on a column nothing in the code knows about.
+	if err := dropUnusedZoneColumns(db); err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: %w", err)
 	}
 
