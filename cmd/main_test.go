@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/farberg/dynamic-zones/internal"
-	"github.com/farberg/dynamic-zones/internal/helper"
+	app "github.com/pfisterer/dynamic-zones/internal"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/stretchr/testify/assert"
 )
 

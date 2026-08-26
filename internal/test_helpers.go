@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/farberg/dynamic-zones/internal/test_helpers"
+	"github.com/pfisterer/dynamic-zones/internal/test_helpers"
 )
 
 // Where the test server ended up. SetupEnvironmentForTests fills this in; the

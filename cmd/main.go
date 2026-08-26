@@ -1,7 +1,7 @@
 package main
 
 import (
-	app "github.com/farberg/dynamic-zones/internal"
+	app "github.com/pfisterer/dynamic-zones/internal"
 )
 
 func main() {

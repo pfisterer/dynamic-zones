@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/miekg/dns"
 )
 

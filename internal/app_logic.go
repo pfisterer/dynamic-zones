@@ -11,7 +11,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )

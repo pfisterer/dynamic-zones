@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/farberg/dynamic-zones/internal/generated_docs"
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/generated_docs"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 )
 

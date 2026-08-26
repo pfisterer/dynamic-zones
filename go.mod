@@ -1,4 +1,4 @@
-module github.com/farberg/dynamic-zones
+module github.com/pfisterer/dynamic-zones
 
 go 1.25.0
 

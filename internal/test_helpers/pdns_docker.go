@@ -9,7 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
 )
 

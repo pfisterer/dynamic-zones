@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
 	"github.com/joeig/go-powerdns/v3"
 	"github.com/miekg/dns"

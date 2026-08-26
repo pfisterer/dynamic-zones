@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/test_helpers"
+	"github.com/pfisterer/dynamic-zones/internal/test_helpers"
 	"go.uber.org/zap"
 )
 

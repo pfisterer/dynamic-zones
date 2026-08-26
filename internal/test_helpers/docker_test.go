@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/farberg/dynamic-zones/internal/helper"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
 )
 
