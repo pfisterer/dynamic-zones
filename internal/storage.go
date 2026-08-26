@@ -15,8 +15,23 @@ import (
 
 const ApiTokenPrefix = "dynz_token_"
 
+// Zone is one owner's claim on a DNS zone. A zone with several owners has one
+// row per owner, each with their own TSIG key in PowerDNS.
+//
+// The fields are spelled out rather than embedding gorm.Model, and that is the
+// point: gorm.Model carries a DeletedAt, and a single such field turns every
+// delete in this table into a soft delete. Nobody decided that — PolicyRule and
+// DelegationPolicy below declare their own fields, have no DeletedAt, and are
+// deleted for real, so the same file had two behaviours and no reason for
+// either. Soft delete also does not fit what this table is: the zone it names is
+// gone from PowerDNS the moment it is deleted, so a row that outlives it
+// describes something that no longer exists, keeps its owner's e-mail address,
+// and is invisible to the application while plainly visible to anything reading
+// the database directly.
 type Zone struct {
-	gorm.Model
+	ID                uint      `gorm:"primaryKey" json:"-"`
+	CreatedAt         time.Time `json:"-"`
+	UpdatedAt         time.Time `json:"-"`
 	Zone              string    `gorm:"primaryKey" json:"domain"`
 	Username          string    `gorm:"index" json:"user"`
 	RequiresRefreshAt time.Time `json:"requires_refresh_at"`
@@ -111,6 +126,10 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to auto-migrate database: %w", err)
+	}
+
+	if err := dropSoftDelete(db); err != nil {
+		return nil, fmt.Errorf("storage.NewStorage: %w", err)
 	}
 
 	// Separate from AutoMigrate above because it is not one: the tokens table
