@@ -70,13 +70,14 @@ func Rfc2136DeleteARecord(tsigName, tsigAlg, tsigSecret, serverAddr, zoneName, r
 	m := new(dns.Msg)
 	m.SetUpdate(zoneName)
 
-	// Remove all A records for the specified name.
-	// To delete all records of a specific type for a name, use the ANY class (dns.ClassANY)
-	// and a TTL of 0.
+	// Remove the A RRset for the specified name. RemoveRRset keeps the header's
+	// Rrtype and rewrites the class to ANY itself (RFC 2136 §2.5.2), so the type
+	// here MUST be TypeA: TypeANY would turn this into §2.5.3 — "delete ALL
+	// RRsets of the name" — and silently wipe AAAA/TXT/CNAME records too.
 	rr := &dns.A{
 		Hdr: dns.RR_Header{
 			Name:   dns.Fqdn(recordName),
-			Rrtype: dns.TypeANY, // TypeANY indicates "delete all records of this type"
+			Rrtype: dns.TypeA,
 			Class:  dns.ClassINET,
 			Ttl:    0, // TTL 0 is for deletion
 		},
@@ -120,13 +121,14 @@ func Rfc2136DeleteAAAARecord(tsigName, tsigAlg, tsigSecret, serverAddr, zoneName
 	m := new(dns.Msg)
 	m.SetUpdate(zoneName)
 
-	// Remove all AAAA records for the specified name.
+	// Remove the AAAA RRset for the specified name (RFC 2136 §2.5.2: the header's
+	// Rrtype names the RRset to delete; RemoveRRset sets the class to ANY itself).
 	rr := &dns.AAAA{
 		Hdr: dns.RR_Header{
 			Name:   dns.Fqdn(recordName),
 			Rrtype: dns.TypeAAAA,
-			Class:  dns.ClassANY, // ClassANY indicates "delete all records of this type"
-			Ttl:    0,            // TTL 0 is for deletion
+			Class:  dns.ClassINET,
+			Ttl:    0, // TTL 0 is for deletion
 		},
 	}
 	m.RemoveRRset([]dns.RR{rr})
