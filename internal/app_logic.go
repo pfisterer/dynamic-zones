@@ -9,7 +9,6 @@ import (
 	"net/mail"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
@@ -346,8 +345,7 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 		return errorResult(http.StatusForbidden, "You are not entitled to join this zone", nil)
 	}
 
-	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
-	if _, err := app.Storage.CreateZone(username, zone, refreshTime); err != nil {
+	if _, err := app.Storage.CreateZone(username, zone); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to join zone", err)
 	}
 	if err := app.PowerDns.AddOwnerKey(ctx, zone, username); err != nil {
@@ -426,8 +424,7 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 	if already, err := app.Storage.IsZoneOwner(newOwner, zone); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to check ownership", err)
 	} else if !already {
-		refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
-		if _, err := app.Storage.CreateZone(newOwner, zone, refreshTime); err != nil {
+		if _, err := app.Storage.CreateZone(newOwner, zone); err != nil {
 			return errorResult(http.StatusInternalServerError, "Failed to add owner", err)
 		}
 		if err := app.PowerDns.AddOwnerKey(ctx, zone, newOwner); err != nil {
@@ -593,8 +590,7 @@ func (app *AppData) ZoneCreate(ctx context.Context, username string, zone ZoneRe
 		return errorResult(http.StatusInternalServerError, "Failed to create zone in DNS server", fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
-	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
-	if _, err := app.Storage.CreateZone(username, zone.Zone, refreshTime); err != nil {
+	if _, err := app.Storage.CreateZone(username, zone.Zone); err != nil {
 		return errorResult(http.StatusInternalServerError, "Failed to create zone in storage", fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"go.uber.org/zap"
 )
@@ -44,14 +45,14 @@ func readOnlyFixture(t *testing.T, useRESTRule bool) (http.Handler, string, stri
 	// branch is not what this is about.
 	g.Use(CombinedAuthMiddleware(nil, store, log, false))
 	if useRESTRule {
-		g.Use(RejectWritesForReadOnlyTokens(log))
+		g.Use(ginweb.RejectWritesForReadOnlyTokens(log))
 	}
 	g.GET("/thing", func(c *gin.Context) { c.Status(http.StatusOK) })
 	g.POST("/thing", func(c *gin.Context) { c.Status(http.StatusOK) })
 	// Stands in for an MCP route: a POST that is a read, answering the
 	// read-only question itself instead of letting the method answer it.
 	g.POST("/tool", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"read_only": IsReadOnlyToken(c)})
+		c.JSON(http.StatusOK, gin.H{"read_only": ginweb.IsReadOnly(c)})
 	})
 	return r, readOnly.Secret, writable.Secret
 }

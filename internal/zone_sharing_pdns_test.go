@@ -56,7 +56,7 @@ func newPdnsTestAppWithContainer(t *testing.T) (*AppData, *test_helpers.PdnsCont
 		t.Fatalf("failed to create test storage: %v", err)
 	}
 
-	return &AppData{Storage: db, PowerDns: pdns, Log: log, RefreshTime: 3600}, pdnsDocker
+	return &AppData{Storage: db, PowerDns: pdns, Log: log}, pdnsDocker
 }
 
 // waitForPdns blocks until the container answers API calls. Talking to it right
@@ -112,7 +112,7 @@ func seedSharedParentWithSubzone(t *testing.T, app *AppData, owner, parent, subz
 		if _, err := app.PowerDns.CreateUserZone(t.Context(), owner, zone, true); err != nil {
 			t.Fatalf("failed to create zone %s in PowerDNS: %v", zone, err)
 		}
-		if _, err := app.Storage.CreateZone(owner, zone, time.Now()); err != nil {
+		if _, err := app.Storage.CreateZone(owner, zone); err != nil {
 			t.Fatalf("failed to create zone %s in storage: %v", zone, err)
 		}
 	}

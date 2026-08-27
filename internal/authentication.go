@@ -10,49 +10,17 @@ import (
 	"github.com/coreos/go-oidc"
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/authn"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"go.uber.org/zap"
 )
 
 const UserDataKey = "__api_userData"
 
-// ReadOnlyKey carries whether the caller authenticated with a read-only API
-// token. Set on every authenticated request, including OIDC ones (false there),
-// so a handler asking the question never has to tell "not read-only" from
-// "nobody set it".
-const ReadOnlyKey = "__api_readOnly"
-
-// IsReadOnlyToken reports whether this request was authenticated with a
-// read-only API token. For routes where the HTTP method does not say what the
-// operation does, this is the question to ask, once per operation, against that
-// operation's own answer.
-func IsReadOnlyToken(c *gin.Context) bool {
-	v, ok := c.Get(ReadOnlyKey)
-	if !ok {
-		return false
-	}
-	readOnly, ok := v.(bool)
-	return ok && readOnly
-}
-
-// RejectWritesForReadOnlyTokens refuses anything but GET for a read-only token.
-//
-// This is the REST rule, and it lives on the REST group rather than in the auth
-// middleware because it is an approximation: the method stands in for "does this
-// change anything", which holds for these routes and nowhere else. Inside the
-// auth middleware it looked like a property of the credential, and it would
-// refuse every call on a route where reads are POSTs too.
-func RejectWritesForReadOnlyTokens(log *zap.SugaredLogger) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodGet && IsReadOnlyToken(c) {
-			log.Warnf("Attempt to use read-only token for non-GET operation: %s %s",
-				c.Request.Method, c.Request.URL.Path)
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token is read-only"})
-			return
-		}
-		c.Next()
-	}
-}
+// The read-only-token rule (recording the flag, reading it, and refusing writes
+// for it) lives in cloud-self-service-golib/ginweb, shared with the other
+// services. This file only records the flag via ginweb.SetReadOnly once it has
+// resolved the token below.
 
 // UserClaims holds the relevant user information extracted from the ID token.
 //
@@ -188,7 +156,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			if dummyUser := c.GetHeader("X-Dummy-Auth-User"); dummyUser != "" {
 				log.Warnf("DEV MODE: trusting X-Dummy-Auth-User '%s' without token verification", dummyUser)
 				c.Set(UserDataKey, &UserClaims{Email: dummyUser})
-				c.Set(ReadOnlyKey, false)
+				ginweb.SetReadOnly(c, false)
 				c.Next()
 				return
 			}
@@ -228,7 +196,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			// write is a property of the OPERATION, and only the REST routes
 			// can read that off the HTTP method (see
 			// RejectWritesForReadOnlyTokens).
-			c.Set(ReadOnlyKey, rec.ReadOnly)
+			ginweb.SetReadOnly(c, rec.ReadOnly)
 
 			// One field, because there is one identity. The token was issued
 			// under this subject (see tokenSubject) and Identity() reads Email
@@ -249,7 +217,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		// Otherwise, treat it as an OIDC Bearer JWT. Set before handing over:
 		// BearerTokenAuthMiddleware calls Next() itself, so anything set after
 		// it would land once the handlers have already run.
-		c.Set(ReadOnlyKey, false)
+		ginweb.SetReadOnly(c, false)
 		oidcVerifier.BearerTokenAuthMiddleware()(c)
 
 	}

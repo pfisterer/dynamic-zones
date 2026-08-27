@@ -38,7 +38,6 @@ func mcpTestApp(t *testing.T, superAdmins ...string) *AppData {
 	return &AppData{
 		Storage:     store,
 		Log:         zap.NewNop().Sugar(),
-		RefreshTime: 3600,
 		Config:      AppConfig{DnsPolicyConfig: DnsPolicyConfig{SuperAdminEmails: admins}},
 	}
 }

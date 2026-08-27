@@ -146,7 +146,9 @@ All configuration is environment variables (`.env` is loaded in development).
 | `API_MODE` | `production` | `development` = auth bypass, see above |
 | `API_BIND` | `:8082` | Listen address |
 | `API_BASE_URL` | `http://localhost:8082` | Public URL, used in generated instructions |
-| `API_TOKEN_TTL_HOURS` | `24` | Lifetime of issued API tokens |
+| `API_TOKEN_TTL_HOURS` | `24` | Token lifetime when the request names none |
+| `API_TOKEN_MAX_TTL_HOURS` | `8760` | Longest lifetime a caller may ask for (a request over it is refused, not shortened) |
+| `API_TOKEN_ALLOW_NEVER_EXPIRES` | `false` | Whether `ttl_hours: -1` (no expiry) is granted at all |
 | `DB_TYPE` | `sqlite` | `sqlite` \| `postgres` \| `mysql` |
 | `DB_CONNECTION_STRING` | in-memory SQLite | DSN for the chosen backend |
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated origins for the browser client |
@@ -175,9 +177,12 @@ parent zone current instead of relying on a one-off manual delegation.
 
 ### Zone defaults
 
-`ZONE_DEFAULTS_SOA_RECORDS` and `ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records
-written into every newly created zone, with
-`ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` for the key used to write them.
+`ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records written into every newly
+created **user (leaf) zone**; `ZONE_DEFAULTS_SOA_RECORDS` go only into the
+**SOA/base (intermediate) zones** the service creates above them.
+`ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` name the admin key that is added to
+all of these zones. The split is deliberate: a record in the base zone cannot be
+deleted or overridden with the user's own zone key.
 
 This is where **CAA** belongs. A `CAA` record must name the certificate authority
 that actually signs — not the ACME endpoint in front of it. Naming the proxy host

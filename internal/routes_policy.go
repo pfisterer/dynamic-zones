@@ -69,9 +69,9 @@ func listPolicyRules(app *AppData) gin.HandlerFunc {
 	}
 }
 
-// createPolicyRule creates a new policy rule (super-admin only).
+// createPolicyRule creates a new policy rule.
 // @Summary Create a policy rule
-// @Description Creates a new DNS policy rule. Only SuperAdmins are authorized.
+// @Description Creates a new DNS policy rule. Requires being a super-admin or holding a delegation that covers the rule's zone_soa.
 // @Tags policies
 // @Accept json
 // @Produce json
@@ -114,9 +114,9 @@ func createPolicyRule(app *AppData) gin.HandlerFunc {
 	}
 }
 
-// updatePolicyRule updates an existing policy rule (super-admin only).
+// updatePolicyRule updates an existing policy rule.
 // @Summary Update a policy rule
-// @Description Updates an existing DNS policy rule by ID. Only SuperAdmins are authorized.
+// @Description Updates an existing DNS policy rule by ID. Requires rights (super-admin or delegation) on BOTH the rule's current zone_soa and the new one, so a rule cannot be moved out of the caller's scope.
 // @Tags policies
 // @Accept json
 // @Produce json
@@ -178,9 +178,9 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 	}
 }
 
-// deletePolicyRule deletes a policy rule (super-admin only).
+// deletePolicyRule deletes a policy rule.
 // @Summary Delete a policy rule
-// @Description Deletes a DNS policy rule by ID. Only SuperAdmins are authorized.
+// @Description Deletes a DNS policy rule by ID. Requires being a super-admin or holding a delegation that covers the rule's zone_soa. Zones the rule granted become orphaned, not deleted.
 // @Tags policies
 // @Produce json
 // @Param id path int true "Rule ID"

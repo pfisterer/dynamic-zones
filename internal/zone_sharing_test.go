@@ -2,7 +2,6 @@ package app
 
 import (
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 )
@@ -22,7 +21,7 @@ func newTestApp(t *testing.T) *AppData {
 
 func addZone(t *testing.T, app *AppData, user, zone string) {
 	t.Helper()
-	if _, err := app.Storage.CreateZone(user, zone, time.Now()); err != nil {
+	if _, err := app.Storage.CreateZone(user, zone); err != nil {
 		t.Fatalf("failed to create zone %s for %s: %v", zone, user, err)
 	}
 }

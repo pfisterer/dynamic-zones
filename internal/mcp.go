@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/mcpserve"
 )
 
@@ -74,7 +75,7 @@ func RegisterMCPRoutes(group *gin.RouterGroup, app *AppData) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unable to resolve user context"})
 			return
 		}
-		caller := mcpCaller{user: user, readOnly: IsReadOnlyToken(c)}
+		caller := mcpCaller{user: user, readOnly: ginweb.IsReadOnly(c)}
 		ctx := mcpserve.WithCaller(c.Request.Context(), caller)
 		handler.ServeHTTP(c.Writer, c.Request.WithContext(ctx))
 	})

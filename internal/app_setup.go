@@ -4,15 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/joho/godotenv"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
+	"github.com/pfisterer/cloud-self-service-golib/redact"
 	"go.uber.org/zap"
 
 	ginzap "github.com/gin-contrib/zap"
@@ -20,12 +18,11 @@ import (
 )
 
 type AppData struct {
-	Config      AppConfig
-	Storage     *Storage
-	PowerDns    *PowerDnsClient
-	RefreshTime uint64
-	Logger      *zap.Logger
-	Log         *zap.SugaredLogger
+	Config   AppConfig
+	Storage  *Storage
+	PowerDns *PowerDnsClient
+	Logger   *zap.Logger
+	Log      *zap.SugaredLogger
 }
 
 func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
@@ -135,7 +132,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 
 	if app.Config.DevMode {
 		app.Log.Debugf("Completely disabling caching in development mode.")
-		router.Use(disableCachingMiddleware())
+		router.Use(ginweb.DisableCaching())
 	}
 
 	// Direct Gin's standard and error output streams to our custom Zap writer
@@ -158,24 +155,31 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Create static file server
 	homeGroup := router.Group("/")
 	homeGroup.Use(cors.Default())
-	// The generated API client (client/*.gen.mjs) is imported by the SPA at runtime and
-	// MUST never be served stale: a browser holding a cached older SDK silently lacks any
-	// newly added operation and the UI feature no-ops. In DevMode the whole router already
-	// gets this; in production only the static assets need it.
+	// These routes serve the landing page, swagger.json and config.json — all of
+	// which embed the running version. Served uncached so a deploy is visible on
+	// the next reload instead of whenever a browser cache expires. (The generated
+	// TypeScript client used to be served here too and had the same problem
+	// harder; it is an npm package consumed at build time now.) In DevMode the
+	// whole router already gets this middleware.
 	if !app.Config.DevMode {
-		homeGroup.Use(disableCachingMiddleware())
+		homeGroup.Use(ginweb.DisableCaching())
 	}
 	CreateHomeRoutes(homeGroup, app)
 
 	// Create router group for  API routes for v1
 	apiV1Group := router.Group("/v1")
-	enableCors(apiV1Group, app.Config.WebServer.CORSAllowedOrigins, app.Config.DevMode, app.Log)
+	ginweb.EnableCORS(apiV1Group, ginweb.CORSOptions{
+		AllowedOrigins: app.Config.WebServer.CORSAllowedOrigins,
+		DevMode:        app.Config.DevMode,
+		AllowHeaders:   []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"},
+		Log:            app.Log,
+	})
 	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
 
 	// The read-only rule for REST, mounted here rather than inside the auth
 	// middleware: "anything but GET is a write" is true of these routes and of
 	// nothing else, so it belongs to the group it describes.
-	apiV1Group.Use(RejectWritesForReadOnlyTokens(app.Log))
+	apiV1Group.Use(ginweb.RejectWritesForReadOnlyTokens(app.Log))
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
@@ -192,33 +196,6 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	return router
 }
 
-// maskSecret returns a short, non-reversible preview of a secret for logs: the
-// first few characters plus the total length, or "***" when it is too short to
-// reveal safely. The length guard also means slicing can never panic on an empty
-// or short secret (SEC #18).
-func maskSecret(s string) string {
-	if s == "" {
-		return ""
-	}
-	const shown = 4
-	if len(s) <= shown {
-		return "***"
-	}
-	return fmt.Sprintf("%s…(len %d)", s[:shown], len(s))
-}
-
-// maskConnString redacts only the password=… token of a space-separated DSN,
-// keeping host/user/dbname visible for debugging.
-func maskConnString(dsn string) string {
-	fields := strings.Fields(dsn)
-	for i, f := range fields {
-		if k, v, ok := strings.Cut(f, "="); ok && strings.EqualFold(k, "password") {
-			fields[i] = k + "=" + maskSecret(v)
-		}
-	}
-	return strings.Join(fields, " ")
-}
-
 func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	var appConfigJson []byte
 	var err error
@@ -228,12 +205,12 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	} else {
 		// Redact every secret to a short preview before logging (SEC #10): these
 		// logs are shipped to Loki, so full API keys / TSIG keys / DB passwords must
-		// never appear. maskSecret also length-guards the value, so an empty or
+		// never appear. redact.Secret also length-guards the value, so an empty or
 		// short secret can no longer panic on a slice (SEC #18).
-		appConfig.UpstreamDns.Tsig_Secret = maskSecret(appConfig.UpstreamDns.Tsig_Secret)
-		appConfig.PowerDns.PdnsApiKey = maskSecret(appConfig.PowerDns.PdnsApiKey)
-		appConfig.ZoneDefaults.DefaultAdminTsigKey = maskSecret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
-		appConfig.Storage.DbConnectionString = maskConnString(appConfig.Storage.DbConnectionString)
+		appConfig.UpstreamDns.Tsig_Secret = redact.Secret(appConfig.UpstreamDns.Tsig_Secret)
+		appConfig.PowerDns.PdnsApiKey = redact.Secret(appConfig.PowerDns.PdnsApiKey)
+		appConfig.ZoneDefaults.DefaultAdminTsigKey = redact.Secret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
+		appConfig.Storage.DbConnectionString = redact.ConnString(appConfig.Storage.DbConnectionString)
 		// In production mode, we use a compact JSON format without indentation
 		appConfigJson, err = json.Marshal(appConfig)
 	}
@@ -245,79 +222,4 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	}
 
 	log.Infof("app.LogAppConfig: Application configuration: %s", appConfigJson)
-}
-
-func disableCachingMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Apply the Cache-Control header to the static files
-		//if strings.HasPrefix(c.Request.URL.Path, "/static/") {
-		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		c.Header("Pragma", "no-cache")
-		c.Header("Expires", "0")
-		//}
-		// Continue to the next middleware or handler
-		c.Next()
-	}
-}
-
-// enableCors restricts cross-origin API access to allowedOrigins (exact origin
-// matches, e.g. "https://selfservice.dhbw.cloud").
-//
-// The previous version reflected ANY origin back and combined that with
-// AllowCredentials, which lets an arbitrary page issue credentialed requests to
-// this API AND read the answers. Empty allowlist = no cross-origin access, the
-// right default whenever the SPA reaches the API same-origin through the BFF.
-// Non-browser clients (dyndns updaters, curl) are unaffected by CORS entirely.
-// In development the local Vite dev server (http://localhost:8084) is a genuine
-// cross-origin caller, so devMode additionally allows any loopback origin —
-// nobody should have to configure an allowlist to run the UI locally.
-func enableCors(router *gin.RouterGroup, allowedOrigins []string, devMode bool, log *zap.SugaredLogger) {
-	allowed := make(map[string]bool, len(allowedOrigins))
-	for _, origin := range allowedOrigins {
-		if trimmed := strings.TrimRight(strings.TrimSpace(origin), "/"); trimmed != "" {
-			allowed[trimmed] = true
-		}
-	}
-
-	switch {
-	case devMode:
-		log.Infof("CORS: development mode — allowing loopback origins plus %v", allowedOrigins)
-	case len(allowed) == 0:
-		log.Info("CORS: no allowed origins configured — cross-origin API access is disabled")
-	default:
-		log.Infof("CORS: allowing cross-origin API access from %v", allowedOrigins)
-	}
-
-	router.Use(cors.New(cors.Config{
-		AllowOriginFunc: func(origin string) bool {
-			origin = strings.TrimRight(origin, "/")
-			return allowed[origin] || (devMode && isLoopbackOrigin(origin))
-		},
-		AllowCredentials: true,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"},
-		MaxAge:           1 * time.Hour,
-	}))
-
-	// Gin runs group middleware only for requests that MATCH a route, and no
-	// handler is registered for OPTIONS — without this catch-all a preflight
-	// would 404 before the CORS middleware ever ran. The handler sets nothing
-	// itself: an allowed origin was already answered 204 with the headers by the
-	// middleware, any other origin was aborted with 403. That is the difference
-	// to the previous version, whose catch-all wrote reflected headers on its own.
-	router.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
-}
-
-// isLoopbackOrigin reports whether an origin points at this machine — the dev
-// server and any local tooling. Only consulted in development mode.
-func isLoopbackOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return false
-	}
-	switch u.Hostname() {
-	case "localhost", "127.0.0.1", "::1":
-		return true
-	}
-	return false
 }

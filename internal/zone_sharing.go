@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
 )
 
 // Sharing is a property of a zone SUBTREE, not of a single zone: whoever owns a
@@ -65,8 +64,7 @@ func (app *AppData) grantOwner(ctx context.Context, user, zone string) error {
 		return nil
 	}
 
-	refreshTime := time.Now().Add(time.Duration(app.RefreshTime) * time.Second)
-	if _, err := app.Storage.CreateZone(user, zone, refreshTime); err != nil {
+	if _, err := app.Storage.CreateZone(user, zone); err != nil {
 		return fmt.Errorf("app.grantOwner: %w", err)
 	}
 	if err := app.PowerDns.AddOwnerKey(ctx, zone, user); err != nil {

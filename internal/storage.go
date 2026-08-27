@@ -224,7 +224,10 @@ func (storage *Storage) GetZone(user string, zone string) (*Zone, error) {
 	return &d, nil
 }
 
-func (storage *Storage) CreateZone(user string, zone string, requiresRefreshAt time.Time) (*Zone, error) {
+// CreateZone inserts one owner row for a zone. (It used to take a
+// requiresRefreshAt argument for a column that was measured to be unused and
+// dropped — see the Zone struct comment and dropUnusedZoneColumns.)
+func (storage *Storage) CreateZone(user string, zone string) (*Zone, error) {
 	d := &Zone{
 		Username: user,
 		Zone:     zone,
@@ -237,7 +240,7 @@ func (storage *Storage) CreateZone(user string, zone string, requiresRefreshAt t
 
 func (storage *Storage) DeleteZone(user string, zone string) error {
 	if err := storage.db.Where("username = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
-		return fmt.Errorf("storage.CreateZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
+		return fmt.Errorf("storage.DeleteZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
 	}
 	return nil
 }
