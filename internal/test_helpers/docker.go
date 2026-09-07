@@ -10,10 +10,8 @@ import (
 
 	"slices"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
 
@@ -27,14 +25,16 @@ type DockerController struct {
 func NewDockerController(log *zap.SugaredLogger) (*DockerController, error) {
 	// Create standard Docker client, test if accessible
 	context := context.Background()
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	_, err = cli.Ping(context)
+	cli, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err == nil {
+		_, err = cli.Ping(context, client.PingOptions{})
+	}
 
 	if err != nil {
 		// Fallback to macOS specific path if needed
 		if runtime.GOOS == "darwin" {
 			defaultDockerHost := fmt.Sprintf("unix://%s/.docker/run/docker.sock", os.Getenv("HOME"))
-			cli, err = client.NewClientWithOpts(client.WithHost(defaultDockerHost), client.WithAPIVersionNegotiation())
+			cli, err = client.New(client.WithHost(defaultDockerHost), client.WithAPIVersionNegotiation())
 			if err != nil {
 				return nil, fmt.Errorf("test_helpers.NewDockerController: failed to create Docker client: %w", err)
 			}
@@ -43,7 +43,7 @@ func NewDockerController(log *zap.SugaredLogger) (*DockerController, error) {
 		}
 	}
 
-	_, err = cli.Ping(context)
+	_, err = cli.Ping(context, client.PingOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("test_helpers.NewDockerController: failed to ping Docker daemon: %w", err)
 	}
@@ -58,12 +58,16 @@ func (dc *DockerController) StartContainer(ctx context.Context, containerName, i
 		Labels: containerLabels,
 	}
 
-	resp, err := dc.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
+	resp, err := dc.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     containerConfig,
+		HostConfig: hostConfig,
+		Name:       containerName,
+	})
 	if err != nil {
 		return "", fmt.Errorf("test_helpers.StartContainer: failed to create container '%s' from image '%s': %w", containerName, imageNameWithTag, err)
 	}
 
-	if err := dc.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := dc.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("test_helpers.StartContainer: failed to start container '%s' (%s): %w", containerName, resp.ID, err)
 	}
 
@@ -71,11 +75,12 @@ func (dc *DockerController) StartContainer(ctx context.Context, containerName, i
 }
 
 func (dc *DockerController) ContainerImageExists(ctx context.Context, imageNameWithTag string) error {
-	images, err := dc.client.ImageList(ctx, image.ListOptions{Filters: filters.NewArgs(filters.Arg("reference", imageNameWithTag))})
+	res, err := dc.client.ImageList(ctx, client.ImageListOptions{Filters: client.Filters{"reference": {imageNameWithTag: true}}})
 	if err != nil {
 		return fmt.Errorf("test_helpers.ContainerImageExists: failed to list images: %w", err)
 	}
 
+	images := res.Items
 	if len(images) == 0 {
 		return fmt.Errorf("test_helpers.ContainerImageExists: image '%s' does not exist", imageNameWithTag)
 	}
@@ -86,7 +91,7 @@ func (dc *DockerController) ContainerImageExists(ctx context.Context, imageNameW
 
 // UpdateContainerImage pulls the latest image (or the specified tag/hash) for a container.
 func (dc *DockerController) UpdateContainerImage(ctx context.Context, imageNameWithTag string) error {
-	out, err := dc.client.ImagePull(ctx, imageNameWithTag, image.PullOptions{})
+	out, err := dc.client.ImagePull(ctx, imageNameWithTag, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("test_helpers.UpdateContainerImage: failed to pull image '%s': %w", imageNameWithTag, err)
 	}
@@ -104,20 +109,22 @@ func (dc *DockerController) UpdateContainerImage(ctx context.Context, imageNameW
 
 // DeleteOldImages removes images that are not currently in use by any containers.
 func (dc *DockerController) DeleteOldImages(ctx context.Context) error {
-	containers, err := dc.client.ContainerList(ctx, container.ListOptions{All: true})
+	containersRes, err := dc.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("test_helpers.DeleteOldImages: failed to list containers: %w", err)
 	}
+	containers := containersRes.Items
 
 	usedImages := make(map[string]bool)
 	for _, c := range containers {
 		usedImages[c.ImageID] = true
 	}
 
-	images, err := dc.client.ImageList(ctx, image.ListOptions{})
+	imagesRes, err := dc.client.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {
 		return fmt.Errorf("test_helpers.ImageList: failed to list images: %w", err)
 	}
+	images := imagesRes.Items
 
 	for _, img := range images {
 		if len(img.RepoTags) == 0 { // Skip images with no tags (often intermediate layers)
@@ -130,7 +137,7 @@ func (dc *DockerController) DeleteOldImages(ctx context.Context) error {
 		if !isUsed {
 			for _, tag := range img.RepoTags {
 				dc.log.Infof("test_helpers.ImageList: Removing unused image: %s (%s)", tag, img.ID)
-				_, err := dc.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: false, PruneChildren: false})
+				_, err := dc.client.ImageRemove(ctx, img.ID, client.ImageRemoveOptions{Force: false, PruneChildren: false})
 				if err != nil && !strings.Contains(err.Error(), "No such image") {
 					dc.log.Warnf("test_helpers.ImageList: Error removing image %s (%s): %v", tag, img.ID, err)
 				}
@@ -144,15 +151,15 @@ func (dc *DockerController) DeleteOldImages(ctx context.Context) error {
 func (dc *DockerController) StopAndDeleteContainer(ctx context.Context, containerID string) error {
 	timeout := 5 // seconds to wait before forcefully stopping
 
-	err := dc.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
+	_, err := dc.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
 	if err != nil && !strings.Contains(err.Error(), "No such container") {
 		return fmt.Errorf("test_helpers.StopAndDeleteContainer: failed to stop container '%s' (%s): %w", containerID, containerID, err)
 	}
 
-	removeOptions := container.RemoveOptions{
+	removeOptions := client.ContainerRemoveOptions{
 		Force: true, // Force the removal if it's still running (though we tried to stop it)
 	}
-	err = dc.client.ContainerRemove(ctx, containerID, removeOptions)
+	_, err = dc.client.ContainerRemove(ctx, containerID, removeOptions)
 	if err != nil && !strings.Contains(err.Error(), "No such container") {
 		return fmt.Errorf("test_helpers.StopAndDeleteContainer: failed to remove container '%s' (%s): %w", containerID, containerID, err)
 	}
@@ -163,11 +170,11 @@ func (dc *DockerController) StopAndDeleteContainer(ctx context.Context, containe
 
 // getContainerIDByName retrieves the ID of a container given its name.
 func (dc *DockerController) GetContainerIDByName(ctx context.Context, containerName string) (string, error) {
-	containers, err := dc.client.ContainerList(ctx, container.ListOptions{All: true})
+	res, err := dc.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return "", fmt.Errorf("test_helpers.GetContainerIDByName: failed to list containers: %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range res.Items {
 		if slices.Contains(c.Names, "/"+containerName) { // Docker prepends a '/' to container names
 			return c.ID, nil
 		}
@@ -176,18 +183,19 @@ func (dc *DockerController) GetContainerIDByName(ctx context.Context, containerN
 }
 
 func (dc *DockerController) GetContainerById(ctx context.Context, containerID string) (*container.InspectResponse, error) {
-	container, err := dc.client.ContainerInspect(ctx, containerID)
+	res, err := dc.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("test_helpers.GetContainerById: failed to inspect container '%s': %w", containerID, err)
 	}
-	return &container, nil
+	return &res.Container, nil
 }
 
 func (dc *DockerController) GetContainersWithLabels(ctx context.Context, labels map[string]string) ([]container.Summary, error) {
-	containers, err := dc.client.ContainerList(ctx, container.ListOptions{All: true})
+	containersRes, err := dc.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return nil, fmt.Errorf("test_helpers.GetContainersWithLabels: failed to list containers: %w", err)
 	}
+	containers := containersRes.Items
 
 	var filteredContainers []container.Summary
 	for _, c := range containers {

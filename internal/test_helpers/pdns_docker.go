@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/go-connections/nat"
-	"github.com/pfisterer/dynamic-zones/internal/helper"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 )
 
 const (
@@ -136,22 +136,19 @@ func StartPndsTestContainer(ctx context.Context) (instance *PdnsContainerTestIns
 		Binds: []string{
 			fmt.Sprintf("%s:/etc/powerdns/pdns.conf:ro", absolutePathToConfig),
 		},
-		PortBindings: nat.PortMap{
-			"8081/tcp": []nat.PortBinding{
+		PortBindings: network.PortMap{
+			network.MustParsePort("8081/tcp"): {
 				{
-					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", externalApiPort),
 				},
 			},
-			"53/tcp": []nat.PortBinding{
+			network.MustParsePort("53/tcp"): {
 				{
-					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", externalDnsPort),
 				},
 			},
-			"53/udp": []nat.PortBinding{
+			network.MustParsePort("53/udp"): {
 				{
-					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", externalDnsPort),
 				},
 			},

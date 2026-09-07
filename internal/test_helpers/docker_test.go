@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 )
 
 const (
