@@ -44,20 +44,43 @@ type ZoneEventInfo struct {
 	LastSeen  time.Time `json:"last_seen" example:"2026-09-06T09:00:00Z"`
 	// Source names the producer of the event (e.g. "alertmanager").
 	Source string `json:"source" example:"alertmanager"`
+	// Owners are the e-mail addresses managing the zone. For a zone's owner
+	// this repeats what the zone list already shows; for the super-admin view
+	// it is what makes an event actionable (contact the owner).
+	Owners []string `json:"owners" example:"alice@example.edu"`
 }
 
-func toZoneEventInfo(ev ZoneEvent) ZoneEventInfo {
-	return ZoneEventInfo{
-		Zone:      ev.Zone,
-		Class:     ev.Class,
-		Severity:  ev.Severity,
-		Message:   ev.Message,
-		Detail:    ev.Detail,
-		Count:     ev.Count,
-		FirstSeen: ev.FirstSeen,
-		LastSeen:  ev.LastSeen,
-		Source:    ev.Source,
+func toZoneEventInfos(events []ZoneEvent, owners map[string][]string) []ZoneEventInfo {
+	out := make([]ZoneEventInfo, 0, len(events))
+	for _, ev := range events {
+		out = append(out, ZoneEventInfo{
+			Zone:      ev.Zone,
+			Class:     ev.Class,
+			Severity:  ev.Severity,
+			Message:   ev.Message,
+			Detail:    ev.Detail,
+			Count:     ev.Count,
+			FirstSeen: ev.FirstSeen,
+			LastSeen:  ev.LastSeen,
+			Source:    ev.Source,
+			Owners:    owners[ev.Zone],
+		})
 	}
+	return out
+}
+
+// zonesOfEvents collects the distinct zone names of a list of events.
+func zonesOfEvents(events []ZoneEvent) []string {
+	seen := map[string]struct{}{}
+	zones := make([]string, 0, len(events))
+	for _, ev := range events {
+		if _, ok := seen[ev.Zone]; ok {
+			continue
+		}
+		seen[ev.Zone] = struct{}{}
+		zones = append(zones, ev.Zone)
+	}
+	return zones
 }
 
 // ZoneEventsResponse is the answer to GET /v1/zone-events/.
@@ -101,11 +124,17 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		out := make([]ZoneEventInfo, 0, len(events))
-		for _, ev := range events {
-			out = append(out, toZoneEventInfo(ev))
+		// One bounded batch query, not one lookup per event: the event count
+		// is structurally capped (one row per source+class+zone), which is
+		// also why this endpoint has no pagination — the worst case is on the
+		// order of the zone count, not of an unbounded log.
+		owners, err := app.Storage.ListOwnersForZones(zonesOfEvents(events))
+		if err != nil {
+			app.Log.Errorf("zone-events: resolving owners: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone events"})
+			return
 		}
-		c.JSON(http.StatusOK, ZoneEventsResponse{Events: out})
+		c.JSON(http.StatusOK, ZoneEventsResponse{Events: toZoneEventInfos(events, owners)})
 	}
 }
 

@@ -163,6 +163,42 @@ func TestApplyZoneEventsValidatesAndReports(t *testing.T) {
 	}
 }
 
+func TestListOwnersForZones(t *testing.T) {
+	app := newZoneEventsTestApp(t, defaultZoneEventsTestConfig())
+	for user, zone := range map[string]string{
+		"alice@example.edu": "shared.example.org",
+		"carol@example.edu": "carol.example.org",
+	} {
+		if _, err := app.Storage.CreateZone(user, zone); err != nil {
+			t.Fatalf("seeding %s: %v", zone, err)
+		}
+	}
+	// A second owner on the shared zone.
+	if _, err := app.Storage.CreateZone("bob@example.edu", "shared.example.org"); err != nil {
+		t.Fatalf("seeding co-owner: %v", err)
+	}
+
+	owners, err := app.Storage.ListOwnersForZones([]string{"shared.example.org", "carol.example.org", "unknown.example.org"})
+	if err != nil {
+		t.Fatalf("ListOwnersForZones: %v", err)
+	}
+	if got := owners["shared.example.org"]; len(got) != 2 || got[0] != "alice@example.edu" || got[1] != "bob@example.edu" {
+		t.Fatalf("shared zone owners wrong: %v", got)
+	}
+	if got := owners["carol.example.org"]; len(got) != 1 || got[0] != "carol@example.edu" {
+		t.Fatalf("carol zone owners wrong: %v", got)
+	}
+	if _, ok := owners["unknown.example.org"]; ok {
+		t.Fatal("unknown zone must not appear in the owners map")
+	}
+
+	// Empty input stays one cheap no-op, not a WHERE IN () syntax error.
+	empty, err := app.Storage.ListOwnersForZones(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty input: %v %v", empty, err)
+	}
+}
+
 func TestReconcileZoneEventsIngestToken(t *testing.T) {
 	app := newZoneEventsTestApp(t, defaultZoneEventsTestConfig())
 	ctx := context.Background()

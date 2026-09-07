@@ -153,6 +153,25 @@ func (s *Storage) ListAllZoneEvents(now time.Time) ([]ZoneEvent, error) {
 	return events, nil
 }
 
+// ListOwnersForZones returns zone -> owner e-mails for the given zones in ONE
+// query. It exists for the events view: enriching each event with its owners
+// server-side is one bounded query here, where the alternative — the browser
+// asking per zone — is N requests that all end up in this table anyway.
+func (s *Storage) ListOwnersForZones(zones []string) (map[string][]string, error) {
+	owners := map[string][]string{}
+	if len(zones) == 0 {
+		return owners, nil
+	}
+	var rows []Zone
+	if err := s.db.Where("zone IN ?", zones).Order("username asc").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("storage.ListOwnersForZones: %w", err)
+	}
+	for _, r := range rows {
+		owners[r.Zone] = append(owners[r.Zone], r.Username)
+	}
+	return owners, nil
+}
+
 // DeleteExpiredZoneEvents removes events past their expiry. Called lazily on
 // ingest (the same pattern the token store uses): reads filter on the expiry
 // anyway, so cleanup needs no timer of its own.
