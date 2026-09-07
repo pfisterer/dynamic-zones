@@ -266,6 +266,18 @@ func applyZoneEvents(app *AppData, source string, events []zoneEventInput) (Zone
 		}
 		sum.Applied++
 	}
+
+	// The producer never reads the response body (the Alertmanager discards
+	// it), so the summary has to reach the log or a skipped event is
+	// undiagnosable — the first E2E test of this endpoint returned a clean
+	// 200 while silently applying nothing, and only the response said why.
+	if sum.Skipped > 0 {
+		app.Log.Warnf("zone-events: ingest from %s: applied=%d resolved=%d skipped=%d (%s)",
+			source, sum.Applied, sum.Resolved, sum.Skipped, strings.Join(sum.Reasons, "; "))
+	} else if sum.Applied > 0 || sum.Resolved > 0 {
+		app.Log.Infof("zone-events: ingest from %s: applied=%d resolved=%d",
+			source, sum.Applied, sum.Resolved)
+	}
 	return sum, nil
 }
 
