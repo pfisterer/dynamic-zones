@@ -70,12 +70,17 @@ type PolicyRule struct {
 // DelegationPolicy grants a user (or wildcard filter) the right to manage
 // PolicyRules whose ZoneSoa is at or below ZoneSuffix (zone + subdomains).
 // Managed by super-admins only.
+// The id, filter and timestamp are omitted when empty because non-admin
+// callers get a REDUCED copy (zone suffix + description only, see
+// DelegationsVisibleTo) — serializing their zero values would leak nothing,
+// but "id": 0 and a year-one timestamp in the payload invite clients to rely
+// on fields that are only real for super-admins.
 type DelegationPolicy struct {
-	ID               int64     `gorm:"primaryKey" json:"id"`
-	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter"`
+	ID               int64     `gorm:"primaryKey" json:"id,omitempty"`
+	TargetUserFilter string    `gorm:"type:varchar(255);not null" json:"target_user_filter,omitempty"`
 	ZoneSuffix       string    `gorm:"type:varchar(255);not null" json:"zone_suffix"`
 	Description      string    `gorm:"type:text;default:null" json:"description,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	CreatedAt        time.Time `json:"created_at,omitzero"`
 }
 
 type Storage struct {

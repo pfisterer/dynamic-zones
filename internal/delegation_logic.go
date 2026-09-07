@@ -19,6 +19,29 @@ func (app *AppData) DelegationGetAll() ([]DelegationPolicy, error) {
 	return app.Storage.DelegationGetAll()
 }
 
+// DelegationsVisibleTo returns the delegations the caller may see. Super-admins
+// get the full list (their management view). Everyone else gets only the
+// delegations whose target filter matches them — reduced to zone suffix and
+// description, because the filter pattern and the id are admin data: the
+// caller needs to know WHAT was delegated to them, not how the admin
+// expressed the audience.
+func (app *AppData) DelegationsVisibleTo(user *UserClaims) ([]DelegationPolicy, error) {
+	all, err := app.Storage.DelegationGetAll()
+	if err != nil {
+		return nil, err
+	}
+	if isSuperAdmin(app, user) {
+		return all, nil
+	}
+	visible := []DelegationPolicy{}
+	for _, d := range all {
+		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok {
+			visible = append(visible, DelegationPolicy{ZoneSuffix: d.ZoneSuffix, Description: d.Description})
+		}
+	}
+	return visible, nil
+}
+
 func (app *AppData) DelegationCreate(req DelegationPolicyRequest) (*DelegationPolicy, error) {
 	if err := validateUserFilter(req.TargetUserFilter); err != nil {
 		return nil, err

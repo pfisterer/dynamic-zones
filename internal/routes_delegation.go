@@ -26,11 +26,10 @@ type StatusResponse struct {
 
 // listDelegations lists all delegation policies.
 // @Summary List delegation policies
-// @Description List every delegation policy. Super-admins only.
+// @Description List the delegation policies visible to the caller. Super-admins get every delegation including the target user filter; other callers get only the delegations that apply to them, reduced to zone suffix and description.
 // @Tags policies
 // @Produce json
 // @Success 200 {object} DelegationsResponse "List of delegation policies"
-// @Failure 403 {object} ErrorResponse "Caller is not a super admin"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security ApiKeyAuth
 // @ID listDelegations
@@ -38,11 +37,7 @@ type StatusResponse struct {
 func listDelegations(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": errNotSuperAdmin})
-			return
-		}
-		delegations, err := app.DelegationGetAll()
+		delegations, err := app.DelegationsVisibleTo(user)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve delegations"})
 			return
