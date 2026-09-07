@@ -133,7 +133,7 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetMaxIdleConns(5)
 
-	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{})
+	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{}, &ZoneEvent{})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to auto-migrate database: %w", err)
 	}

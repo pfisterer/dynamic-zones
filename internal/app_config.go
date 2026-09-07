@@ -151,6 +151,7 @@ type AppConfig struct {
 	WebServer       WebServerConfig         `json:"webserver_config"`
 	ZoneDefaults    ZoneDefaults            `json:"zone_defaults"`
 	DnsPolicyConfig DnsPolicyConfig         `json:"dns_policy_config"`
+	ZoneEvents      ZoneEventsConfig        `json:"zone_events_config"`
 	// Path to the initial data script file (JavaScript) to run on startup
 	InitialDataScriptPath string `json:"initial_data_script_path,omitempty"`
 	// Flag indicating if the application is running in development mode
@@ -224,6 +225,16 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		},
 		DnsPolicyConfig: DnsPolicyConfig{
 			SuperAdminEmails: envconf.StringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, strings.ToLower),
+		},
+		ZoneEvents: ZoneEventsConfig{
+			IngestSubject: envconf.String("ZONE_EVENTS_INGEST_SUBJECT", "alertmanager@platform"),
+			IngestToken:   envconf.String("ZONE_EVENTS_INGEST_TOKEN", ""),
+			// Class names are alert names, so the case is preserved (unlike the
+			// super-admin e-mails above).
+			AllowedClasses: envconf.StringSet("ZONE_EVENTS_ALLOWED_CLASSES", map[string]struct{}{"DnsClientMisconfig": {}}),
+			// Must comfortably exceed the Alertmanager's repeat_interval (12h in
+			// this deployment), or events flap out of the UI between refreshes.
+			TTLHours: envconf.Int("ZONE_EVENTS_TTL_HOURS", 24),
 		},
 
 		InitialDataScriptPath: envconf.String("INITIAL_DATA_SCRIPT_PATH", ""),

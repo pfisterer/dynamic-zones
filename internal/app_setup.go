@@ -76,6 +76,12 @@ func RunApplication() {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
+	// Make the token store match the configured zone-events ingest credential
+	// (provisions, rotates or revokes it — see ReconcileZoneEventsIngestToken).
+	if err := ReconcileZoneEventsIngestToken(db, appConfig.ZoneEvents); err != nil {
+		log.Fatalf("Failed to reconcile the zone-events ingest token: %v", err)
+	}
+
 	// Prepare application data
 	appData := AppData{
 		Config:   appConfig,
@@ -184,6 +190,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
 	CreatePolicyApiGroup(apiV1Group, app)
+	CreateZoneEventsApiGroup(apiV1Group, app)
 
 	// The MCP endpoint: same authentication as /v1, deliberately WITHOUT
 	// RejectWritesForReadOnlyTokens. Every MCP call is a POST, so the method
@@ -211,6 +218,7 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 		appConfig.PowerDns.PdnsApiKey = redact.Secret(appConfig.PowerDns.PdnsApiKey)
 		appConfig.ZoneDefaults.DefaultAdminTsigKey = redact.Secret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
 		appConfig.Storage.DbConnectionString = redact.ConnString(appConfig.Storage.DbConnectionString)
+		appConfig.ZoneEvents.IngestToken = redact.Secret(appConfig.ZoneEvents.IngestToken)
 		// In production mode, we use a compact JSON format without indentation
 		appConfigJson, err = json.Marshal(appConfig)
 	}

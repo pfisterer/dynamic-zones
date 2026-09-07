@@ -159,6 +159,19 @@ spec:
               value: {{ .Values.dynamicZonesAPI.zoneDefaults.defaultAdminTsigAlg | quote }}
             {{- end }}
 
+            # Zone events: the ingest credential for the monitoring side
+            # (Alertmanager webhook). Startup-provisioned into the token store
+            # by the service; absent/empty disables ingest. `optional`, like
+            # os-mgt-api's openstack-password: both environments point at an
+            # existingSecret that predates this key, and a required key would
+            # wedge the pods on the next rollout.
+            - name: ZONE_EVENTS_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: zone-events-ingest-token
+                  optional: true
+
             # Database Connection
             - name: DB_TYPE
               value: {{ .Values.dynamicZonesAPI.database.type | quote }}
