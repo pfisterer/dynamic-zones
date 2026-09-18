@@ -114,7 +114,6 @@ type CreateTokenRequest struct {
 func ttlPolicy(cfg WebServerConfig) token.TTLPolicy {
 	return token.TTLPolicy{
 		Default:    time.Duration(cfg.ApiTokenTTLHours) * time.Hour,
-		Max:        time.Duration(cfg.ApiTokenMaxTTLHours) * time.Hour,
 		AllowNever: cfg.ApiTokenAllowNeverExpires,
 	}
 }
