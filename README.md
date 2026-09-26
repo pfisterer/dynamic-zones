@@ -158,6 +158,7 @@ All configuration is environment variables. A `.env` file in the working directo
 | `DB_CONNECTION_STRING` | in-memory SQLite | DSN for the chosen backend |
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated origins for the browser client |
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` | — | Bearer-token verification (required) |
+| `OIDC_JWKS_URL` | — | The provider's key set (`…/protocol/openid-connect/certs` on Keycloak). Set it and startup asks the provider nothing, so an identity provider that is down cannot keep this service from starting; empty discovers the address from the issuer, which needs the provider to answer right then. A token that cannot be checked while the provider is away is answered 503, not 401 |
 | `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy |
 | `INITIAL_DATA_SCRIPT_PATH` | — | JS file that seeds rules/zones on first start |
 | `EXTERNAL_DNS_IMAGE_VERSION` | `v0.19.0` | external-dns image version used in the generated external-dns manifest (a request can override it with `image-version`) |

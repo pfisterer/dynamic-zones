@@ -15,7 +15,7 @@ require (
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/pfisterer/cloud-self-service-golib v0.7.0
+	github.com/pfisterer/cloud-self-service-golib v0.8.0
 	github.com/stretchr/testify v1.12.1
 	github.com/swaggo/swag v1.16.6
 	go.uber.org/zap v1.28.0

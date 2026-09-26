@@ -23,6 +23,18 @@ type AppData struct {
 	PowerDns *PowerDnsClient
 	Logger   *zap.Logger
 	Log      *zap.SugaredLogger
+
+	// oidcVerifier is set once the web server is built; config.json asks it
+	// whether the identity provider is answering, which is a state that changes
+	// while the process runs.
+	oidcVerifier *OIDCAuthVerifier
+}
+
+// SignInAvailable reports whether a new sign-in can currently work. True before
+// anything has been verified: a provider nobody has asked anything of is not
+// known to be broken.
+func (app *AppData) SignInAvailable() bool {
+	return app == nil || !app.oidcVerifier.KeysUnavailable()
 }
 
 func CreateAppLogger(appConfig AppConfig) (*zap.Logger, *zap.SugaredLogger) {
@@ -151,12 +163,14 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	oidcConfig := OIDCVerifierConfig{
 		IssuerURL: app.Config.WebServer.OIDCIssuerURL,
 		ClientID:  app.Config.WebServer.OIDCClientID,
+		JWKSURL:   app.Config.WebServer.OIDCJWKSURL,
 	}
 
 	oidcAuthVerifier, err := NewOIDCAuthVerifier(oidcConfig, app.Log)
 	if err != nil {
 		app.Log.Fatalf("Failed to initialize OIDCAuthVerifier: %v", err)
 	}
+	app.oidcVerifier = oidcAuthVerifier
 
 	// Create static file server
 	homeGroup := router.Group("/")

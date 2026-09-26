@@ -40,6 +40,10 @@ func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 				"auth_provider": "oidc",
 				"issuer_url":    app.Config.WebServer.OIDCIssuerURL,
 				"client_id":     app.Config.WebServer.OIDCClientID,
+				// False while the identity provider cannot be reached. Sessions
+				// that already exist keep working; what fails is signing in, and
+				// the UI says so rather than offering a login that cannot work.
+				"sign_in_available": app.SignInAvailable(),
 			},
 		})
 	})

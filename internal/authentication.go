@@ -1,16 +1,14 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
-	"github.com/coreos/go-oidc"
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/authn"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
+	"github.com/pfisterer/cloud-self-service-golib/oidcauth"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"go.uber.org/zap"
 )
@@ -30,44 +28,32 @@ const UserDataKey = "__api_userData"
 // the shared module; this name stays because the call sites read well with it.
 type UserClaims = authn.Claims
 
-// OIDCVerifierConfig holds the minimal configuration for OIDC token verification.
-type OIDCVerifierConfig struct {
-	IssuerURL string
-	ClientID  string
-}
+// OIDCVerifierConfig holds the minimal configuration for OIDC token
+// verification. JWKSURL is what keeps an identity provider that is down from
+// taking this service with it — see the oidcauth package for the whole story.
+type OIDCVerifierConfig = oidcauth.Config
 
 // OIDCAuthVerifier manages the OIDC token verification process.
 type OIDCAuthVerifier struct {
-	Config   OIDCVerifierConfig
-	Verifier *oidc.IDTokenVerifier
+	Verifier *oidcauth.Verifier
 	Logger   *zap.SugaredLogger
 }
 
-// NewOIDCAuthVerifier initializes a new OIDCAuthVerifier.
-// It sets up the ID token verifier using the issuer URL and client ID.
+// NewOIDCAuthVerifier initializes a new OIDCAuthVerifier. With a key set
+// configured this makes no network call, so the provider being away is a state
+// this service can report rather than a reason to die.
 func NewOIDCAuthVerifier(cfg OIDCVerifierConfig, log *zap.SugaredLogger) (*OIDCAuthVerifier, error) {
-	ctx := context.Background()
-	// Discover the OIDC provider's configuration from the issuer URL
-	// This fetches the JWKS endpoint and other metadata needed for verification.
-	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
+	verifier, err := oidcauth.New(cfg, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OIDC provider for issuer '%s': %w", cfg.IssuerURL, err)
+		return nil, err
 	}
+	return &OIDCAuthVerifier{Verifier: verifier, Logger: log}, nil
+}
 
-	// Configure the ID token verifier.
-	// The ClientID here acts as the expected audience (aud claim) for the token.
-	oidcConfig := &oidc.Config{
-		ClientID: cfg.ClientID,
-		// If you have multiple audiences, you can specify them here:
-		// ExpectedAudience: []string{"your-api-audience", "another-audience"},
-	}
-	verifier := provider.Verifier(oidcConfig)
-
-	return &OIDCAuthVerifier{
-		Config:   cfg,
-		Verifier: verifier,
-		Logger:   log,
-	}, nil
+// KeysUnavailable reports whether the identity provider is currently
+// unreachable, for the status the UI shows.
+func (m *OIDCAuthVerifier) KeysUnavailable() bool {
+	return m != nil && m.Verifier.KeysUnavailable()
 }
 
 // BearerTokenAuthMiddleware is a Gin middleware to verify OIDC bearer tokens.
@@ -95,27 +81,21 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		ctx := context.Background()
-		// Verify the ID token's signature, issuer, audience, and expiry
-		idToken, err := m.Verifier.Verify(ctx, rawIDToken)
+		claims, err := m.Verifier.Verify(c.Request.Context(), rawIDToken)
 		if err != nil {
+			// A token nobody can judge right now is not a rejected token. 401
+			// would tell the browser to drop its session and sign in again,
+			// which is impossible while the provider is away — the user would
+			// loop through a login that cannot finish and read it as our fault.
+			if errors.Is(err, oidcauth.ErrKeysUnavailable) {
+				m.Logger.Warnw("cannot verify tokens: the identity provider is unreachable", "error", err)
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+					"error": "sign-in is temporarily unavailable: the identity provider cannot be reached",
+				})
+				return
+			}
 			m.Logger.Warnf("Failed to verify ID token from Authorization header: %v. Denying access.", err)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Invalid or expired token: %v", err)})
-			return
-		}
-
-		// Optional: Explicitly check for token expiry, though oidc.Verifier usually handles this.
-		if idToken.Expiry.Before(time.Now()) {
-			m.Logger.Warnf("ID token expired for user '%s'. Denying access.", idToken.Subject)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
-			return
-		}
-
-		// Extract claims from the verified ID token
-		var claims UserClaims
-		if err := idToken.Claims(&claims); err != nil {
-			m.Logger.Errorf("Failed to parse ID token claims: %v. Denying access.", err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user claims from token."})
 			return
 		}
 
@@ -131,7 +111,7 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 		// 260 accounts in `dhbw-main`, zero with an `email` differing from the
 		// username, zero without an address at all (2026-08-26). Everything now
 		// reads Claims.Identity() and there is nothing left to compare.
-		c.Set(UserDataKey, &claims)
+		c.Set(UserDataKey, claims)
 
 		c.Next() // Continue to the next handler in the chain
 	}

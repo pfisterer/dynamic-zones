@@ -134,6 +134,10 @@ spec:
               value: {{ .Values.auth.oidc.issuerUrl | quote }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.auth.oidc.clientId | quote }}
+            {{- with .Values.auth.oidc.jwksUrl }}
+            - name: OIDC_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
 
             # Zone Settings
             {{- if .Values.dynamicZonesAPI.zoneDefaults.defaultRecords }}

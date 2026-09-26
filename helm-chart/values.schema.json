@@ -110,7 +110,8 @@
           "required": ["issuerUrl", "clientId"],
           "properties": {
             "issuerUrl": { "type": "string", "minLength": 1 },
-            "clientId": { "type": "string", "minLength": 1 }
+            "clientId": { "type": "string", "minLength": 1 },
+            "jwksUrl": { "type": "string" }
           }
         }
       }

@@ -86,6 +86,16 @@ type WebServerConfig struct {
 	OIDCIssuerURL string `json:"oidc_issuer_url" validate:"required,url"`
 	// The OIDC client ID for authentication
 	OIDCClientID string `json:"oidc_client_id" validate:"required"`
+	// OIDCJWKSURL is the provider's key set, e.g.
+	// https://sso.example/realms/x/protocol/openid-connect/certs.
+	//
+	// Set it and this service starts without asking the provider anything: the
+	// keys are fetched when the first token needs checking and cached after
+	// that. Empty means the address is discovered from the issuer at startup,
+	// which requires the provider to be up in that second — on 2026-09-25 a
+	// Keycloak outage during a power cut therefore kept every restarting pod
+	// down long after our own cluster was healthy.
+	OIDCJWKSURL string `json:"oidc_jwks_url"`
 	// The bind string for the Gin web server (e.g., ":8082")
 	GinBindString string `json:"gin_bind_string" validate:"required"`
 	// The base URL for the web server (e.g., "http://localhost:8082")
@@ -191,6 +201,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			ApiTokenAllowNeverExpires: envconf.Bool("API_TOKEN_ALLOW_NEVER_EXPIRES", false),
 			OIDCIssuerURL:             envconf.String("OIDC_ISSUER_URL", ""),
 			OIDCClientID:              envconf.String("OIDC_CLIENT_ID", ""),
+			OIDCJWKSURL:               envconf.String("OIDC_JWKS_URL", ""),
 			GinBindString:             envconf.String("API_BIND", ":8082"),
 			WebserverBaseUrl:          envconf.String("API_BASE_URL", "http://localhost:8082"),
 			ExternalDnsVersion:        envconf.String("EXTERNAL_DNS_IMAGE_VERSION", "v0.19.0"),
