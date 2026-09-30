@@ -3,7 +3,6 @@ module github.com/pfisterer/dynamic-zones
 go 1.26.0
 
 require (
-	github.com/coreos/go-oidc v2.5.0+incompatible
 	github.com/dop251/goja v0.0.0-20260906210903-70ad66ec7ce4
 	github.com/gin-contrib/cors v1.7.8
 	github.com/gin-contrib/zap v1.1.8
@@ -15,7 +14,7 @@ require (
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/pfisterer/cloud-self-service-golib v0.8.0
+	github.com/pfisterer/cloud-self-service-golib v0.9.0
 	github.com/stretchr/testify v1.12.1
 	github.com/swaggo/swag v1.16.6
 	go.uber.org/zap v1.28.0
@@ -36,6 +35,7 @@ require (
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
+	github.com/coreos/go-oidc v2.5.0+incompatible // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.7.2 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
