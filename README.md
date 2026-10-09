@@ -103,7 +103,7 @@ Both are part of the public `/v1` surface, so being logged in is not enough: onl
 
 ## Running it locally
 
-**Prerequisites:** Go 1.26+ ([swag](https://github.com/swaggo/swag) is installed by `make` when missing), a reachable PowerDNS with its API enabled, a reachable OIDC issuer (startup fetches its discovery document, in development mode too), and optionally [air](https://github.com/air-verse/air) for live reload. Node.js is only needed to build the npm client package, Docker only for the tests.
+**Prerequisites:** Go 1.26+ ([swag](https://github.com/swaggo/swag) is installed by `make` when missing), a reachable PowerDNS with its API enabled, a reachable OIDC issuer (unless `OIDC_JWKS_URL` is set, startup fetches its discovery document, in development mode too), and optionally [air](https://github.com/air-verse/air) for live reload. Node.js is only needed to build the npm client package, Docker only for the tests.
 
 A minimal PowerDNS for development (SQLite backend, API on 8080, DNS on 53 — published on 15353 when run in a container, which is what the defaults below expect):
 
@@ -135,9 +135,7 @@ A fresh clone does not compile until `make bundle` (or `make all`) has generated
 
 `API_MODE=development` **bypasses authentication**: the caller asserts an identity
 with the `X-Dummy-Auth-User` header. That is the whole login in development — and
-the reason `API_MODE` must be `production` everywhere else. A production
-deployment that accidentally ran in development mode showed empty zone and policy
-lists, because every request was a different, unknown user.
+the reason `API_MODE` must be `production` everywhere else.
 
 A `run-development.sh` in the workspace that holds the sibling repositories (not part of this repository) starts PowerDNS, this API, the role-provider, the OpenStack management API and the web UI together.
 
