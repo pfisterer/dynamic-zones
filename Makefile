@@ -19,7 +19,7 @@ DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build clean doc convert client bundle npm-package npm-pack npm-publish check swag run help install-npm docker docker-login docker-build multi-arch-build dev helm-update bump version-check
+.PHONY: publish all build clean doc convert client bundle npm-package npm-pack npm-publish check swag run help install-npm docker docker-login docker-build multi-arch-build dev helm-update bump version-check
 
 all: bundle build
 
@@ -83,7 +83,7 @@ bundle: generate-swagger-json
 build: check-modules
 	@echo "🔨 Building Go binary..."
 	@mkdir -p $(BUILD_DIR)
-	@set -e; CGO_ENABLED=1 go build -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)/main.go
+	@set -e; CGO_ENABLED=1 $${BUILD_GO:-go} build -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)/main.go
 	@echo "✅ Go binary built (./$(BUILD_DIR)/$(BINARY_NAME))"
 
 # ── npm client package ──────────────────────────────────────────────────────
@@ -257,3 +257,15 @@ help:
 	@echo "  docker-run              → Run Docker container"
 	@echo "  docker-multi-arch-build → Build and push multi-architecture Docker image (requires buildx & Docker login)"
 	@echo "  helm-update             → Update Helm chart"
+
+# make publish — release from this machine instead of waiting for CI, for test and stable versions alike: runs the checks, builds the image for the cluster (linux/amd64; the build stage runs natively and cross-compiles, see the Dockerfile), pushes it and the Helm chart to GHCR, and only then pushes the commits. CI then finds the version published and just verifies that it builds; tags and GitHub releases of stable versions stay with CI. Refuses a dirty tree and a version that is already published, so what is in the registry is always exactly one commit. Needs `docker login ghcr.io` and `helm registry login ghcr.io` with a token that may write packages.
+publish: version-check test
+	@test -z "$$(git status --porcelain)" || { echo "✗ uncommitted changes — commit first"; exit 1; }
+	@set -e; V=$$(tr -d '\n' < VERSION); I=ghcr.io/pfisterer/dynamic-zones; \
+	if docker buildx imagetools inspect "$$I:$$V" >/dev/null 2>&1; then echo "✗ $$I:$$V is already published — bump the version first"; exit 1; fi; \
+	echo "🏗️  $$I:$$V (linux/amd64)"; \
+	docker buildx build --platform linux/amd64 --tag "$$I:$$V" --tag "$$I:latest" --push .; \
+	rm -rf tmp/chart && mkdir -p tmp/chart && helm package helm-chart/ --destination tmp/chart >/dev/null; \
+	helm push tmp/chart/*.tgz oci://ghcr.io/pfisterer/charts; \
+	git push; \
+	echo "✅ $$I:$$V and its chart are published, commits pushed — CI only verifies"

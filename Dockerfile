@@ -1,8 +1,13 @@
 ## Stage 1: Builder image
-FROM golang:1-alpine AS builder
+# The build stage runs on the machine that builds (BUILDPLATFORM) and cross-compiles for the target: on an arm64 Mac that is native speed instead of emulation. The SQLite driver needs cgo, so the C side is cross-compiled too, with tonistiigi/xx (xx-go sets GOOS, GOARCH and a clang for the target; xx-apk installs the target's libraries).
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1 AS xx
+FROM --platform=$BUILDPLATFORM golang:1-alpine AS builder
+COPY --from=xx / /
+ARG TARGETPLATFORM
 
-# Install git, nodejs, npm, and make using Alpine's apk package manager
-RUN apk add --no-cache git nodejs npm make build-base sqlite-dev
+# Tools for the build machine; gcc, musl and SQLite for the target
+RUN apk add --no-cache git nodejs npm make clang lld
+RUN xx-apk add --no-cache gcc musl-dev sqlite-dev
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -21,7 +26,7 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
 # Build the application
-RUN make all
+RUN BUILD_GO=xx-go make all && xx-verify tmp/build/dynamic-zones
 
 ## Stage 2: Production image
 FROM alpine:latest AS final
