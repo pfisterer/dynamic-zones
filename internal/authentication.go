@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/authn"
@@ -14,6 +15,50 @@ import (
 )
 
 const UserDataKey = "__api_userData"
+
+// actorKey holds the signed-in admin while a request acts on somebody's behalf; UserDataKey then holds that somebody.
+const actorKey = "__api_actor"
+
+// viaAPITokenKey marks a request authenticated with an API token rather than a sign-in.
+const viaAPITokenKey = "__api_viaAPIToken"
+
+// ActorOf is the signed-in admin acting on behalf of the request's user, or "" when the user acts themself.
+func ActorOf(c *gin.Context) string { return c.GetString(actorKey) }
+
+// ActAsMiddleware lets a super admin act on behalf of another person, e.g. for a ticket: with X-Act-As the request's user (UserDataKey) becomes that person — their zones, their policies, their %u — and is no super admin unless they are one. Every service of the platform reads the same header and checks it against its own admins. Refused rather than ignored for anybody else, and for API tokens: acting on behalf is for people signed in. Must run after CombinedAuthMiddleware.
+func ActAsMiddleware(superAdmins map[string]struct{}, log *zap.SugaredLogger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader(authn.ActAsHeader)
+		v, ok := c.Get(UserDataKey)
+		if header == "" || !ok {
+			c.Next()
+			return
+		}
+		if c.GetBool(viaAPITokenKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": authn.ErrActAsNeedsSignIn.Error()})
+			return
+		}
+		actor := v.(*UserClaims).Identity()
+		_, may := superAdmins[strings.ToLower(actor)]
+		target, err := authn.ActAs(header, actor, may)
+		if err != nil {
+			status := http.StatusForbidden
+			if errors.Is(err, authn.ErrActAsInvalid) {
+				status = http.StatusBadRequest
+			}
+			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		if target != actor {
+			if authn.IsWrite(c.Request.Method) {
+				log.Infow("acting on behalf", "actor", actor, "as", target, "method", c.Request.Method, "path", c.Request.URL.Path)
+			}
+			c.Set(UserDataKey, &UserClaims{Email: target})
+			c.Set(actorKey, actor)
+		}
+		c.Next()
+	}
+}
 
 // The read-only-token rule (recording the flag, reading it, and refusing writes
 // for it) lives in cloud-self-service-golib/ginweb, shared with the other
@@ -117,7 +162,8 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devMode bool) gin.HandlerFunc {
+// devUser is who a request without a bearer is; "" outside development mode.
+func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devUser string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -128,18 +174,15 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			return
 		}
 
-		// Dev-only: trust the X-Dummy-Auth-User header so the self-service UI's
-		// dummy-auth mode works for local development. This bypasses token
-		// verification entirely, so it is gated on devMode and is NEVER active
-		// in production (devMode is false there).
-		if devMode {
-			if dummyUser := c.GetHeader("X-Dummy-Auth-User"); dummyUser != "" {
-				log.Warnf("DEV MODE: trusting X-Dummy-Auth-User '%s' without token verification", dummyUser)
-				c.Set(UserDataKey, &UserClaims{Email: dummyUser})
-				ginweb.SetReadOnly(c, false)
-				c.Next()
-				return
-			}
+		// Dev-only: a request without a bearer is the dev user (DEV_AUTH_USER),
+		// nothing is verified; other people are reached with X-Act-As, as in
+		// production. Gated on devMode and NEVER active in production (devMode
+		// is false there).
+		if devUser != "" && c.GetHeader("Authorization") == "" {
+			c.Set(UserDataKey, &UserClaims{Email: devUser})
+			ginweb.SetReadOnly(c, false)
+			c.Next()
+			return
 		}
 
 		// Get the Authorization header
@@ -177,6 +220,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			// can read that off the HTTP method (see
 			// RejectWritesForReadOnlyTokens).
 			ginweb.SetReadOnly(c, rec.ReadOnly)
+			c.Set(viaAPITokenKey, true)
 
 			// One field, because there is one identity. The token was issued
 			// under this subject (see tokenSubject) and Identity() reads Email

@@ -161,6 +161,16 @@ type AppConfig struct {
 	InitialDataScriptPath string `json:"initial_data_script_path,omitempty"`
 	// Flag indicating if the application is running in development mode
 	DevMode bool `json:"dev_mode"`
+	// DevAuthUser is who a request without a bearer is in development mode (DEV_AUTH_USER); other people are reached with X-Act-As.
+	DevAuthUser string `json:"dev_auth_user,omitempty"`
+}
+
+// devUser is the development sign-in, "" outside development mode.
+func (c AppConfig) devUser() string {
+	if !c.DevMode {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(c.DevAuthUser))
 }
 
 func GetAppConfigFromEnvironment() (AppConfig, error) {
@@ -244,6 +254,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 
 		InitialDataScriptPath: envconf.String("INITIAL_DATA_SCRIPT_PATH", ""),
 		DevMode:               envconf.String("API_MODE", "production") == "development",
+		DevAuthUser:           envconf.String("DEV_AUTH_USER", "root.admin@uni.example"),
 	}
 
 	//Validate the configuration

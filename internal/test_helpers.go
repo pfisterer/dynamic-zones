@@ -43,11 +43,9 @@ func GetBaseURLForTests() string {
 
 // DoRequestForTests performs an AUTHENTICATED request against the test server.
 //
-// Every /v1 route is behind authentication, and in development mode the API
-// trusts the X-Dummy-Auth-User header instead of verifying a bearer token.
-// Without it the answer is 401 — which a test that unmarshals the body into
-// its expected response type reads as "empty result", failing on a value
-// comparison while the real cause (not authenticated) goes unmentioned.
+// Every /v1 route is behind authentication; in development mode a request
+// without a bearer is the dev user, which SetupEnvironmentForTests makes the
+// test user (DEV_AUTH_USER).
 func DoRequestForTests(t *testing.T, method, path string, body io.Reader) (*http.Response, error) {
 	t.Helper()
 
@@ -55,7 +53,6 @@ func DoRequestForTests(t *testing.T, method, path string, body io.Reader) (*http
 	if err != nil {
 		return nil, fmt.Errorf("app.DoRequestForTests: building %s %s: %w", method, path, err)
 	}
-	req.Header.Set("X-Dummy-Auth-User", expectedUserName)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -80,6 +77,7 @@ func SetupEnvironmentForTests(t *testing.T) {
 	// godotenv.Overload — but it sets the same development values, and on a
 	// machine without one (CI) these apply.
 	t.Setenv("API_MODE", "development")
+	t.Setenv("DEV_AUTH_USER", expectedUserName)
 	t.Setenv("DB_TYPE", "sqlite")
 	t.Setenv("DB_CONNECTION_STRING", "file::memory:?cache=shared")
 

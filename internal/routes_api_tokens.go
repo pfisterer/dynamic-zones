@@ -81,8 +81,13 @@ func toAPIToken(rec token.Record) Token {
 // It used to read preferred_username deliberately, while policy rules matched on
 // the e-mail. On the 260 accounts in this realm the two strings are identical, so
 // the change moves nothing on disk.
-func tokenSubject(user *UserClaims) string {
-	return user.Identity()
+//
+// While an admin acts on somebody's behalf (X-Act-As) it is the ADMIN: acting for somebody for a while must not turn into a permanent credential in their name — the same rule as in openstack-management-api.
+func tokenSubject(c *gin.Context) string {
+	if actor := ActorOf(c); actor != "" {
+		return actor
+	}
+	return c.MustGet(UserDataKey).(*UserClaims).Identity()
 }
 
 // TokensResponse represents a list of tokens returned by GET /tokens
@@ -130,7 +135,7 @@ func ttlPolicy(cfg WebServerConfig) token.TTLPolicy {
 // @Router /v1/tokens/ [get]
 func getTokens(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		subject := tokenSubject(c.MustGet(UserDataKey).(*UserClaims))
+		subject := tokenSubject(c)
 
 		records, err := app.Storage.Tokens.List(c.Request.Context(), subject)
 		if err != nil {
@@ -166,7 +171,7 @@ func getTokens(app *AppData) gin.HandlerFunc {
 // @Router /v1/tokens/ [post]
 func createToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		subject := tokenSubject(c.MustGet(UserDataKey).(*UserClaims))
+		subject := tokenSubject(c)
 
 		var input CreateTokenRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -228,7 +233,7 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		subject := tokenSubject(c.MustGet(UserDataKey).(*UserClaims))
+		subject := tokenSubject(c)
 
 		err = app.Storage.Tokens.Revoke(c.Request.Context(), subject, uint(id))
 		switch {

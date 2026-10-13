@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/joho/godotenv"
+	"github.com/pfisterer/cloud-self-service-golib/authn"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/logging"
 	"github.com/pfisterer/cloud-self-service-golib/redact"
@@ -191,15 +192,17 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	ginweb.EnableCORS(apiV1Group, ginweb.CORSOptions{
 		AllowedOrigins: app.Config.WebServer.CORSAllowedOrigins,
 		DevMode:        app.Config.DevMode,
-		AllowHeaders:   []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", "X-Dummy-Auth-User"},
+		AllowHeaders:   []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", authn.ActAsHeader},
 		Log:            app.Log,
 	})
-	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
+	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser()))
+	apiV1Group.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
 
 	// The read-only rule for REST, mounted here rather than inside the auth
 	// middleware: "anything but GET is a write" is true of these routes and of
 	// nothing else, so it belongs to the group it describes.
 	apiV1Group.Use(ginweb.RejectWritesForReadOnlyTokens(app.Log))
+	CreateMeRoute(apiV1Group, app)
 	CreateApiV1Zones(apiV1Group, app)
 	CreateTokensApiGroup(apiV1Group, app)
 	CreateRfc2136ClientApiGroup(apiV1Group, app)
@@ -211,7 +214,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// cannot say whether an operation writes — the tool does, and mcp.go checks
 	// it there. No CORS: this is for an MCP client, not a browser.
 	mcpGroup := router.Group("/mcp")
-	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.DevMode))
+	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser()))
+	mcpGroup.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
 	RegisterMCPRoutes(mcpGroup, app)
 
 	return router

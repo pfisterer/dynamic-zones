@@ -133,9 +133,9 @@ A fresh clone does not compile until `make bundle` (or `make all`) has generated
 
 `make test` runs integration tests: they start a PowerDNS container and the real application on `:8082`, so a running development server makes them fail with "address already in use", and they need the same OIDC and upstream variables.
 
-`API_MODE=development` **bypasses authentication**: the caller asserts an identity
-with the `X-Dummy-Auth-User` header. That is the whole login in development — and
-the reason `API_MODE` must be `production` everywhere else.
+`API_MODE=development` **bypasses authentication**: a request without a bearer is the dev user `DEV_AUTH_USER` (default `root.admin@uni.example`). That is the whole login in development — and the reason `API_MODE` must be `production` everywhere else. Other people are reached as in production, with `X-Act-As` (below), so the dev user should be a super admin.
+
+A super admin (`DNS_POLICY_SUPERADMIN_EMAILS`) may act on behalf of another person, e.g. for a ticket, by sending `X-Act-As: <email>` — the header every service of the platform reads, each checking it against its own admins. The request then is that person's: their zones, their policy rules, their `%u`, and no super-admin rights unless they have them. Writes are logged with both. Not for API tokens (403), and API tokens created meanwhile still belong to the admin. `GET /v1/me` reports `may_act_as` and `acting_as`.
 
 A `run-development.sh` in the workspace that holds the sibling repositories (not part of this repository) starts PowerDNS, this API, the role-provider, the OpenStack management API and the web UI together.
 
