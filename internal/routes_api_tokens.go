@@ -82,11 +82,8 @@ func toAPIToken(rec token.Record) Token {
 // the e-mail. On the 260 accounts in this realm the two strings are identical, so
 // the change moves nothing on disk.
 //
-// While an admin acts on somebody's behalf (X-Act-As) it is the ADMIN: acting for somebody for a while must not turn into a permanent credential in their name — the same rule as in openstack-management-api.
+// While a super admin acts on somebody's behalf (X-Act-As) it is that somebody: managing a person's tokens for a ticket is one of the reasons to act on their behalf, the same rule as in openstack-management-api.
 func tokenSubject(c *gin.Context) string {
-	if actor := ActorOf(c); actor != "" {
-		return actor
-	}
 	return c.MustGet(UserDataKey).(*UserClaims).Identity()
 }
 
