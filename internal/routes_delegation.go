@@ -203,7 +203,10 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can delete orphaned zones"})
 			return
 		}
-		zoneName := c.Param("zone")
+		zoneName, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		z, err := app.Storage.GetZoneByName(zoneName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to look up zone"})

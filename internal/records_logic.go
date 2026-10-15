@@ -74,11 +74,6 @@ func MessageOf(err error) string {
 	return "internal error"
 }
 
-// normalizeZone trims a zone name to the form the ownership table stores.
-func normalizeZone(zone string) string {
-	return strings.TrimSuffix(strings.TrimSpace(zone), ".")
-}
-
 // requireZoneOwnership refuses to act on a zone the caller does not own.
 //
 // The TSIG key in a REST request is what PowerDNS checks, so these endpoints
@@ -86,9 +81,9 @@ func normalizeZone(zone string) string {
 // RFC2136 relay that any logged-in user could point at any zone. Ownership is
 // the same rule the zone endpoints apply, so nothing legitimate changes.
 func (app *AppData) requireZoneOwnership(username, zone string) (string, error) {
-	name := normalizeZone(zone)
-	if name == "" {
-		return "", statusErr(http.StatusBadRequest, "zone is required", nil)
+	name, err := canonicalZoneName(zone)
+	if err != nil {
+		return "", statusErr(http.StatusBadRequest, err.Error(), nil)
 	}
 	isOwner, err := app.Storage.IsZoneOwner(username, name)
 	if err != nil {

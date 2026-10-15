@@ -43,7 +43,7 @@ func readOnlyFixture(t *testing.T, useRESTRule bool) (http.Handler, string, stri
 	g := r.Group("/v1")
 	// No OIDC verifier: every request here carries an API token, and the OIDC
 	// branch is not what this is about.
-	g.Use(CombinedAuthMiddleware(nil, store, log, ""))
+	g.Use(CombinedAuthMiddleware(nil, store, log, "", ""))
 	if useRESTRule {
 		g.Use(ginweb.RejectWritesForReadOnlyTokens(log))
 	}

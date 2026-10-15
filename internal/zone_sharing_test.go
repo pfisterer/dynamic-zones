@@ -21,7 +21,12 @@ func newTestApp(t *testing.T) *AppData {
 
 func addZone(t *testing.T, app *AppData, user, zone string) {
 	t.Helper()
-	if _, err := app.Storage.CreateZone(user, zone); err != nil {
+	// The first owner of a zone is its creator, every further row a co-owner.
+	exists, err := app.Storage.ZoneExists(zone)
+	if err != nil {
+		t.Fatalf("failed to check zone %s: %v", zone, err)
+	}
+	if _, err := app.Storage.CreateZone(user, zone, !exists); err != nil {
 		t.Fatalf("failed to create zone %s for %s: %v", zone, user, err)
 	}
 }

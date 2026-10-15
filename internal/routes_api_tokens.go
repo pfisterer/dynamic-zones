@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -116,8 +117,17 @@ type CreateTokenRequest struct {
 func ttlPolicy(cfg WebServerConfig) token.TTLPolicy {
 	return token.TTLPolicy{
 		Default:    time.Duration(cfg.ApiTokenTTLHours) * time.Hour,
+		Max:        time.Duration(cfg.ApiTokenMaxTTLHours) * time.Hour,
 		AllowNever: cfg.ApiTokenAllowNeverExpires,
 	}
+}
+
+// resolveTokenTTL turns the requested lifetime into a duration under the configured policy. The maximum is checked on the HOURS first: TTLPolicy.Resolve multiplies them into a time.Duration, and a large enough request (about 2.5 million hours) overflows int64 nanoseconds into a negative duration that passes its own maximum check.
+func resolveTokenTTL(cfg WebServerConfig, requestedHours int) (time.Duration, error) {
+	if cfg.ApiTokenMaxTTLHours > 0 && requestedHours > cfg.ApiTokenMaxTTLHours {
+		return 0, fmt.Errorf("%w: %d hours, maximum is %d", token.ErrTTLTooLong, requestedHours, cfg.ApiTokenMaxTTLHours)
+	}
+	return ttlPolicy(cfg).Resolve(requestedHours)
 }
 
 // getTokens retrieves all tokens for the authenticated user
@@ -176,7 +186,7 @@ func createToken(app *AppData) gin.HandlerFunc {
 			return
 		}
 
-		ttl, err := ttlPolicy(app.Config.WebServer).Resolve(input.TTLHours)
+		ttl, err := resolveTokenTTL(app.Config.WebServer, input.TTLHours)
 		if err != nil {
 			// The caller asked for something this deployment does not grant, and
 			// the message says which limit — nothing here is a server fault.

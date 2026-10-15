@@ -104,6 +104,8 @@ func RunApplication() {
 		Log:      log,
 	}
 
+	appData.warnAboutNonCanonicalZoneNames()
+
 	// Start application
 	go RunPeriodicUpstreamDnsUpdateCheck(appData)
 
@@ -195,7 +197,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 		AllowHeaders:   []string{"Origin", "Content-Type", "Authorization", "X-DNS-Key-Name", "X-DNS-Key-Algorithm", "X-DNS-Key", authn.ActAsHeader},
 		Log:            app.Log,
 	})
-	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser()))
+	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser(), app.Config.ZoneEvents.IngestSubject))
 	apiV1Group.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
 
 	// The read-only rule for REST, mounted here rather than inside the auth
@@ -214,7 +216,9 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// cannot say whether an operation writes — the tool does, and mcp.go checks
 	// it there. No CORS: this is for an MCP client, not a browser.
 	mcpGroup := router.Group("/mcp")
-	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser()))
+	// /mcp has no CORS group of its own, so the cross-origin guard EnableCORS brings to /v1 is mounted here.
+	mcpGroup.Use(ginweb.RejectCrossOriginWrites(ginweb.CrossOriginOptions{DevMode: app.Config.DevMode, Log: app.Log}))
+	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser(), app.Config.ZoneEvents.IngestSubject))
 	mcpGroup.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
 	RegisterMCPRoutes(mcpGroup, app)
 

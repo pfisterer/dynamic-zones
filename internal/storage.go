@@ -45,6 +45,8 @@ type Zone struct {
 	CreatedAt time.Time `json:"-"`
 	Zone      string    `gorm:"primaryKey" json:"domain"`
 	Username  string    `gorm:"index" json:"user"`
+	// Creator marks the owner who created the zone, as opposed to one who joined it or was added. Exactly one row per zone carries it. Sharing hands out co-ownership, not the zone: only the creator (or a super admin) may delete the zone, remove other owners or rotate their keys — a co-owner may leave and rotate their own key. Rows from before this column get the earliest owner as creator, see backfillZoneCreators.
+	Creator bool `gorm:"not null;default:false" json:"-"`
 }
 
 // PolicyRule represents a DNS policy rule.
@@ -147,6 +149,10 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 		return nil, fmt.Errorf("storage.NewStorage: %w", err)
 	}
 
+	if err := backfillZoneCreators(db); err != nil {
+		return nil, fmt.Errorf("storage.NewStorage: %w", err)
+	}
+
 	// Both of these run BEFORE anything can insert a row, and that is not an
 	// accident: a column the model no longer declares is invisible to GORM, so
 	// if it were NOT NULL without a default, the first insert after startup
@@ -211,6 +217,15 @@ func (storage *Storage) ZoneExists(zone string) (bool, error) {
 	return true, nil
 }
 
+// ZoneExistsAnySpelling reports whether a zone is stored under its canonical name or under a spelling that differs only in case or a trailing dot — the forms PowerDNS treats as the same zone. Rows of the second kind predate canonical names.
+func (storage *Storage) ZoneExistsAnySpelling(canonical string) (bool, error) {
+	var count int64
+	if err := storage.db.Model(&Zone{}).Where("LOWER(zone) IN ?", []string{canonical, canonical + "."}).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("storage.ZoneExistsAnySpelling: Failed to check zone ('%s'): %w", canonical, err)
+	}
+	return count > 0, nil
+}
+
 func (storage *Storage) GetZone(user string, zone string) (*Zone, error) {
 	var d Zone
 
@@ -229,13 +244,14 @@ func (storage *Storage) GetZone(user string, zone string) (*Zone, error) {
 	return &d, nil
 }
 
-// CreateZone inserts one owner row for a zone. (It used to take a
+// CreateZone inserts one owner row for a zone; creator is true only for the person who created the zone, never for someone joining or being added. (It used to take a
 // requiresRefreshAt argument for a column that was measured to be unused and
 // dropped — see the Zone struct comment and dropUnusedZoneColumns.)
-func (storage *Storage) CreateZone(user string, zone string) (*Zone, error) {
+func (storage *Storage) CreateZone(user string, zone string, creator bool) (*Zone, error) {
 	d := &Zone{
 		Username: user,
 		Zone:     zone,
+		Creator:  creator,
 	}
 	if err := storage.db.Create(d).Error; err != nil {
 		return nil, fmt.Errorf("storage.CreateZone: Failed to create zone ('%s') for user ('%s'): %w", zone, user, err)
@@ -243,11 +259,38 @@ func (storage *Storage) CreateZone(user string, zone string) (*Zone, error) {
 	return d, nil
 }
 
+// DeleteZone removes one owner row. When that was the creator's row (a super admin removed them, or a subtree revocation took them out of a subzone), the earliest remaining owner becomes the creator, so a zone with owners never ends up without one.
 func (storage *Storage) DeleteZone(user string, zone string) error {
-	if err := storage.db.Where("username = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
-		return fmt.Errorf("storage.DeleteZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
+	return storage.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("username = ? AND zone = ?", user, zone).Delete(&Zone{}).Error; err != nil {
+			return fmt.Errorf("storage.DeleteZone: Failed to delete zone ('%s') for user ('%s'): %w", zone, user, err)
+		}
+		if err := ensureZoneCreator(tx, zone); err != nil {
+			return fmt.Errorf("storage.DeleteZone: %w", err)
+		}
+		return nil
+	})
+}
+
+// ZoneCreator returns the creator of a zone, or "" when the zone has no rows.
+func (storage *Storage) ZoneCreator(zone string) (string, error) {
+	var rows []Zone
+	if err := storage.db.Where("zone = ? AND creator = ?", zone, true).Limit(1).Find(&rows).Error; err != nil {
+		return "", fmt.Errorf("storage.ZoneCreator: Failed to get the creator of zone ('%s'): %w", zone, err)
 	}
-	return nil
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].Username, nil
+}
+
+// IsZoneCreator reports whether `user` created `zone`.
+func (storage *Storage) IsZoneCreator(user string, zone string) (bool, error) {
+	var count int64
+	if err := storage.db.Model(&Zone{}).Where("zone = ? AND username = ? AND creator = ?", zone, user, true).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("storage.IsZoneCreator: Failed to check creator ('%s') of zone ('%s'): %w", user, zone, err)
+	}
+	return count > 0, nil
 }
 
 // ---- Zone owners (a zone can have several owner rows, one per user) --------

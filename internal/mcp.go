@@ -70,7 +70,14 @@ func RegisterMCPRoutes(group *gin.RouterGroup, app *AppData) {
 	})
 
 	group.Any("", func(c *gin.Context) {
-		user, ok := c.MustGet(UserDataKey).(*UserClaims)
+		// Nothing here answers a CORS preflight (MCP clients are not browsers), and an OPTIONS request is no MCP call either.
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
+			return
+		}
+		// c.Get, not MustGet: a request that reached this without an identity must be refused, not panic.
+		v, _ := c.Get(UserDataKey)
+		user, ok := v.(*UserClaims)
 		if !ok || user == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unable to resolve user context"})
 			return
@@ -128,6 +135,7 @@ type mcpZone struct {
 	SharingAllowed  bool     `json:"sharing_allowed" jsonschema:"whether it may be shared with further owners"`
 	Parent          string   `json:"parent,omitempty" jsonschema:"for a subzone, the zone it is delegated under"`
 	Owners          []string `json:"owners,omitempty" jsonschema:"who manages it; only visible to an owner"`
+	Creator         string   `json:"creator,omitempty" jsonschema:"which owner created it: the only one who may delete it or remove other owners; only visible to an owner"`
 }
 
 func toMCPZone(z ZoneStatus) mcpZone {
@@ -140,6 +148,7 @@ func toMCPZone(z ZoneStatus) mcpZone {
 		SharingAllowed:  z.SharingAllowed,
 		Parent:          z.Parent,
 		Owners:          z.Owners,
+		Creator:         z.Creator,
 	}
 }
 
@@ -282,9 +291,12 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err != nil {
 			return nil, mcpZone{}, fmt.Errorf("get zone: %w", err)
 		}
-		want := normalizeZone(in.Zone)
+		want, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpZone{}, err
+		}
 		for _, z := range zones {
-			if normalizeZone(z.Name) == want {
+			if z.Name == want {
 				return nil, toMCPZone(z), nil
 			}
 		}
@@ -296,7 +308,10 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "Create a DNS zone the calling user is entitled to, or a delegated subzone under a zone " +
 			"they own that allows subdomains. The zone gets its own TSIG key, which stays on the server.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		app.Log.Infow("MCP create_zone", "user", caller.user.Identity(), "zone", zone)
 		if _, err := app.ZoneCreateAuthorized(ctx, caller.user, zone); err != nil {
 			return nil, mcpStatus{}, toolErr("create zone", err)
@@ -307,10 +322,14 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "delete_zone",
 		Description: "Delete a zone for ALL its owners. This cannot be undone: every record in it and every " +
-			"owner's key are gone, and anything updating it (external-dns, ACME) stops working. Ask the person " +
-			"before calling this. To leave a shared zone without deleting it, use remove_zone_owner on yourself.",
+			"owner's key are gone, and anything updating it (external-dns, ACME) stops working. Only the zone's " +
+			"creator may. Ask the person before calling this. To leave a shared zone without deleting it, use " +
+			"remove_zone_owner on yourself.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		// Normalized on both sides: a trailing dot is the same zone, and being
 		// refused over one would teach a model to retry rather than to check.
 		if err := mcpserve.ConfirmEcho("confirm_zone", normalizeZone(in.ConfirmZone), zone, "the zone"); err != nil {
@@ -417,7 +436,10 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Name:        "list_zone_owners",
 		Description: "List who manages a zone. Only an owner may ask.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		isOwner, err := app.Storage.IsZoneOwner(caller.user.Identity(), zone)
 		if err != nil {
 			return nil, mcpStatus{}, fmt.Errorf("check ownership: %w", err)
@@ -429,7 +451,11 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		if err != nil {
 			return nil, mcpStatus{}, fmt.Errorf("list owners: %w", err)
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: strings.Join(owners, ", ")}, nil
+		creator, err := app.Storage.ZoneCreator(zone)
+		if err != nil {
+			return nil, mcpStatus{}, fmt.Errorf("get the creator: %w", err)
+		}
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: strings.Join(owners, ", ") + " (created by " + creator + ")"}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
@@ -437,7 +463,10 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "Become a co-owner of an existing zone the calling user is entitled to and that allows " +
 			"sharing. list_my_zones marks those with can_join.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		app.Log.Infow("MCP join_zone", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneJoin(ctx, caller.user, zone)
 		if err := legacyResult(status, body, err, "join zone"); err != nil {
@@ -451,7 +480,10 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "Add someone as a co-owner of a zone. They get their own key and can manage the zone as " +
 			"the caller does. Owner-only, and the zone must allow sharing.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		app.Log.Infow("MCP add_zone_owner", "user", caller.user.Identity(), "zone", zone, "new_owner", in.Email)
 		status, body, err := app.ZoneAddOwner(ctx, caller.user, zone, in.Email)
 		if err := legacyResult(status, body, err, "add owner"); err != nil {
@@ -462,10 +494,14 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "remove_zone_owner",
-		Description: "Remove a co-owner from a zone; their key is revoked. The last owner cannot be removed — " +
-			"deleting the zone is a separate, destructive act. Pass the caller's own address to leave a shared zone.",
+		Description: "Remove an owner from a zone; their key is revoked. Only the zone's creator may remove " +
+			"someone else; anyone else may only pass their own address, to leave a shared zone. The creator " +
+			"cannot leave and the last owner cannot be removed — deleting the zone is a separate, destructive act.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		app.Log.Infow("MCP remove_zone_owner", "user", caller.user.Identity(), "zone", zone, "owner", in.Email)
 		status, body, err := app.ZoneRemoveOwner(ctx, caller.user, zone, in.Email)
 		if err := legacyResult(status, body, err, "remove owner"); err != nil {
@@ -476,10 +512,14 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "rotate_zone_keys",
-		Description: "Replace every owner's TSIG key for a zone, e.g. after one leaked. Disruptive: everything " +
-			"using an old key (external-dns, ACME clients) stops updating until it is reconfigured. Nothing is lost.",
+		Description: "Replace TSIG keys of a zone, e.g. after one leaked: the zone's creator replaces every " +
+			"owner's key, any other owner only their own. Disruptive: everything using an old key (external-dns, " +
+			"ACME clients) stops updating until it is reconfigured. Nothing is lost.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
-		zone := normalizeZone(in.Zone)
+		zone, err := canonicalZoneName(in.Zone)
+		if err != nil {
+			return nil, mcpStatus{}, err
+		}
 		app.Log.Infow("MCP rotate_zone_keys", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneRotateKeys(ctx, caller.user, zone)
 		if err := legacyResult(status, body, err, "rotate keys"); err != nil {

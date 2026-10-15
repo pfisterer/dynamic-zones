@@ -18,6 +18,8 @@ type ZoneResponse struct {
 	// Whether this zone may be shared with additional owners (and policy-entitled
 	// users auto-join). Comes from the governing policy rule.
 	SharingAllowed bool `json:"sharing_allowed"`
+	// Subzone marks a zone reached through a parent the caller holds (allow_subdomains) rather than granted by a rule directly. ZoneCreate requires the caller to own that parent, because creating the subzone writes its delegation into the parent.
+	Subzone bool `json:"-"`
 }
 
 // CreatePolicyApiGroup sets up the /policies API group and its routes.

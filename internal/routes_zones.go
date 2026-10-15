@@ -2,9 +2,14 @@ package app
 
 import (
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 )
+
+// dockerTagPattern is what a Docker image tag may look like. The image-version query parameter is written verbatim into the external-dns values YAML, so anything else (a newline, a colon and a space) would let the caller add keys of their own to a file people paste into their cluster.
+var dockerTagPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 
 func CreateApiV1Zones(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 	v1.GET("/zones/", getZones(app))
@@ -43,7 +48,10 @@ type AddOwnerRequest struct {
 func joinZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		status, resp, _ := app.ZoneJoin(c.Request.Context(), user, zone)
 		c.JSON(status, resp)
 	}
@@ -63,7 +71,10 @@ func joinZone(app *AppData) gin.HandlerFunc {
 func listZoneOwners(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		isOwner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check ownership"})
@@ -73,12 +84,8 @@ func listZoneOwners(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You are not an owner of this zone"})
 			return
 		}
-		owners, err := app.Storage.ListZoneOwners(zone)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list owners"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"owners": owners})
+		status, resp, _ := app.ownersResult(zone)
+		c.JSON(status, resp)
 	}
 }
 
@@ -98,7 +105,10 @@ func listZoneOwners(app *AppData) gin.HandlerFunc {
 func addZoneOwner(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		var req AddOwnerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
@@ -112,7 +122,7 @@ func addZoneOwner(app *AppData) gin.HandlerFunc {
 // removeZoneOwner removes a co-owner from a zone.
 //
 //	@Summary		Remove a zone owner
-//	@Description	Removes a co-owner (row + their TSIG key). Owner-only; the last owner cannot be removed.
+//	@Description	Removes an owner (row + their TSIG key). Removing someone else is for the zone's creator (or a super admin); any other owner may only remove themself, i.e. leave. The creator cannot leave, and the last owner cannot be removed.
 //	@Tags			zones
 //	@Produce		json
 //	@Security		Bearer
@@ -124,7 +134,10 @@ func addZoneOwner(app *AppData) gin.HandlerFunc {
 func removeZoneOwner(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		owner := c.Param("owner")
 		status, resp, _ := app.ZoneRemoveOwner(c.Request.Context(), user, zone, owner)
 		c.JSON(status, resp)
@@ -134,7 +147,7 @@ func removeZoneOwner(app *AppData) gin.HandlerFunc {
 // rotateZoneKeys regenerates every owner's TSIG key for a zone.
 //
 //	@Summary		Rotate zone keys
-//	@Description	Regenerates the TSIG key of every owner (e.g. after a suspected key compromise). Owner-only; all owners must re-fetch their key.
+//	@Description	Regenerates TSIG keys (e.g. after a suspected key compromise). The zone's creator (or a super admin) rotates every owner's key and all owners must re-fetch theirs; any other owner rotates only their own.
 //	@Tags			zones
 //	@Produce		json
 //	@Security		Bearer
@@ -145,7 +158,10 @@ func removeZoneOwner(app *AppData) gin.HandlerFunc {
 func rotateZoneKeys(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		status, resp, _ := app.ZoneRotateKeys(c.Request.Context(), user, zone)
 		c.JSON(status, resp)
 	}
@@ -171,6 +187,8 @@ type ZoneStatus struct {
 	// Owners: the users currently managing this (existing) zone. Shown in the UI
 	// so a shared zone's co-owners are visible before opening it.
 	Owners []string `json:"owners,omitempty"`
+	// Creator: which of the owners created the zone — the only one (besides a super admin) who may delete it, remove other owners or rotate their keys. Like Owners, only shown to an owner.
+	Creator string `json:"creator,omitempty"`
 	// SharingAllowed: whether this zone may be shared (governing rule opt-in).
 	SharingAllowed bool `json:"sharing_allowed"`
 }
@@ -211,7 +229,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 // getZone retrieves a specific DNS zone.
 //
 //	@Summary		Get a DNS zone
-//	@Description	Retrieves a specific DNS zone by its name.
+//	@Description	Retrieves a specific DNS zone by its name. A read-only API token gets the zone without its TSIG key and without externalDnsValuesYaml; format=external-dns is refused for it.
 //	@Tags			zones
 //	@Accept			json
 //	@Produce		json
@@ -226,16 +244,30 @@ func getZones(app *AppData) gin.HandlerFunc {
 func getZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		format := c.Query("format")
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
+		if !dockerTagPattern.MatchString(externalDnsVersion) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image-version must be a Docker image tag"})
+			return
+		}
+
+		// The external-dns values carry the zone's TSIG key, which may write the zone. A read-only token gets the zone without it (see ZoneGet), and no values file at all.
+		readOnly := ginweb.IsReadOnly(c)
+		if format == "external-dns" && readOnly {
+			c.JSON(http.StatusForbidden, gin.H{"error": "A read-only token cannot fetch the external-dns configuration: it contains the zone's key"})
+			return
+		}
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
 		app.Log.Debug("🚀 getZone: called with zone: ", zone, " and user: ", user.Identity())
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
-		statusCode, returnValue, err := app.ZoneGet(ctx, user, zone, externalDnsVersion)
+		statusCode, returnValue, err := app.ZoneGet(ctx, user, zone, externalDnsVersion, readOnly)
 
 		if err != nil {
 			app.Log.Warnf("getZone: zone '%s' error: %w", zone, err)
@@ -299,7 +331,10 @@ func getZone(app *AppData) gin.HandlerFunc {
 func postZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")
@@ -321,7 +356,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 // deleteZone deletes a DNS zone.
 //
 //	@Summary		Delete a DNS zone
-//	@Description	Deletes a DNS zone by its name.
+//	@Description	Deletes a DNS zone by its name, for all owners. Only the zone's creator (or a super admin) may; a co-owner leaves via DELETE /v1/zones/{zone}/owners/{owner} with their own address.
 //	@Tags			zones
 //	@Security		Bearer
 //	@Param		zone	path	string	true	"The name of the zone to delete."
@@ -333,7 +368,10 @@ func postZone(app *AppData) gin.HandlerFunc {
 func deleteZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		zone := c.Param("zone")
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
 		user := c.MustGet(UserDataKey).(*UserClaims)
 
 		app.Log.Debug("-------------------------------------------------------------------------------")

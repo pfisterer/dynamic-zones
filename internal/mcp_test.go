@@ -66,7 +66,7 @@ func mcpTestServerFor(t *testing.T, app *AppData, subject string) (*httptest.Ser
 
 	r := gin.New()
 	g := r.Group("/mcp")
-	g.Use(CombinedAuthMiddleware(nil, app.Storage, app.Log, ""))
+	g.Use(CombinedAuthMiddleware(nil, app.Storage, app.Log, "", ""))
 	RegisterMCPRoutes(g, app)
 
 	srv := httptest.NewServer(r)

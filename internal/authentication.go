@@ -162,17 +162,21 @@ func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// ingestRoutes are the only routes the zone-events ingest identity may call (method + route pattern, as gin.Context.FullPath reports it).
+var ingestRoutes = map[string]bool{
+	http.MethodPost + " /v1/zone-events/":             true,
+	http.MethodPost + " /v1/zone-events/alertmanager": true,
+}
+
 // devUser is who a request without a bearer is; "" outside development mode.
-func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devUser string) gin.HandlerFunc {
+//
+// ingestSubject is the zone-events producer's identity (ZONE_EVENTS_INGEST_SUBJECT). Its token is provisioned from configuration and never expires, so it is confined here to the two ingest routes: anywhere else it would be an ordinary, writable account that nobody signs in as and nobody watches.
+//
+// There is no unauthenticated path for OPTIONS: CORS preflights on /v1 are answered by the CORS middleware before this runs, and every other OPTIONS request (e.g. on /mcp, which has no CORS) has to authenticate like any other.
+func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devUser, ingestSubject string) gin.HandlerFunc {
+	ingestSubject = strings.TrimSpace(ingestSubject)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-
-		// Allow preflight OPTIONS requests without authentication
-		if c.Request.Method == http.MethodOptions && c.GetHeader("Access-Control-Request-Headers") != "" {
-			log.Infof("Allowing pre-flight request without authentication")
-			c.Next()
-			return
-		}
 
 		// Dev-only: a request without a bearer is the dev user (DEV_AUTH_USER),
 		// nothing is verified; other people are reached with X-Act-As, as in
@@ -219,6 +223,12 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			// write is a property of the OPERATION, and only the REST routes
 			// can read that off the HTTP method (see
 			// RejectWritesForReadOnlyTokens).
+			if ingestSubject != "" && rec.Subject == ingestSubject && !ingestRoutes[c.Request.Method+" "+c.FullPath()] {
+				log.Warnf("The zone-events ingest token was used for %s %s, refusing", c.Request.Method, c.Request.URL.Path)
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "this token may only ingest zone events"})
+				return
+			}
+
 			ginweb.SetReadOnly(c, rec.ReadOnly)
 			c.Set(viaAPITokenKey, true)
 

@@ -64,7 +64,7 @@ func (app *AppData) grantOwner(ctx context.Context, user, zone string) error {
 		return nil
 	}
 
-	if _, err := app.Storage.CreateZone(user, zone); err != nil {
+	if _, err := app.Storage.CreateZone(user, zone, false); err != nil {
 		return fmt.Errorf("app.grantOwner: %w", err)
 	}
 	if err := app.PowerDns.AddOwnerKey(ctx, zone, user); err != nil {
@@ -207,5 +207,5 @@ func (app *AppData) subzoneDefViaOwnedParent(zone, user string) (*ZoneResponse, 
 	if def == nil || !def.AllowSubdomains {
 		return nil, nil
 	}
-	return &ZoneResponse{Zone: zone, ZoneSOA: parent, AllowSubdomains: true, SharingAllowed: def.SharingAllowed}, nil
+	return &ZoneResponse{Zone: zone, ZoneSOA: parent, AllowSubdomains: true, SharingAllowed: def.SharingAllowed, Subzone: true}, nil
 }

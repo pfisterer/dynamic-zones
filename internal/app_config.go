@@ -39,7 +39,7 @@ type PowerDnsConfig struct {
 	PdnsUrl string `json:"pdns_url" validate:"required,url"`
 	// The vhost header to use when connecting to PowerDNS
 	PdnsVhost string `json:"pdns_vhost" validate:"required"`
-	// The API key for authenticating with PowerDNS
+	// The API key for authenticating with PowerDNS. No default: a key everybody can read in this repository is no key, so PDNS_API_KEY must be set (startup fails otherwise).
 	PdnsApiKey string `json:"pdns_api_key" validate:"required"`
 	// DnsServerAddress is the PUBLICLY reachable address of this nameserver. It
 	// is announced upstream as its A/AAAA record and shown to users in the dig /
@@ -102,6 +102,8 @@ type WebServerConfig struct {
 	WebserverBaseUrl string `json:"webserver_base_url" validate:"required,url"`
 	// The TTL (in hours) for API tokens, used when the request names none.
 	ApiTokenTTLHours int `json:"api_token_ttl_hours"`
+	// ApiTokenMaxTTLHours is the longest lifetime a caller may ask for (API_TOKEN_MAX_TTL_HOURS, default one year). Without it any number of hours was accepted, so "never expires" being off only meant "expires in a thousand years". A token without expiry is ApiTokenAllowNeverExpires' decision, not this one's.
+	ApiTokenMaxTTLHours int `json:"api_token_max_ttl_hours" validate:"min=1"`
 	// ApiTokenAllowNeverExpires decides whether a token may be issued with no
 	// expiry at all. Off by default: a permanent credential is an operator's
 	// decision, not a user's. On for this deployment because the typical DNS
@@ -191,7 +193,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		PowerDns: PowerDnsConfig{
 			PdnsUrl:    envconf.String("PDNS_URL", "http://localhost:8080"),
 			PdnsVhost:  envconf.String("PDNS_VHOST", "localhost"),
-			PdnsApiKey: envconf.String("PDNS_API_KEY", "my-default-api-key"),
+			PdnsApiKey: envconf.String("PDNS_API_KEY", ""),
 			// Loopback, not "localhost": this is validated as (and used as) a
 			// literal IP — it is the address published upstream as this
 			// nameserver's A/AAAA record, so a hostname never fits. ::1 works
@@ -208,6 +210,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		},
 		WebServer: WebServerConfig{
 			ApiTokenTTLHours:          envconf.Int("API_TOKEN_TTL_HOURS", 24),
+			ApiTokenMaxTTLHours:       envconf.Int("API_TOKEN_MAX_TTL_HOURS", 365*24),
 			ApiTokenAllowNeverExpires: envconf.Bool("API_TOKEN_ALLOW_NEVER_EXPIRES", false),
 			OIDCIssuerURL:             envconf.String("OIDC_ISSUER_URL", ""),
 			OIDCClientID:              envconf.String("OIDC_CLIENT_ID", ""),

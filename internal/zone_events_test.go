@@ -112,7 +112,7 @@ func TestZoneEventUpsertRefreshResolveAndExpiry(t *testing.T) {
 func TestApplyZoneEventsValidatesAndReports(t *testing.T) {
 	app := newZoneEventsTestApp(t, defaultZoneEventsTestConfig())
 
-	if _, err := app.Storage.CreateZone("alice@example.edu", "alice.example.org"); err != nil {
+	if _, err := app.Storage.CreateZone("alice@example.edu", "alice.example.org", true); err != nil {
 		t.Fatalf("seeding zone: %v", err)
 	}
 
@@ -169,12 +169,12 @@ func TestListOwnersForZones(t *testing.T) {
 		"alice@example.edu": "shared.example.org",
 		"carol@example.edu": "carol.example.org",
 	} {
-		if _, err := app.Storage.CreateZone(user, zone); err != nil {
+		if _, err := app.Storage.CreateZone(user, zone, true); err != nil {
 			t.Fatalf("seeding %s: %v", zone, err)
 		}
 	}
 	// A second owner on the shared zone.
-	if _, err := app.Storage.CreateZone("bob@example.edu", "shared.example.org"); err != nil {
+	if _, err := app.Storage.CreateZone("bob@example.edu", "shared.example.org", false); err != nil {
 		t.Fatalf("seeding co-owner: %v", err)
 	}
 

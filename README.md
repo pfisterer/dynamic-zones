@@ -49,10 +49,10 @@ and record management, API tokens, the policy view and ready-made snippets for
   Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS
   configuration, not this service's business.
 - **Upstream delegation.** For the managed zones to resolve globally, the parent zone must delegate to this nameserver. Either configure that once upstream, or let this service keep its own `A`/`AAAA` record current in the upstream zone via RFC 2136 itself.
-- **Shared zones and delegated policy administration.** A zone may have several owners; a *delegation* lets named people manage policy rules for one zone and its subdomains without being a global administrator. Anyone can list the delegations that apply to them (zone suffix and description); only super-admins see every delegation and whom it targets.
+- **Shared zones and delegated policy administration.** A zone may have several owners, one of whom created it: only the creator (or a super-admin) may delete the zone, remove other owners or rotate everyone's keys, while an owner who joined or was added may leave and rotate their own key. Subzones are created below a zone the requester owns, never below somebody else's; a *delegation* lets named people manage policy rules for one zone and its subdomains without being a global administrator. Anyone can list the delegations that apply to them (zone suffix and description); only super-admins see every delegation and whom it targets.
 - **Zone events.** Problems observed with a zone — for example a client that keeps failing TSIG against it — are shown to the zone's owners, and to super-admins for all zones together with the owners to contact. The service stores and serves them; producing them is left to a monitoring system (see [Zone events](#zone-events)).
 - **API tokens** for automation, optionally read-only (a read-only token is
-  refused on anything but `GET`).
+  refused on anything but `GET`, and never sees a zone's TSIG key).
 
 ### Zones, rules and "orphaned" zones
 
@@ -99,7 +99,7 @@ The destructive tools (`delete_zone`, `delete_policy_rule`, `delete_delegation`)
 
 Two endpoints accept events: `POST /v1/zone-events/` in a generic shape, and `POST /v1/zone-events/alertmanager`, which takes an Alertmanager webhook as is and turns every alert carrying a `zone` label into an event (class = `alertname`). The service knows nothing about the rules that fire them.
 
-Both are part of the public `/v1` surface, so being logged in is not enough: only the single identity `ZONE_EVENTS_INGEST_SUBJECT` may post, anyone else gets `403`. Its token is not issued through the token API — it would then act as the admin who issued it — but provisioned from `ZONE_EVENTS_INGEST_TOKEN` at startup, so rotating it is changing the value and restarting, and emptying it revokes it. It must start with the API-token prefix `dynz_token_`, followed by at least 16 characters. What a leaked token can do is bounded further: events for zones this service does not manage or for classes not in `ZONE_EVENTS_ALLOWED_CLASSES` are skipped (and reported back in the response and in the log), text is truncated, a request carries at most 200 events, and ingest is capped at 120 requests a minute.
+Both are part of the public `/v1` surface, so being logged in is not enough: only the single identity `ZONE_EVENTS_INGEST_SUBJECT` may post, anyone else gets `403`. Its token is not issued through the token API — it would then act as the admin who issued it — but provisioned from `ZONE_EVENTS_INGEST_TOKEN` at startup, so rotating it is changing the value and restarting, and emptying it revokes it. It must start with the API-token prefix `dynz_token_`, followed by at least 16 characters. The ingest token works on the two ingest routes only; anywhere else in `/v1` and on `/mcp` it is refused with `403`. What a leaked token can do is bounded further: events for zones this service does not manage or for classes not in `ZONE_EVENTS_ALLOWED_CLASSES` are skipped (and reported back in the response and in the log), text is truncated, a request carries at most 200 events, and ingest is capped at 120 requests a minute.
 
 ## Running it locally
 
@@ -129,7 +129,7 @@ make test
 make all     # swagger + binary
 ```
 
-A fresh clone does not compile until `make bundle` (or `make all`) has generated `internal/generated_docs/`. Besides `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`, startup requires `UPSTREAM_DNS_NAME` and `UPSTREAM_DNS_ZONE` (see [Upstream nameserver](#upstream-nameserver)); set `API_MODE=development` in the environment or in `.env`.
+A fresh clone does not compile until `make bundle` (or `make all`) has generated `internal/generated_docs/`. Besides `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`, startup requires `PDNS_API_KEY`, `UPSTREAM_DNS_NAME` and `UPSTREAM_DNS_ZONE` (see [Upstream nameserver](#upstream-nameserver)); set `API_MODE=development` in the environment or in `.env`.
 
 `make test` runs integration tests: they start a PowerDNS container and the real application on `:8082`, so a running development server makes them fail with "address already in use", and they need the same OIDC and upstream variables.
 
@@ -150,7 +150,8 @@ All configuration is environment variables. A `.env` file in the working directo
 | `API_MODE` | `production` | `development` = auth bypass, see above |
 | `API_BIND` | `:8082` | Listen address |
 | `API_BASE_URL` | `http://localhost:8082` | Public URL, used in generated instructions |
-| `API_TOKEN_TTL_HOURS` | `24` | Token lifetime when the request names none (any other lifetime may be requested) |
+| `API_TOKEN_TTL_HOURS` | `24` | Token lifetime when the request names none (any other lifetime up to `API_TOKEN_MAX_TTL_HOURS` may be requested) |
+| `API_TOKEN_MAX_TTL_HOURS` | `8760` (1 year) | Longest lifetime a request may ask for; longer requests are refused, not shortened |
 | `API_TOKEN_ALLOW_NEVER_EXPIRES` | `false` | Whether `ttl_hours: -1` (no expiry) is granted at all |
 | `DB_TYPE` | `sqlite` | `sqlite` \| `postgres` \| `mysql` |
 | `DB_CONNECTION_STRING` | in-memory SQLite | DSN for the chosen backend |
@@ -159,14 +160,14 @@ All configuration is environment variables. A `.env` file in the working directo
 | `OIDC_JWKS_URL` | — | The provider's key set (`…/protocol/openid-connect/certs` on Keycloak). Set it and startup asks the provider nothing, so an identity provider that is down cannot keep this service from starting; empty discovers the address from the issuer, which needs the provider to answer right then. A token that cannot be checked while the provider is away is answered 503, not 401 |
 | `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy |
 | `INITIAL_DATA_SCRIPT_PATH` | — | JS file that seeds rules/zones on first start |
-| `EXTERNAL_DNS_IMAGE_VERSION` | `v0.19.0` | external-dns image version used in the generated external-dns manifest (a request can override it with `image-version`) |
+| `EXTERNAL_DNS_IMAGE_VERSION` | `v0.19.0` | external-dns image version used in the generated external-dns manifest (a request can override it with `image-version`, which must be a Docker image tag) |
 
 ### PowerDNS
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PDNS_URL` | `http://localhost:8080` | PowerDNS HTTP API |
-| `PDNS_API_KEY` | `my-default-api-key` | API key |
+| `PDNS_API_KEY` | — (required) | API key; there is no default, startup fails without it |
 | `PDNS_VHOST` | `localhost` | The PowerDNS *server id* in the API path (`/api/v1/servers/<id>`), which is `localhost` in a stock install — not a network host |
 | `PDNS_SERVER_ADDRESS`, `PDNS_SERVER_PORT` | `127.0.0.1`, `15353` | The **publicly reachable** address of this nameserver: announced upstream as its A/AAAA record and used to build the `dig` / cert-manager / external-dns examples. Validated as an IP, because a name would not work in either place |
 | `PDNS_QUERY_TARGET` | `127.0.0.1:15353` | Where this service sends its **own** AXFR and RFC 2136 traffic. A `host:port` that only has to resolve from here, so in a cluster it is the PowerDNS Service — kept separate from the address above, which points at whatever fronts the nameserver publicly |

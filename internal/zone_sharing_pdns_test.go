@@ -112,7 +112,7 @@ func seedSharedParentWithSubzone(t *testing.T, app *AppData, owner, parent, subz
 		if _, err := app.PowerDns.CreateUserZone(t.Context(), owner, zone, true); err != nil {
 			t.Fatalf("failed to create zone %s in PowerDNS: %v", zone, err)
 		}
-		if _, err := app.Storage.CreateZone(owner, zone); err != nil {
+		if _, err := app.Storage.CreateZone(owner, zone, true); err != nil {
 			t.Fatalf("failed to create zone %s in storage: %v", zone, err)
 		}
 	}
@@ -193,7 +193,7 @@ func TestSubzoneCreationInheritsParentOwners(t *testing.T) {
 	if def == nil {
 		t.Fatal("a co-owner of a zone that allows subdomains must be allowed to delegate below it")
 	}
-	if status, resp, _ := app.ZoneCreate(ctx, coOwner, *def); status != 201 {
+	if status, resp, _ := app.ZoneCreate(ctx, &UserClaims{Email: coOwner}, *def); status != 201 {
 		t.Fatalf("ZoneCreate returned %d: %v", status, resp)
 	}
 

@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/pfisterer/dynamic-zones/internal/helper"
@@ -226,6 +228,19 @@ func (p *PowerDnsClient) DeleteZone(ctx context.Context, zone string, delete_all
 	return nil
 }
 
+// ZoneExists asks PowerDNS whether it serves `zone`. PowerDNS compares names case-insensitively and with or without the root dot, which is exactly why this is asked before a zone is created: the ownership table only knows the spellings it stored.
+func (p *PowerDnsClient) ZoneExists(ctx context.Context, zone string) (bool, error) {
+	_, err := p.powerdns.Zones.Get(ctx, dns.Fqdn(zone))
+	if err == nil {
+		return true, nil
+	}
+	var apiErr *powerdns.Error
+	if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusUnprocessableEntity) {
+		return false, nil
+	}
+	return false, fmt.Errorf("ZoneExists: asking PowerDNS for %s: %w", zone, err)
+}
+
 func (p *PowerDnsClient) EnsureIntermediateZoneExists(ctx context.Context, zone, nextChildZone string) error {
 	// zone name as FQDN
 	zoneFQDN := dns.Fqdn(zone)
@@ -282,7 +297,7 @@ func (p *PowerDnsClient) CreateUserZone(ctx context.Context, user, zone string, 
 	// Compute TSIG key name, etc.
 	keyname := p.keyNameFor(user, zone)
 
-	// If force is set, delete existing zone and key (if they exist)
+	// If force is set, delete existing zone and key (if they exist). Internal repair only (the reconcile loop): a request from a user must never pass it, because it replaces whatever zone PowerDNS holds under that name — including somebody else's.
 	if force {
 		_ = p.powerdns.Zones.Delete(ctx, zoneFQDN)
 		_ = p.powerdns.TSIGKeys.Delete(ctx, keyname)
@@ -320,6 +335,46 @@ func (p *PowerDnsClient) CreateUserZone(ctx context.Context, user, zone string, 
 		return nil, fmt.Errorf("failed to add TSIG key to zone: %v", err)
 	}
 
+	return p.GetZone(ctx, zone, user)
+}
+
+// AdoptUserZone turns a zone PowerDNS already serves without an owner — an intermediate zone created on the way to a deeper one — into `user`'s zone: the admin key and the user's own key are added, and the user zone default records that are missing are filled in. Nothing that is there is deleted, so the delegations it holds for zones below keep working.
+func (p *PowerDnsClient) AdoptUserZone(ctx context.Context, user, zone string) (*ZoneDataResponse, error) {
+	zoneFQDN := dns.Fqdn(zone)
+
+	if p.defaultAdminTsigKeyName != "" && p.defaultAdminTsigKey != "" && p.defaultAdminTsigAlg != "" {
+		if err := p.addKeyToZone(ctx, zoneFQDN, p.defaultAdminTsigKeyName, p.defaultAdminTsigAlg, p.defaultAdminTsigKey); err != nil {
+			return nil, fmt.Errorf("AdoptUserZone: failed to add admin TSIG key: %w", err)
+		}
+	}
+
+	for _, rrset := range p.prepareZoneForCreation(zoneFQDN, p.defaultUserZoneRecords).RRsets {
+		if rrset.Type == nil || *rrset.Type == powerdns.RRTypeSOA {
+			continue
+		}
+		existing, err := p.powerdns.Records.Get(ctx, zoneFQDN, *rrset.Name, rrset.Type)
+		if err != nil {
+			return nil, fmt.Errorf("AdoptUserZone: reading %s %s: %w", *rrset.Name, *rrset.Type, err)
+		}
+		if len(existing) > 0 {
+			continue
+		}
+		contents := make([]string, 0, len(rrset.Records))
+		for _, r := range rrset.Records {
+			contents = append(contents, *r.Content)
+		}
+		ttl := *rrset.TTL
+		if ttl == 0 {
+			ttl = p.defaultTTLSeconds
+		}
+		if err := p.powerdns.Records.Add(ctx, zoneFQDN, *rrset.Name, *rrset.Type, ttl, contents); err != nil {
+			return nil, fmt.Errorf("AdoptUserZone: adding default record %s %s: %w", *rrset.Name, *rrset.Type, err)
+		}
+	}
+
+	if err := p.AddOwnerKey(ctx, zone, user); err != nil {
+		return nil, fmt.Errorf("AdoptUserZone: %w", err)
+	}
 	return p.GetZone(ctx, zone, user)
 }
 
