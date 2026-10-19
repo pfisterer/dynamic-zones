@@ -232,10 +232,7 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	if appConfig.DevMode {
 		appConfigJson, err = json.MarshalIndent(appConfig, "", "  ")
 	} else {
-		// Redact every secret to a short preview before logging (SEC #10): these
-		// logs are shipped to Loki, so full API keys / TSIG keys / DB passwords must
-		// never appear. redact.Secret also length-guards the value, so an empty or
-		// short secret can no longer panic on a slice (SEC #18).
+		// Redact every secret before logging (SEC #10): these logs are shipped to Loki, so API keys, TSIG keys and DB passwords appear only as "set" or empty, nothing of their value.
 		appConfig.UpstreamDns.Tsig_Secret = redact.Secret(appConfig.UpstreamDns.Tsig_Secret)
 		appConfig.PowerDns.PdnsApiKey = redact.Secret(appConfig.PowerDns.PdnsApiKey)
 		appConfig.ZoneDefaults.DefaultAdminTsigKey = redact.Secret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
