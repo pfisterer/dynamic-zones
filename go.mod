@@ -2,6 +2,8 @@ module github.com/pfisterer/dynamic-zones
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	github.com/dop251/goja v0.0.0-20260906210903-70ad66ec7ce4
 	github.com/gin-contrib/cors v1.7.8

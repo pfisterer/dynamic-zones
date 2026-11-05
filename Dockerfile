@@ -2,7 +2,7 @@
 # The build stage runs on the machine that builds (BUILDPLATFORM) and cross-compiles for the target: on an arm64 Mac that is native speed instead of emulation. The SQLite driver needs cgo, so the C side is cross-compiled too, with tonistiigi/xx (xx-go sets GOOS, GOARCH and a clang for the target; xx-apk installs the target's libraries).
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1 AS xx
 # Base images are pinned to exact versions (Go 1.27.2 for its security fixes; the runtime Alpine to a point release), so a rebuild produces the image that was reviewed and a new base arrives as a visible change, not as a side effect.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine3.24 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
