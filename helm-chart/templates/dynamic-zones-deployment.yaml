@@ -82,17 +82,22 @@ spec:
             limits:
               cpu: "500m"
               memory: "256Mi"
+          # /healthz: the process serves; /readyz: the database answers (the identity provider is reported, not required). The API listens only once the database and OIDC discovery are reached (each tried for up to a minute), so the startup probe gives it 150 s before liveness counts.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8082
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: 8082
-            initialDelaySeconds: 10
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: 8082
-            initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
             - name: tmp

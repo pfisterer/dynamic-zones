@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -175,6 +177,9 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	}
 	app.oidcVerifier = oidcAuthVerifier
 
+	// The probes, without authentication: /healthz (the process serves) and /readyz (the database answers; the identity provider's keys are reported but do not take the pod out, since API tokens and dyndns work without it).
+	app.probes().Mount(router)
+
 	// Create static file server
 	homeGroup := router.Group("/")
 	homeGroup.Use(cors.Default())
@@ -249,4 +254,28 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 	}
 
 	log.Infof("app.LogAppConfig: Application configuration: %s", appConfigJson)
+}
+
+// probes are the readiness checks: the database must answer, the identity provider's keys are only reported.
+func (app *AppData) probes() *ginweb.Health {
+	h := &ginweb.Health{}
+	if app.Storage != nil && app.Storage.db != nil {
+		db := app.Storage.db
+		h.AddCheck("database", func(ctx context.Context) error {
+			sqlDB, err := db.DB()
+			if err != nil {
+				return err
+			}
+			return sqlDB.PingContext(ctx)
+		})
+	}
+	if v := app.oidcVerifier; v != nil && v.Verifier != nil {
+		h.AddDegraded("oidc_keys", func(context.Context) error {
+			if v.KeysUnavailable() {
+				return errors.New(v.Verifier.LastKeyFetchError())
+			}
+			return nil
+		})
+	}
+	return h
 }

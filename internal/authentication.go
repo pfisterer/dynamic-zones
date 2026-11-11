@@ -1,15 +1,19 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/authn"
+	"github.com/pfisterer/cloud-self-service-golib/credential"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/oidcauth"
+	"github.com/pfisterer/cloud-self-service-golib/retry"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"go.uber.org/zap"
 )
@@ -86,9 +90,9 @@ type OIDCAuthVerifier struct {
 
 // NewOIDCAuthVerifier initializes a new OIDCAuthVerifier. With a key set
 // configured this makes no network call, so the provider being away is a state
-// this service can report rather than a reason to die.
+// this service can report rather than a reason to die. Without one the issuer's discovery is tried again for up to a minute (oidcauth.NewWithRetry): right after a pod starts the NetworkPolicies may not let it through yet.
 func NewOIDCAuthVerifier(cfg OIDCVerifierConfig, log *zap.SugaredLogger) (*OIDCAuthVerifier, error) {
-	verifier, err := oidcauth.New(cfg, log)
+	verifier, err := oidcauth.NewWithRetry(context.Background(), cfg, log, retry.Policy{Total: time.Minute})
 	if err != nil {
 		return nil, err
 	}
@@ -99,67 +103,6 @@ func NewOIDCAuthVerifier(cfg OIDCVerifierConfig, log *zap.SugaredLogger) (*OIDCA
 // unreachable, for the status the UI shows.
 func (m *OIDCAuthVerifier) KeysUnavailable() bool {
 	return m != nil && m.Verifier.KeysUnavailable()
-}
-
-// BearerTokenAuthMiddleware is a Gin middleware to verify OIDC bearer tokens.
-// It expects the token in the "Authorization: Bearer <token>" header.
-func (m *OIDCAuthVerifier) BearerTokenAuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			m.Logger.Debug("Authorization header missing. Denying access.")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			return
-		}
-
-		// Check if the header uses the Bearer scheme (case-insensitive per RFC 7235)
-		rawIDToken, ok := authn.CutBearerPrefix(authHeader)
-		if !ok {
-			m.Logger.Debug("Authorization header does not use the Bearer scheme. Denying access.")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unsupported authorization type. Use Bearer token."})
-			return
-		}
-
-		if rawIDToken == "" {
-			m.Logger.Debug("Bearer token is empty. Denying access.")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Bearer token missing"})
-			return
-		}
-
-		claims, err := m.Verifier.Verify(c.Request.Context(), rawIDToken)
-		if err != nil {
-			// A token nobody can judge right now is not a rejected token. 401
-			// would tell the browser to drop its session and sign in again,
-			// which is impossible while the provider is away — the user would
-			// loop through a login that cannot finish and read it as our fault.
-			if errors.Is(err, oidcauth.ErrKeysUnavailable) {
-				m.Logger.Warnw("cannot verify tokens: the identity provider is unreachable", "error", err)
-				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-					"error": "sign-in is temporarily unavailable: the identity provider cannot be reached",
-				})
-				return
-			}
-			m.Logger.Warnf("Failed to verify ID token from Authorization header: %v. Denying access.", err)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Invalid or expired token: %v", err)})
-			return
-		}
-
-		// The probe that used to sit here is gone, together with the question it
-		// asked. It watched for a verified ID token whose `email` and
-		// `preferred_username` disagreed, because this service keyed zone and
-		// token ownership on one and policy rules on the other — and no database
-		// here could prove they always matched, since each stores only one.
-		//
-		// It never answered: over 36 hours of production it saw 8 authenticated
-		// requests and not one login, which is what a semester break looks like.
-		// Keycloak answered it instead, and completely rather than by sample —
-		// 260 accounts in `dhbw-main`, zero with an `email` differing from the
-		// username, zero without an address at all (2026-08-26). Everything now
-		// reads Claims.Identity() and there is nothing left to compare.
-		c.Set(UserDataKey, claims)
-
-		c.Next() // Continue to the next handler in the chain
-	}
 }
 
 // ingestRoutes are the only routes the zone-events ingest identity may call (method + route pattern, as gin.Context.FullPath reports it).
@@ -175,84 +118,113 @@ var ingestRoutes = map[string]bool{
 // There is no unauthenticated path for OPTIONS: CORS preflights on /v1 are answered by the CORS middleware before this runs, and every other OPTIONS request (e.g. on /mcp, which has no CORS) has to authenticate like any other.
 func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log *zap.SugaredLogger, devUser, ingestSubject string) gin.HandlerFunc {
 	ingestSubject = strings.TrimSpace(ingestSubject)
+	var verifier credential.Verifier
+	if oidcVerifier != nil && oidcVerifier.Verifier != nil {
+		verifier = oidcVerifier.Verifier
+	}
+	var tokens credential.Tokens
+	if store != nil && store.Tokens != nil {
+		tokens = store.Tokens
+	}
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		authHeader := c.GetHeader("Authorization")
 
 		// Dev-only: a request without a bearer is the dev user (DEV_AUTH_USER),
 		// nothing is verified; other people are reached with X-Act-As, as in
 		// production. Gated on devMode and NEVER active in production (devMode
 		// is false there).
-		if devUser != "" && c.GetHeader("Authorization") == "" {
+		if devUser != "" && authHeader == "" {
 			c.Set(UserDataKey, &UserClaims{Email: devUser})
 			ginweb.SetReadOnly(c, false)
 			c.Next()
 			return
 		}
 
-		// Get the Authorization header
-		authHeader := c.GetHeader("Authorization")
-
-		tokenString, ok := authn.CutBearerPrefix(authHeader)
-		if !ok {
+		// Which case the credential is (none, an API token, an ID token, rejected, the provider away) is decided by golib's credential.Resolve, the same in every service of the platform; the answers here are this service's. A token with this service's prefix is looked up and never sent to the provider.
+		p, err := credential.Resolve(ctx, authHeader, tokens, verifier)
+		switch {
+		case err == nil:
+		case errors.Is(err, credential.ErrMissing):
+			if _, ok := authn.CutBearerPrefix(authHeader); ok {
+				log.Debug("Bearer token is empty. Denying access.")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Bearer token missing"})
+				return
+			}
 			// The header value itself is never logged: a client sending a valid
 			// token under an unexpected scheme would write its credential into
 			// the log. The scheme alone is what makes this diagnosable.
 			log.Warnf("Missing or invalid Authorization header (scheme %q)", authn.Scheme(authHeader))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization Bearer header"})
 			return
+		case errors.Is(err, token.ErrNotFound):
+			// An expired token is not found, so the answer here needs no expiry check of its own.
+			log.Warn("Invalid API token, returning unauthorized")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		case errors.Is(err, credential.ErrKeysUnavailable):
+			// A token nobody can judge right now is not a rejected token. 401
+			// would tell the browser to drop its session and sign in again,
+			// which is impossible while the provider is away — the user would
+			// loop through a login that cannot finish and read it as our fault.
+			log.Warnw("cannot verify tokens: the identity provider is unreachable", "error", err)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "sign-in is temporarily unavailable: the identity provider cannot be reached",
+			})
+			return
+		case errors.Is(err, credential.ErrRejected):
+			cause := credential.Cause(err)
+			log.Warnf("Failed to verify ID token from Authorization header: %v. Denying access.", cause)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Invalid or expired token: %v", cause)})
+			return
+		case errors.Is(err, credential.ErrNoVerifier):
+			log.Error("OIDC verifier is not configured")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		default:
+			log.Warnf("storage error: %v", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
 		}
 
-		// Check if token is an API key (starts with your prefix)
-		if store.Tokens.Owns(tokenString) {
-
-			// Look up the token in storage. An expired one is not found, so the
-			// answer here needs no expiry check of its own.
-			rec, err := store.Tokens.Lookup(ctx, tokenString)
-			if errors.Is(err, token.ErrNotFound) {
-				log.Warn("Invalid API token, returning unauthorized")
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-				return
-			}
-			if err != nil {
-				log.Warnf("storage error: %v", err)
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-				return
-			}
-
-			// Recorded here, enforced by the route group: what counts as a
-			// write is a property of the OPERATION, and only the REST routes
-			// can read that off the HTTP method (see
-			// RejectWritesForReadOnlyTokens).
-			if ingestSubject != "" && rec.Subject == ingestSubject && !ingestRoutes[c.Request.Method+" "+c.FullPath()] {
+		if p.ViaAPIToken() {
+			if ingestSubject != "" && p.Token.Subject == ingestSubject && !ingestRoutes[c.Request.Method+" "+c.FullPath()] {
 				log.Warnf("The zone-events ingest token was used for %s %s, refusing", c.Request.Method, c.Request.URL.Path)
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "this token may only ingest zone events"})
 				return
 			}
-
-			ginweb.SetReadOnly(c, rec.ReadOnly)
 			c.Set(viaAPITokenKey, true)
-
-			// One field, because there is one identity. The token was issued
-			// under this subject (see tokenSubject) and Identity() reads Email
-			// first, so this is the string every later lookup resolves to —
-			// zone ownership, policy matching and the %u expansion alike.
-			//
-			// It used to fill all three claims, and that was not tidiness: for a
-			// while it filled only preferred_username, while policy rules matched
-			// on Email. Such a token authenticated cleanly and then matched NO
-			// rule — its holder saw the zones they already owned and was entitled
-			// to nothing, and every create was refused.
-			c.Set(UserDataKey, &UserClaims{Email: rec.Subject})
-
-			c.Next()
-			return
 		}
+		// Recorded here, enforced by the route group: what counts as a write
+		// is a property of the OPERATION, and only the REST routes can read
+		// that off the HTTP method (see RejectWritesForReadOnlyTokens). An
+		// interactive login is never read-only.
+		ginweb.SetReadOnly(c, p.ReadOnly)
 
-		// Otherwise, treat it as an OIDC Bearer JWT. Set before handing over:
-		// BearerTokenAuthMiddleware calls Next() itself, so anything set after
-		// it would land once the handlers have already run.
-		ginweb.SetReadOnly(c, false)
-		oidcVerifier.BearerTokenAuthMiddleware()(c)
-
+		// For an API token one field, because there is one identity. The token
+		// was issued under this subject (see tokenSubject) and Identity() reads
+		// Email first, so this is the string every later lookup resolves to —
+		// zone ownership, policy matching and the %u expansion alike.
+		//
+		// It used to fill all three claims, and that was not tidiness: for a
+		// while it filled only preferred_username, while policy rules matched
+		// on Email. Such a token authenticated cleanly and then matched NO
+		// rule — its holder saw the zones they already owned and was entitled
+		// to nothing, and every create was refused.
+		//
+		// The probe that used to sit here is gone, together with the question it
+		// asked. It watched for a verified ID token whose `email` and
+		// `preferred_username` disagreed, because this service keyed zone and
+		// token ownership on one and policy rules on the other — and no database
+		// here could prove they always matched, since each stores only one.
+		//
+		// It never answered: over 36 hours of production it saw 8 authenticated
+		// requests and not one login, which is what a semester break looks like.
+		// Keycloak answered it instead, and completely rather than by sample —
+		// 260 accounts in `dhbw-main`, zero with an `email` differing from the
+		// username, zero without an address at all (2026-08-26). Everything now
+		// reads Claims.Identity() and there is nothing left to compare.
+		c.Set(UserDataKey, p.Claims)
+		c.Next()
 	}
 }

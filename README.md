@@ -73,6 +73,7 @@ spec is the authoritative reference, so it cannot drift from the implementation 
 way a hand-written endpoint list does:
 
 - **`GET /swagger.json`** — the OpenAPI spec
+- **`GET /healthz`** and **`GET /readyz`** — the probes, unauthenticated: alive while the process serves; ready while the database answers (503 with the failing checks under `failed`). The identity provider's keys are listed under `degraded` without making it 503, since API tokens and dyndns updates work without the provider
 - A generated TypeScript client is published to npm as `@dhbw-cloud/dynamic-zones-client`.
   It used to be served from `/client/` and loaded by the browser at startup; consumers
   now depend on a version at build time, so a missing operation is a build error there
