@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -60,9 +59,8 @@ func listPolicyRules(app *AppData) gin.HandlerFunc {
 		response, err := app.PolicyGetAllUserRules(user)
 
 		if err != nil {
-			errorMessage := fmt.Sprintf("Failed to retrieve policy rules for user %s: %v", user.Identity(), err)
-			app.Log.Warnf(errorMessage)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": errorMessage})
+			app.Log.Warnf("Failed to retrieve policy rules for user %s: %v", user.Identity(), err)
+			abortErr(c, http.StatusInternalServerError, "Die Regeln ließen sich nicht laden.")
 			return
 		}
 
@@ -92,23 +90,23 @@ func createPolicyRule(app *AppData) gin.HandlerFunc {
 		// Unmarshal and validate request body
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 
 		// Authorize: super-admin, or a delegation covering the rule's zone.
 		if allowed, err := app.userCanManageZoneSoa(user, req.ZoneSoa); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
 			return
 		} else if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
+			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
 			return
 		}
 
 		// Create Policy
 		createdRule, err := app.PolicyCreateRule(req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 
@@ -140,14 +138,14 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Regel-ID.")
 			return
 		}
 
 		// Unmarshal and validate the request
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 
@@ -155,24 +153,24 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 		// zone and the new zone (so a rule cannot be moved out of scope).
 		existing, err := app.Storage.PolicyGetByID(id)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+			abortErr(c, http.StatusNotFound, "Die Regel gibt es nicht.")
 			return
 		}
 		okOld, err1 := app.userCanManageZoneSoa(user, existing.ZoneSoa)
 		okNew, err2 := app.userCanManageZoneSoa(user, req.ZoneSoa)
 		if err1 != nil || err2 != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
 			return
 		}
 		if !okOld || !okNew {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
+			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
 			return
 		}
 
 		// Update the rule
 		updatedRule, err := app.PolicyUpdateRule(id, req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 
@@ -202,28 +200,28 @@ func deletePolicyRule(app *AppData) gin.HandlerFunc {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Regel-ID.")
 			return
 		}
 
 		// Authorize: super-admin, or a delegation covering the rule's zone.
 		existing, err := app.Storage.PolicyGetByID(id)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+			abortErr(c, http.StatusNotFound, "Die Regel gibt es nicht.")
 			return
 		}
 		if allowed, err := app.userCanManageZoneSoa(user, existing.ZoneSoa); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permissions"})
+			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
 			return
 		} else if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to manage rules for this zone"})
+			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
 			return
 		}
 
 		// Delete the rule
 		err = app.PolicyDeleteRule(id)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 

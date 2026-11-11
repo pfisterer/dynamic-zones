@@ -77,11 +77,11 @@ func listZoneOwners(app *AppData) gin.HandlerFunc {
 		}
 		isOwner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check ownership"})
+			abortErr(c, http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.")
 			return
 		}
 		if !isOwner {
-			c.JSON(http.StatusForbidden, gin.H{"error": "You are not an owner of this zone"})
+			abortErr(c, http.StatusForbidden, "Kein Eigentümer dieser Zone.")
 			return
 		}
 		status, resp, _ := app.ownersResult(zone)
@@ -111,7 +111,7 @@ func addZoneOwner(app *AppData) gin.HandlerFunc {
 		}
 		var req AddOwnerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 		status, resp, _ := app.ZoneAddOwner(c.Request.Context(), user, zone, req.Email)
@@ -215,7 +215,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		zonesWithStatus, err := app.ZoneList(user)
 		if err != nil {
 			app.Log.Errorf("Error listing zones: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user zones"})
+			abortErr(c, http.StatusInternalServerError, "Die eigenen Zonen ließen sich nicht laden.")
 			return
 		}
 
@@ -252,14 +252,14 @@ func getZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
 		if !dockerTagPattern.MatchString(externalDnsVersion) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "image-version must be a Docker image tag"})
+			abortErr(c, http.StatusBadRequest, "image-version muss ein Docker-Image-Tag sein.")
 			return
 		}
 
 		// The external-dns values carry the zone's TSIG key, which may write the zone. A read-only token gets the zone without it (see ZoneGet), and no values file at all.
 		readOnly := ginweb.IsReadOnly(c)
 		if format == "external-dns" && readOnly {
-			c.JSON(http.StatusForbidden, gin.H{"error": "A read-only token cannot fetch the external-dns configuration: it contains the zone's key"})
+			abortErr(c, http.StatusForbidden, "Ein Token nur zum Lesen bekommt die external-dns-Konfiguration nicht: Sie enthält den Schlüssel der Zone.")
 			return
 		}
 
@@ -284,21 +284,21 @@ func getZone(app *AppData) gin.HandlerFunc {
 				returnMap = genericMap
 			} else {
 				app.Log.Errorf("getZone: Failed to cast success returnValue (%T) to map[string]any or gin.H", returnValue)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: Invalid response format from GetZone"})
+				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die Zone kam in einem unerwarteten Format.")
 				return
 			}
 
 			yamlValue, exists := returnMap["externalDnsValuesYaml"]
 			if !exists {
 				app.Log.Errorf("getZone: Key 'externalDnsValuesYaml' missing from successful response map")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: Missing external-dns data in response"})
+				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die external-dns-Konfiguration fehlt.")
 				return
 			}
 
 			yamlString, ok := yamlValue.(string)
 			if !ok {
 				app.Log.Errorf("getZone: Failed to cast externalDnsValuesYaml value (%T) to string", yamlValue)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal configuration error: external-dns data is not a string"})
+				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die external-dns-Konfiguration ist kein Text.")
 				return
 			}
 
@@ -344,7 +344,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 		zoneData, err := app.ZoneCreateAuthorized(ctx, user, zone)
 		if err != nil {
 			app.Log.Warnf("postZone: %v", err)
-			c.JSON(StatusOf(err), gin.H{"error": MessageOf(err)})
+			app.respondError(c, err)
 			return
 		}
 
@@ -380,7 +380,7 @@ func deleteZone(app *AppData) gin.HandlerFunc {
 
 		if err := app.ZoneDeleteAuthorized(ctx, user, zone); err != nil {
 			app.Log.Warnf("deleteZone: %v", err)
-			c.JSON(StatusOf(err), gin.H{"error": MessageOf(err)})
+			app.respondError(c, err)
 			return
 		}
 

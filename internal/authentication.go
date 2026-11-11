@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -39,18 +38,14 @@ func ActAsMiddleware(superAdmins map[string]struct{}, log *zap.SugaredLogger) gi
 			return
 		}
 		if c.GetBool(viaAPITokenKey) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": authn.ErrActAsNeedsSignIn.Error()})
+			ginweb.AbortError(c, errActAsNeedsSignIn)
 			return
 		}
 		actor := v.(*UserClaims).Identity()
 		_, may := superAdmins[strings.ToLower(actor)]
 		target, err := authn.ActAs(header, actor, may)
 		if err != nil {
-			status := http.StatusForbidden
-			if errors.Is(err, authn.ErrActAsInvalid) {
-				status = http.StatusBadRequest
-			}
-			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+			ginweb.AbortError(c, actAsError(err))
 			return
 		}
 		if target != actor {
@@ -148,19 +143,19 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		case errors.Is(err, credential.ErrMissing):
 			if _, ok := authn.CutBearerPrefix(authHeader); ok {
 				log.Debug("Bearer token is empty. Denying access.")
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Bearer token missing"})
+				ginweb.AbortError(c, errUnauthenticated)
 				return
 			}
 			// The header value itself is never logged: a client sending a valid
 			// token under an unexpected scheme would write its credential into
 			// the log. The scheme alone is what makes this diagnosable.
 			log.Warnf("Missing or invalid Authorization header (scheme %q)", authn.Scheme(authHeader))
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization Bearer header"})
+			ginweb.AbortError(c, errUnauthenticated)
 			return
 		case errors.Is(err, token.ErrNotFound):
 			// An expired token is not found, so the answer here needs no expiry check of its own.
 			log.Warn("Invalid API token, returning unauthorized")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			ginweb.AbortError(c, errAPITokenRejected)
 			return
 		case errors.Is(err, credential.ErrKeysUnavailable):
 			// A token nobody can judge right now is not a rejected token. 401
@@ -168,29 +163,27 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 			// which is impossible while the provider is away — the user would
 			// loop through a login that cannot finish and read it as our fault.
 			log.Warnw("cannot verify tokens: the identity provider is unreachable", "error", err)
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": "sign-in is temporarily unavailable: the identity provider cannot be reached",
-			})
+			ginweb.AbortError(c, errSignInUnavailable)
 			return
 		case errors.Is(err, credential.ErrRejected):
 			cause := credential.Cause(err)
 			log.Warnf("Failed to verify ID token from Authorization header: %v. Denying access.", cause)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Invalid or expired token: %v", cause)})
+			ginweb.AbortError(c, errSignInRejected)
 			return
 		case errors.Is(err, credential.ErrNoVerifier):
 			log.Error("OIDC verifier is not configured")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			ginweb.AbortError(c, errInternal)
 			return
 		default:
 			log.Warnf("storage error: %v", err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			ginweb.AbortError(c, errInternal)
 			return
 		}
 
 		if p.ViaAPIToken() {
 			if ingestSubject != "" && p.Token.Subject == ingestSubject && !ingestRoutes[c.Request.Method+" "+c.FullPath()] {
 				log.Warnf("The zone-events ingest token was used for %s %s, refusing", c.Request.Method, c.Request.URL.Path)
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "this token may only ingest zone events"})
+				abortErr(c, http.StatusForbidden, "Dieses Token darf nur Zonen-Ereignisse einliefern.")
 				return
 			}
 			c.Set(viaAPITokenKey, true)

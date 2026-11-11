@@ -230,7 +230,7 @@ func TestMCP_AdminToolsRefuseANonAdmin(t *testing.T) {
 	session := mcptest.Dial(t, srv.URL+"/mcp", readOnlySecret)
 
 	for _, name := range []string{"list_delegations", "list_orphaned_zones"} {
-		if msg := callToolErr(t, session, name, map[string]any{}); !strings.Contains(msg, "super admin") {
+		if msg := callToolErr(t, session, name, map[string]any{}); !strings.Contains(msg, "Super-Admins") {
 			t.Errorf("%s: got %q, want a super-admin refusal", name, msg)
 		}
 	}

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -22,7 +21,7 @@ func normalizeZone(zone string) string {
 func canonicalZoneName(raw string) (string, error) {
 	zone := normalizeZone(raw)
 	if err := helper.DnsValidateName(zone); err != nil {
-		return "", fmt.Errorf("invalid zone name %q: %w", raw, err)
+		return "", invalid("Ungültiger Zonenname %q: %w", raw, err)
 	}
 	return zone, nil
 }
@@ -31,7 +30,7 @@ func canonicalZoneName(raw string) (string, error) {
 func zoneParam(c *gin.Context, param string) (string, bool) {
 	zone, err := canonicalZoneName(c.Param(param))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortErr(c, http.StatusBadRequest, err.Error())
 		return "", false
 	}
 	return zone, true

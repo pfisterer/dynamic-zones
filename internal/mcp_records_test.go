@@ -127,7 +127,7 @@ func TestMCP_RecordToolsRefuseAZoneTheCallerDoesNotOwn(t *testing.T) {
 	if msg == "" {
 		t.Fatal("writing into someone else's zone was allowed")
 	}
-	if !strings.Contains(msg, "owner") {
+	if !strings.Contains(msg, "Kein Eigentümer") {
 		t.Errorf("got %q, want a refusal about ownership", msg)
 	}
 }

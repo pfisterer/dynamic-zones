@@ -120,7 +120,7 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 		}
 		if err != nil {
 			app.Log.Errorf("zone-events: listing for %s: %v", user.Identity(), err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone events"})
+			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht laden.")
 			return
 		}
 
@@ -131,7 +131,7 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 		owners, err := app.Storage.ListOwnersForZones(zonesOfEvents(events))
 		if err != nil {
 			app.Log.Errorf("zone-events: resolving owners: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list zone events"})
+			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht laden.")
 			return
 		}
 		c.JSON(http.StatusOK, ZoneEventsResponse{Events: toZoneEventInfos(events, owners)})
@@ -146,7 +146,7 @@ func requireIngestIdentity(app *AppData, c *gin.Context) bool {
 	subject := app.Config.ZoneEvents.IngestSubject
 	if subject == "" || user.Identity() != subject {
 		app.Log.Warnf("zone-events: ingest refused for %q (not the ingest subject)", user.Identity())
-		c.JSON(http.StatusForbidden, gin.H{"error": "this identity may not ingest zone events"})
+		abortErr(c, http.StatusForbidden, "Diese Identität darf keine Zonen-Ereignisse einliefern.")
 		return false
 	}
 	return true
@@ -155,7 +155,7 @@ func requireIngestIdentity(app *AppData, c *gin.Context) bool {
 func requireIngestBudget(app *AppData, limiter *ingestLimiter, c *gin.Context) bool {
 	if !limiter.allow(time.Now()) {
 		app.Log.Warn("zone-events: ingest rate limit exceeded")
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many ingest requests"})
+		abortErr(c, http.StatusTooManyRequests, "Zu viele Anfragen zum Einliefern.")
 		return false
 	}
 	return true
@@ -200,11 +200,11 @@ func ingestZoneEvents(app *AppData, limiter *ingestLimiter) gin.HandlerFunc {
 
 		var req ZoneEventsIngestRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 		if len(req.Events) > maxZoneEventBatch {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "too many events in one request"})
+			abortErr(c, http.StatusBadRequest, "Zu viele Ereignisse in einer Anfrage.")
 			return
 		}
 
@@ -223,7 +223,7 @@ func ingestZoneEvents(app *AppData, limiter *ingestLimiter) gin.HandlerFunc {
 		sum, err := applyZoneEvents(app, "generic", events)
 		if err != nil {
 			app.Log.Errorf("zone-events: generic ingest: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store zone events"})
+			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht speichern.")
 			return
 		}
 		c.JSON(http.StatusOK, sum)
@@ -270,11 +270,11 @@ func ingestAlertmanagerZoneEvents(app *AppData, limiter *ingestLimiter) gin.Hand
 
 		var payload AlertmanagerWebhook
 		if err := c.ShouldBindJSON(&payload); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 		if len(payload.Alerts) > maxZoneEventBatch {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "too many alerts in one request"})
+			abortErr(c, http.StatusBadRequest, "Zu viele Alarme in einer Anfrage.")
 			return
 		}
 
@@ -304,7 +304,7 @@ func ingestAlertmanagerZoneEvents(app *AppData, limiter *ingestLimiter) gin.Hand
 		sum, err := applyZoneEvents(app, "alertmanager", events)
 		if err != nil {
 			app.Log.Errorf("zone-events: alertmanager ingest: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store zone events"})
+			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht speichern.")
 			return
 		}
 		sum.Skipped += len(payload.Alerts) - len(events)

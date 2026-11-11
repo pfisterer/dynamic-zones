@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -54,24 +53,14 @@ func statusErr(status int, msg string, err error) error {
 	return &StatusError{Status: status, Msg: msg, Err: err}
 }
 
-// StatusOf reports the HTTP status an error asks for, defaulting to 500 for one
-// that carries no opinion.
+// StatusOf reports the HTTP status an error asks for (serviceErrors), 500 for one that carries no opinion.
 func StatusOf(err error) int {
-	var se *StatusError
-	if errors.As(err, &se) {
-		return se.Status
-	}
-	return http.StatusInternalServerError
+	return serviceErrors.Classify(err).Status
 }
 
-// MessageOf returns the caller-facing half of an error: the StatusError message
-// without the wrapped cause, which belongs in the log and not in a response.
+// MessageOf returns the caller-facing half of an error (serviceErrors): the StatusError message without the wrapped cause, which belongs in the log and not in a response; "Interner Fehler." for one that carries no message.
 func MessageOf(err error) string {
-	var se *StatusError
-	if errors.As(err, &se) {
-		return se.Msg
-	}
-	return "internal error"
+	return serviceErrors.Classify(err).Msg
 }
 
 // requireZoneOwnership refuses to act on a zone the caller does not own.
@@ -87,10 +76,10 @@ func (app *AppData) requireZoneOwnership(username, zone string) (string, error) 
 	}
 	isOwner, err := app.Storage.IsZoneOwner(username, name)
 	if err != nil {
-		return "", statusErr(http.StatusInternalServerError, "failed to check zone ownership", err)
+		return "", statusErr(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
 	}
 	if !isOwner {
-		return "", statusErr(http.StatusForbidden, "you are not an owner of this zone",
+		return "", statusErr(http.StatusForbidden, "Kein Eigentümer dieser Zone.",
 			fmt.Errorf("user %q does not own zone %q", username, name))
 	}
 	return name, nil
@@ -116,12 +105,12 @@ func (app *AppData) OwnerTSIG(ctx context.Context, username, zone string) (TSIGC
 	// string, and a trailing dot makes it a different one.
 	zoneData, err := app.PowerDns.GetZone(ctx, name, username)
 	if err != nil {
-		return TSIGCredentials{}, statusErr(http.StatusInternalServerError, "failed to read the zone's keys", err)
+		return TSIGCredentials{}, statusErr(http.StatusInternalServerError, "Die Schlüssel der Zone ließen sich nicht lesen.", err)
 	}
 	if len(zoneData.ZoneKeys) == 0 {
 		// An owner without a key is a zone in an inconsistent state, not a
 		// permission problem: every owner gets one when they create or join.
-		return TSIGCredentials{}, statusErr(http.StatusConflict, "no TSIG key for this zone and user",
+		return TSIGCredentials{}, statusErr(http.StatusConflict, "Für diese Zone gibt es keinen eigenen TSIG-Schlüssel.",
 			fmt.Errorf("zone %q has no key for %q", zone, username))
 	}
 	k := zoneData.ZoneKeys[0]
@@ -150,7 +139,7 @@ func (app *AppData) RecordsList(ctx context.Context, username, zone string, cred
 		return nil, err
 	}
 	if !creds.complete() {
-		return nil, statusErr(http.StatusBadRequest, "TSIG credentials required", nil)
+		return nil, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
 	}
 	creds = creds.fqdn()
 	zoneFQDN := dns.Fqdn(name)
@@ -164,13 +153,13 @@ func (app *AppData) RecordsList(ctx context.Context, username, zone string, cred
 
 	envChan, err := tr.In(msg, GetServerAddress(app))
 	if err != nil {
-		return nil, statusErr(http.StatusInternalServerError, "zone transfer failed", err)
+		return nil, statusErr(http.StatusInternalServerError, "Die Zonenübertragung ist fehlgeschlagen.", err)
 	}
 
 	var records []DNSRecord
 	for env := range envChan {
 		if env.Error != nil {
-			return nil, statusErr(http.StatusInternalServerError, "zone transfer failed", env.Error)
+			return nil, statusErr(http.StatusInternalServerError, "Die Zonenübertragung ist fehlgeschlagen.", env.Error)
 		}
 		for _, rr := range env.RR {
 			h := rr.Header()
@@ -233,7 +222,7 @@ func (app *AppData) RecordUpsert(ctx context.Context, username string, rec DNSRe
 		return DNSRecord{}, err
 	}
 	if !creds.complete() {
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG credentials required", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
 	}
 	creds = creds.fqdn()
 
@@ -247,15 +236,15 @@ func (app *AppData) RecordUpsert(ctx context.Context, username string, rec DNSRe
 	case "A":
 		_, _ = helper.Rfc2136DeleteARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName)
 		if _, err := helper.Rfc2136AddARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName, rec.Value, rec.TTL); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "failed to write the record", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht schreiben.", err)
 		}
 	case "AAAA":
 		_, _ = helper.Rfc2136DeleteAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName)
 		if _, err := helper.Rfc2136AddAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName, rec.Value, rec.TTL); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "failed to write the record", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht schreiben.", err)
 		}
 	default:
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "unsupported type (supported: A, AAAA)", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, "Nicht unterstützter Typ (unterstützt: A, AAAA).", nil)
 	}
 
 	return DNSRecord{Zone: zoneFQDN, Name: recordName, Type: recType, TTL: rec.TTL, Value: rec.Value}, nil
@@ -268,7 +257,7 @@ func (app *AppData) RecordDelete(ctx context.Context, username string, rec DNSRe
 		return DNSRecord{}, err
 	}
 	if !creds.complete() {
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG credentials required", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
 	}
 	creds = creds.fqdn()
 
@@ -280,14 +269,14 @@ func (app *AppData) RecordDelete(ctx context.Context, username string, rec DNSRe
 	switch recType {
 	case "A":
 		if _, err := helper.Rfc2136DeleteARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "failed to delete the record", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht löschen.", err)
 		}
 	case "AAAA":
 		if _, err := helper.Rfc2136DeleteAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "failed to delete the record", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht löschen.", err)
 		}
 	default:
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "unsupported type (supported: A, AAAA)", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, "Nicht unterstützter Typ (unterstützt: A, AAAA).", nil)
 	}
 
 	return DNSRecord{Zone: zoneFQDN, Name: recordName, Type: recType, TTL: rec.TTL, Value: rec.Value}, nil

@@ -2,7 +2,7 @@ package app
 
 import (
 	"errors"
-	"fmt"
+	"net/http"
 	"strings"
 
 	"gorm.io/gorm"
@@ -43,11 +43,8 @@ func (app *AppData) DelegationsVisibleTo(user *UserClaims) ([]DelegationPolicy, 
 }
 
 func (app *AppData) DelegationCreate(req DelegationPolicyRequest) (*DelegationPolicy, error) {
-	if err := validateUserFilter(req.TargetUserFilter); err != nil {
+	if err := validateDelegationRequest(req); err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(req.ZoneSuffix) == "" {
-		return nil, errors.New("zone_suffix is required")
 	}
 	d := DelegationPolicy{
 		TargetUserFilter: req.TargetUserFilter,
@@ -58,16 +55,13 @@ func (app *AppData) DelegationCreate(req DelegationPolicyRequest) (*DelegationPo
 }
 
 func (app *AppData) DelegationUpdate(id int64, req DelegationPolicyRequest) (*DelegationPolicy, error) {
-	if err := validateUserFilter(req.TargetUserFilter); err != nil {
+	if err := validateDelegationRequest(req); err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(req.ZoneSuffix) == "" {
-		return nil, errors.New("zone_suffix is required")
 	}
 	existing, err := app.Storage.DelegationGetByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("delegation not found")
+			return nil, errDelegationNotFound
 		}
 		return nil, err
 	}
@@ -80,7 +74,7 @@ func (app *AppData) DelegationUpdate(id int64, req DelegationPolicyRequest) (*De
 func (app *AppData) DelegationDelete(id int64) error {
 	if err := app.Storage.DelegationDelete(id); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("delegation not found")
+			return errDelegationNotFound
 		}
 		return err
 	}
@@ -112,4 +106,18 @@ func zoneInScope(zone, suffix string) bool {
 	z := strings.ToLower(strings.TrimSuffix(zone, "."))
 	s := strings.ToLower(strings.TrimSuffix(suffix, "."))
 	return z == s || isSubdomainOf(z, s)
+}
+
+// errDelegationNotFound is the answer for a delegation id that does not exist.
+var errDelegationNotFound = statusErr(http.StatusNotFound, "Die Delegation gibt es nicht.", nil)
+
+// validateDelegationRequest refuses a delegation without a valid user filter or zone suffix, with 400.
+func validateDelegationRequest(req DelegationPolicyRequest) error {
+	if err := validateUserFilter(req.TargetUserFilter); err != nil {
+		return statusErr(http.StatusBadRequest, err.Error(), nil)
+	}
+	if strings.TrimSpace(req.ZoneSuffix) == "" {
+		return statusErr(http.StatusBadRequest, "zone_suffix ist erforderlich.", nil)
+	}
+	return nil
 }

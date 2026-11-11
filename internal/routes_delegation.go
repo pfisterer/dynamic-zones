@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const errNotSuperAdmin = "Only super admins can manage delegations"
+const errNotSuperAdmin = "Nur für Super-Admins."
 
 // DelegationsResponse is the body of GET /v1/policies/delegations.
 type DelegationsResponse struct {
@@ -39,7 +39,7 @@ func listDelegations(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		delegations, err := app.DelegationsVisibleTo(user)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve delegations"})
+			abortErr(c, http.StatusInternalServerError, "Die Delegationen ließen sich nicht laden.")
 			return
 		}
 		c.JSON(http.StatusOK, DelegationsResponse{Delegations: delegations})
@@ -63,17 +63,17 @@ func createDelegation(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": errNotSuperAdmin})
+			abortErr(c, http.StatusForbidden, errNotSuperAdmin)
 			return
 		}
 		var req DelegationPolicyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 		created, err := app.DelegationCreate(req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusCreated, created)
@@ -98,22 +98,22 @@ func updateDelegation(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": errNotSuperAdmin})
+			abortErr(c, http.StatusForbidden, errNotSuperAdmin)
 			return
 		}
 		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delegation ID"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Delegations-ID.")
 			return
 		}
 		var req DelegationPolicyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 		updated, err := app.DelegationUpdate(id, req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, updated)
@@ -136,16 +136,16 @@ func deleteDelegation(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": errNotSuperAdmin})
+			abortErr(c, http.StatusForbidden, errNotSuperAdmin)
 			return
 		}
 		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delegation ID"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Delegations-ID.")
 			return
 		}
 		if err := app.DelegationDelete(id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			app.respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, StatusResponse{Status: "deleted"})
@@ -170,12 +170,12 @@ func listOrphanedZones(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can view orphaned zones"})
+			abortErr(c, http.StatusForbidden, "Verwaiste Zonen sehen nur Super-Admins.")
 			return
 		}
 		zones, err := app.OrphanedZones()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list orphaned zones"})
+			abortErr(c, http.StatusInternalServerError, "Die verwaisten Zonen ließen sich nicht laden.")
 			return
 		}
 		c.JSON(http.StatusOK, OrphanedZonesResponse{Zones: zones})
@@ -200,7 +200,7 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		if !isSuperAdmin(app, user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only super admins can delete orphaned zones"})
+			abortErr(c, http.StatusForbidden, "Verwaiste Zonen löschen nur Super-Admins.")
 			return
 		}
 		zoneName, ok := zoneParam(c, "zone")
@@ -209,22 +209,22 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 		}
 		z, err := app.Storage.GetZoneByName(zoneName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to look up zone"})
+			abortErr(c, http.StatusInternalServerError, "Die Zone ließ sich nicht nachschlagen.")
 			return
 		}
 		if z == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
+			abortErr(c, http.StatusNotFound, "Die Zone gibt es nicht.")
 			return
 		}
 		// Safety: only delete through this endpoint if the zone really is orphaned.
 		owner := &UserClaims{Email: z.Username}
 		allowed, _, err := app.PolicyIsZoneAllowedForUser(zoneName, owner)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check zone"})
+			abortErr(c, http.StatusInternalServerError, "Die Zone ließ sich nicht prüfen.")
 			return
 		}
 		if allowed {
-			c.JSON(http.StatusConflict, gin.H{"error": "Zone is covered by a policy; delete it via Zone Management instead"})
+			abortErr(c, http.StatusConflict, "Die Zone ist von einer Regel abgedeckt; sie lässt sich nur in der Zonenverwaltung löschen.")
 			return
 		}
 		statusCode, returnValue, err := app.ZoneDelete(c.Request.Context(), z.Username, zoneName)

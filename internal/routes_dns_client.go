@@ -8,9 +8,10 @@ import (
 	"github.com/miekg/dns"
 )
 
-// ErrorResponse represents a generic API error
+// ErrorResponse represents a generic API error: the text for people and the stable code (apierr.Body).
 type ErrorResponse struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
 }
 
 // Request format for all DNS calls
@@ -102,7 +103,7 @@ func GetTSIGCredentials(c *gin.Context) (TSIGCredentials, *ErrorResponse) {
 	}
 	if !creds.complete() {
 		return TSIGCredentials{}, &ErrorResponse{
-			Error: "TSIG headers required: X-DNS-Key-Name, X-DNS-Key-Algorithm, X-DNS-Key",
+			Error: "TSIG-Header erforderlich: X-DNS-Key-Name, X-DNS-Key-Algorithm, X-DNS-Key.",
 		}
 	}
 	return creds, nil
@@ -112,7 +113,7 @@ func GetTSIGCredentials(c *gin.Context) (TSIGCredentials, *ErrorResponse) {
 func CheckTSIGRequestData(req *DNSRecordRequest) *ErrorResponse {
 	if req.KeyName == "" || req.KeyAlgorithm == "" || req.Key == "" {
 		return &ErrorResponse{
-			Error: "TSIG credentials required: key_name, key_algorithm, key",
+			Error: "TSIG-Zugangsdaten erforderlich: key_name, key_algorithm, key.",
 		}
 	}
 	return nil
@@ -143,7 +144,7 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 		zone := strings.TrimSpace(c.Query("zone"))
 		if zone == "" {
 			app.Log.Error("Zone query parameter missing")
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "zone query parameter required"})
+			abortErr(c, http.StatusBadRequest, "Der Parameter zone fehlt.")
 			return
 		}
 
@@ -155,14 +156,14 @@ func listDNSRecords(app *AppData) gin.HandlerFunc {
 		creds, tsigErr := GetTSIGCredentials(c)
 		if tsigErr != nil {
 			app.Log.Error("TSIG headers missing")
-			c.JSON(http.StatusBadRequest, tsigErr)
+			abortErr(c, http.StatusBadRequest, tsigErr.Error)
 			return
 		}
 
 		records, err := app.RecordsList(c.Request.Context(), user.Identity(), zone, creds)
 		if err != nil {
 			app.Log.Warnf("listDNSRecords: %v", err)
-			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
+			app.respondError(c, err)
 			return
 		}
 
@@ -193,7 +194,7 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 
 		var req DNSRecordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 
@@ -202,14 +203,14 @@ func createDNSRecord(app *AppData) gin.HandlerFunc {
 		app.Log.Debug("-------------------------------------------------------------------------------")
 
 		if tsigErr := CheckTSIGRequestData(&req); tsigErr != nil {
-			c.JSON(http.StatusBadRequest, tsigErr)
+			abortErr(c, http.StatusBadRequest, tsigErr.Error)
 			return
 		}
 
 		record, err := app.RecordUpsert(c.Request.Context(), user.Identity(), req.record(), req.credentials())
 		if err != nil {
 			app.Log.Warnf("createDNSRecord: %v", err)
-			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
+			app.respondError(c, err)
 			return
 		}
 
@@ -247,12 +248,12 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 
 		var req DNSRecordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
 			return
 		}
 
 		if tsigErr := CheckTSIGRequestData(&req); tsigErr != nil {
-			c.JSON(http.StatusBadRequest, tsigErr)
+			abortErr(c, http.StatusBadRequest, tsigErr.Error)
 			return
 		}
 
@@ -263,7 +264,7 @@ func deleteDNSRecord(app *AppData) gin.HandlerFunc {
 		record, err := app.RecordDelete(c.Request.Context(), user.Identity(), req.record(), req.credentials())
 		if err != nil {
 			app.Log.Warnf("deleteDNSRecord: %v", err)
-			c.JSON(StatusOf(err), ErrorResponse{Error: MessageOf(err)})
+			app.respondError(c, err)
 			return
 		}
 
