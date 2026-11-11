@@ -12,7 +12,7 @@ import (
 func newTestApp(t *testing.T) *AppData {
 	t.Helper()
 	// A private cache per test, so parallel tests do not share a database.
-	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("failed to create test storage: %v", err)
 	}

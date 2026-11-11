@@ -120,7 +120,7 @@ func freeLoopbackAddr(t *testing.T) string {
 func SeedPolicyRulesForTests(t *testing.T) {
 	t.Helper()
 
-	store, err := NewStorage("sqlite", "file::memory:?cache=shared")
+	store, err := NewStorage("sqlite", "file::memory:?cache=shared", nil)
 	if err != nil {
 		t.Fatalf("app.SeedPolicyRulesForTests: opening the test store: %v", err)
 	}

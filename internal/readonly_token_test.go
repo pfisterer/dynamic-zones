@@ -25,7 +25,7 @@ func readOnlyFixture(t *testing.T, useRESTRule bool) (http.Handler, string, stri
 	gin.SetMode(gin.TestMode)
 	log := zap.NewNop().Sugar()
 
-	store, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	store, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}

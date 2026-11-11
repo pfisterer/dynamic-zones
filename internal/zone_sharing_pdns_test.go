@@ -51,7 +51,7 @@ func newPdnsTestAppWithContainer(t *testing.T) (*AppData, *test_helpers.PdnsCont
 		t.Fatalf("failed to create PowerDNS client: %v", err)
 	}
 
-	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("failed to create test storage: %v", err)
 	}

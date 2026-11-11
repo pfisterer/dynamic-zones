@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/pfisterer/cloud-self-service-golib/mcpserve/mcptest"
 )
 
 // The point of the record tools, against a real PowerDNS: a caller writes and
@@ -63,7 +64,7 @@ func TestMCP_RecordToolsNeverSeeTheZoneKey(t *testing.T) {
 	}
 
 	srv, _, writeSecret := mcpTestServerFor(t, app, user)
-	session := mcpSession(t, srv, writeSecret)
+	session := mcptest.Dial(t, srv.URL+"/mcp", writeSecret)
 
 	// A write with no credential anywhere in the arguments.
 	written := callToolJSON(t, session, "set_dns_record", map[string]any{
@@ -118,7 +119,7 @@ func TestMCP_RecordToolsRefuseAZoneTheCallerDoesNotOwn(t *testing.T) {
 
 	// A token belonging to somebody else entirely.
 	srv, _, writeSecret := mcpTestServerFor(t, app, "mallory")
-	session := mcpSession(t, srv, writeSecret)
+	session := mcptest.Dial(t, srv.URL+"/mcp", writeSecret)
 
 	msg := callToolErr(t, session, "set_dns_record", map[string]any{
 		"zone": zone, "name": "www", "type": "A", "value": "192.0.2.66",
@@ -135,18 +136,9 @@ func TestMCP_RecordToolsRefuseAZoneTheCallerDoesNotOwn(t *testing.T) {
 // test if the call errored.
 func callToolJSON(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) string {
 	t.Helper()
-	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		t.Fatalf("call %s: %v", name, err)
-	}
+	res := mcptest.Call(t, session, name, args)
 	if res.IsError {
-		var sb strings.Builder
-		for _, c := range res.Content {
-			if tc, ok := c.(*mcp.TextContent); ok {
-				sb.WriteString(tc.Text)
-			}
-		}
-		t.Fatalf("%s reported an error: %s", name, sb.String())
+		t.Fatalf("%s reported an error: %s", name, mcptest.Text(res))
 	}
 	raw, err := json.Marshal(res.StructuredContent)
 	if err != nil {

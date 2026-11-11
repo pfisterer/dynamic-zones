@@ -138,7 +138,7 @@ func TestDropSoftDelete_IsIdempotent(t *testing.T) {
 // The tokens column is dropped too, and — unlike zones — without touching any
 // rows: nothing has written it since the token code moved to the shared library.
 func TestDropSoftDelete_LeavesTokensIntactWhileDroppingTheirColumn(t *testing.T) {
-	store, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	store, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}

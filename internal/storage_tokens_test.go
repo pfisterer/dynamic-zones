@@ -13,7 +13,7 @@ import (
 // when the owner lists their tokens, so the expiry has to be enforced on the
 // lookup path itself.
 func TestExpiredTokenDoesNotAuthenticate(t *testing.T) {
-	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestExpiredTokenDoesNotAuthenticate(t *testing.T) {
 
 // The secret must be reachable exactly once, and never out of the database.
 func TestTokenSecretIsNotStored(t *testing.T) {
-	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestTokenSecretIsNotStored(t *testing.T) {
 
 // The prefix is what routes a credential to the token path instead of OIDC.
 func TestTokensOwnsOnlyThisServicesPrefix(t *testing.T) {
-	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := NewStorage("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared", nil)
 	if err != nil {
 		t.Fatalf("create storage: %v", err)
 	}

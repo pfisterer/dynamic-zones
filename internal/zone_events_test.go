@@ -20,7 +20,7 @@ import (
 func newZoneEventsTestApp(t *testing.T, cfg ZoneEventsConfig) *AppData {
 	t.Helper()
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	storage, err := NewStorage("sqlite", dsn)
+	storage, err := NewStorage("sqlite", dsn, nil)
 	if err != nil {
 		t.Fatalf("opening test storage: %v", err)
 	}

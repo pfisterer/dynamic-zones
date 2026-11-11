@@ -84,7 +84,7 @@ func RunApplication() {
 	}
 
 	// Create storage component
-	db, err := NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString)
+	db, err := NewStorage(appConfig.Storage.DbType, appConfig.Storage.DbConnectionString, log)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}

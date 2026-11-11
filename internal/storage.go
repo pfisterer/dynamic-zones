@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pfisterer/cloud-self-service-golib/retry"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"github.com/pfisterer/cloud-self-service-golib/tokengorm"
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -92,7 +94,8 @@ type Storage struct {
 	Tokens *token.Service
 }
 
-func NewStorage(dbType string, connectionString string) (*Storage, error) {
+// NewStorage connects to the database and migrates it. A networked database (postgres, mysql) is waited for up to a minute, with every failed attempt logged when log is set: since the NetworkPolicies a new pod is let through only a moment after it starts, so the first attempt can be refused although nothing is wrong. A sqlite file is not waited for, since it does not come up later.
+func NewStorage(dbType string, connectionString string, log *zap.SugaredLogger) (*Storage, error) {
 	var dialector gorm.Dialector
 	var err error
 
@@ -107,7 +110,19 @@ func NewStorage(dbType string, connectionString string) (*Storage, error) {
 		return nil, fmt.Errorf("storage.NewStorage: Unsupported database type: %s", dbType)
 	}
 
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	var db *gorm.DB
+	err = retry.Do(context.Background(), retry.Policy{Total: time.Minute, OnRetry: func(attempt int, err error, wait time.Duration) {
+		if log != nil {
+			log.Infow("database not reachable yet, trying again", "type", dbType, "attempt", attempt, "in", wait.String(), "error", err)
+		}
+	}}, func(context.Context) error {
+		var err error
+		db, err = gorm.Open(dialector, &gorm.Config{})
+		if err != nil && dbType == "sqlite" {
+			return retry.Permanent(err)
+		}
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to connect to %s database: %w", dbType, err)
 	}
