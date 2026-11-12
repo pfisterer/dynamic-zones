@@ -185,6 +185,8 @@ type ZoneStatus struct {
 	// Parent: for a created subzone, the base zone it is delegated under
 	// (empty for policy base zones). Lets the UI indent subzones under their parent.
 	Parent string `json:"parent,omitempty"`
+	// ZoneSoa: for a top-level zone, the zone it was given out of — the governing policy rule's zone_soa (e.g. users.dhbw.site for a personal zone), or for a zone shared with the user the SOA of the rule that governs it. The part of the name the user does not own, which the UI groups the zones by. Empty for subzones (they belong to their parent) and when no rule governs the zone any more.
+	ZoneSoa string `json:"zone_soa,omitempty"`
 	// Owners: the users currently managing this (existing) zone. Shown in the UI
 	// so a shared zone's co-owners are visible before opening it.
 	Owners []string `json:"owners,omitempty"`

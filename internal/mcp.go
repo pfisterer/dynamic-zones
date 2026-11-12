@@ -147,6 +147,7 @@ type mcpZone struct {
 	AllowSubdomains bool     `json:"allow_subdomains" jsonschema:"whether delegated subzones may be created under it"`
 	SharingAllowed  bool     `json:"sharing_allowed" jsonschema:"whether it may be shared with further owners"`
 	Parent          string   `json:"parent,omitempty" jsonschema:"for a subzone, the zone it is delegated under"`
+	ZoneSoa         string   `json:"zone_soa,omitempty" jsonschema:"for a top-level zone, the zone it was given out of (its policy rule's zone_soa, e.g. users.dhbw.site); empty for subzones"`
 	Owners          []string `json:"owners,omitempty" jsonschema:"who manages it; only visible to an owner"`
 	Creator         string   `json:"creator,omitempty" jsonschema:"which owner created it: the only one who may delete it or remove other owners; only visible to an owner"`
 }
@@ -160,6 +161,7 @@ func toMCPZone(z ZoneStatus) mcpZone {
 		AllowSubdomains: z.AllowSubdomains,
 		SharingAllowed:  z.SharingAllowed,
 		Parent:          z.Parent,
+		ZoneSoa:         z.ZoneSoa,
 		Owners:          z.Owners,
 		Creator:         z.Creator,
 	}

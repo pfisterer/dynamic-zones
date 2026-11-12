@@ -119,3 +119,47 @@ func TestSubzoneDefViaOwnedParent(t *testing.T) {
 		t.Errorf("expected no definition for a non-owner, got %+v", def)
 	}
 }
+
+// ZoneList tells for every top-level zone the zone it was given out of (zone_soa): a zone a rule grants carries the rule's SOA, a zone shared with the user the SOA of the rule that governs it (through its owner), a subzone none, since it belongs to its parent.
+func TestZoneListZoneSoa(t *testing.T) {
+	app := newTestApp(t)
+	for _, rule := range []PolicyRule{
+		{ZonePattern: "%u.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", AllowSubdomains: true},
+		{ZonePattern: "test.pfisterer.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "dennis@dhbw.de", AllowSubdomains: true},
+		{ZonePattern: "services.dhbw.cloud", ZoneSoa: "dhbw.cloud", TargetUserFilter: "clemens@dhbw.de", AllowSubdomains: true, SharingAllowed: true},
+	} {
+		if _, err := app.Storage.PolicyCreate(&rule); err != nil {
+			t.Fatalf("failed to create policy rule: %v", err)
+		}
+	}
+	addZone(t, app, "dennis@dhbw.de", "dennis-at-dhbw-de.users.dhbw.site")
+	addZone(t, app, "dennis@dhbw.de", "iot.dennis-at-dhbw-de.users.dhbw.site")
+	addZone(t, app, "clemens@dhbw.de", "services.dhbw.cloud")
+	addZone(t, app, "dennis@dhbw.de", "services.dhbw.cloud") // shared with dennis, no rule of his grants it
+	addZone(t, app, "clemens@dhbw.de", "llm.services.dhbw.cloud")
+	addZone(t, app, "dennis@dhbw.de", "llm.services.dhbw.cloud")
+
+	zones, err := app.ZoneList(&UserClaims{Email: "dennis@dhbw.de"})
+	if err != nil {
+		t.Fatalf("ZoneList failed: %v", err)
+	}
+	got := make(map[string]string, len(zones))
+	for _, z := range zones {
+		got[z.Name] = z.ZoneSoa
+	}
+	want := map[string]string{
+		"dennis-at-dhbw-de.users.dhbw.site":     "users.dhbw.site",
+		"test.pfisterer.users.dhbw.site":        "users.dhbw.site", // granted, not created yet
+		"iot.dennis-at-dhbw-de.users.dhbw.site": "",
+		"services.dhbw.cloud":                   "dhbw.cloud",
+		"llm.services.dhbw.cloud":               "",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got zones %v, want %v", got, want)
+	}
+	for name, soa := range want {
+		if s, ok := got[name]; !ok || s != soa {
+			t.Errorf("%s: zone_soa %q (listed %v), want %q", name, s, ok, soa)
+		}
+	}
+}

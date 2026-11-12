@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,8 @@ func testGetAvailableZones(t *testing.T) []app.ZoneStatus {
 	actualZones := make([]string, 0, len(response.Zones))
 	for _, zone := range response.Zones {
 		actualZones = append(actualZones, zone.Name)
+		// Every zone here comes from a rule "%u.<zone>" with SOA <zone>: the zone it was given out of is its name without the user's label.
+		assert.Equal(t, strings.TrimPrefix(zone.Name, app.GetExpectedUserNameForTests()+"."), zone.ZoneSoa, "testGetAvailableZones: zone_soa of %s", zone.Name)
 	}
 
 	assert.ElementsMatch(t, expectedZones, actualZones, "testGetAvailableZones: Expected zones do not match the response zones")

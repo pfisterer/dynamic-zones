@@ -1101,6 +1101,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			SharingAllowed:            zone.SharingAllowed,
 			Owners:                    owners,
 			Creator:                   creator,
+			ZoneSoa:                   zone.ZoneSOA,
 		})
 	}
 
@@ -1166,6 +1167,10 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			// subzone of one -> a zone SHARED with them (or orphaned). Show it
 			// as a top-level managed zone, using its governing rule's flags.
 			def := govDefs[cz.Zone]
+			soa := ""
+			if def != nil {
+				soa = def.ZoneSOA
+			}
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 				Name:            cz.Zone,
 				Exists:          true,
@@ -1173,6 +1178,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 				SharingAllowed:  def != nil && def.SharingAllowed,
 				Owners:          zOwners,
 				Creator:         zCreator,
+				ZoneSoa:         soa,
 			})
 			continue
 		}

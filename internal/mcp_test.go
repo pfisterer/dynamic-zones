@@ -230,6 +230,8 @@ func TestMCP_ToolsActAsTheTokenOwner(t *testing.T) {
 	}
 	if len(got.Zones) != 1 || got.Zones[0].Name != "alice.users.example.com" {
 		t.Errorf("got %+v, want the zone alice's rule grants", got.Zones)
+	} else if got.Zones[0].ZoneSoa != "users.example.com" {
+		t.Errorf("zone_soa = %q, want the rule's SOA users.example.com", got.Zones[0].ZoneSoa)
 	}
 }
 
