@@ -12,13 +12,19 @@ import (
 
 var dnsLabelCharRegex = regexp.MustCompile("^[A-Za-z0-9-]+$")
 
+// DNS limits (RFC 1035): a label has at most 63 characters, a name in text form without the trailing root dot at most 253.
+const (
+	DnsMaxLabelLength = 63
+	DnsMaxNameLength  = 253
+)
+
 func DnsValidateName(value string) error {
 	if value == "" {
 		return invalid("Der Name ist leer.")
 	}
 
-	if len(value) == 0 || len(value) > 253 {
-		return invalid("Der Name muss 1 bis 253 Zeichen lang sein.")
+	if len(value) > DnsMaxNameLength {
+		return invalid("Der Name hat %d Zeichen, erlaubt sind höchstens %d.", len(value), DnsMaxNameLength)
 	}
 
 	parts := strings.Split(value, ".")
@@ -41,8 +47,8 @@ func DnsValidateName(value string) error {
 func DnsIsValidLabel(label string) error {
 	// 1. Check length constraints
 	length := len(label)
-	if length < 1 || length > 63 {
-		return invalid("Jedes Label muss 1 bis 63 Zeichen lang sein, eines hat %d.", length)
+	if length < 1 || length > DnsMaxLabelLength {
+		return invalid("Jedes Label muss 1 bis %d Zeichen lang sein, eines hat %d.", DnsMaxLabelLength, length)
 	}
 
 	// 2. Allowed characters: alphanumeric and hyphen (test with regex)
