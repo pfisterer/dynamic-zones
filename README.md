@@ -2,86 +2,50 @@
 
 ## Why
 
-A DNS name is the smallest possible request and one of the slowest to fulfil. A
-student needs `myproject.students.example.edu` for a demo, a lecturer needs a
-handful of names for a course, a Kubernetes cluster needs to prove domain
-ownership to Let's Encrypt every few weeks — and all of it typically ends in a
-ticket to whoever holds the zone file. The wait is longer than the work.
+A DNS name is the smallest possible request and one of the slowest to fulfil. A student needs `myproject.students.example.edu` for a demo, a lecturer needs a handful of names for a course, a Kubernetes cluster needs to prove domain ownership to Let's Encrypt every few weeks — and all of it typically ends in a ticket to whoever holds the zone file. The wait is longer than the work.
 
-The obstacle is not effort but trust: giving someone write access to a zone means
-giving it for the *whole* zone. So requests are funnelled through people who are
-allowed to edit it, and automation gets a shared credential nobody dares rotate.
+The obstacle is not effort but trust: giving someone write access to a zone means giving it for the *whole* zone. So requests are funnelled through people who are allowed to edit it, and automation gets a shared credential nobody dares rotate.
 
-This service removes that trade-off. A policy states which names which people may
-have; anyone matching it creates their zone themselves and gets a key that is
-valid **for that zone only**. Machines then keep their own records up to date over
-the standard protocol (RFC 2136), with no human in the loop and no credential
-that reaches beyond one delegated name.
+This service removes that trade-off. A policy states which names which people may have; anyone matching it creates their zone themselves and gets a key that is valid **for that zone only**. Machines then keep their own records up to date over the standard protocol (RFC 2136), with no human in the loop and no credential that reaches beyond one delegated name.
 
-Put plainly: this is the self-service layer over a hardened
-[PowerDNS](https://doc.powerdns.com/) installation. PowerDNS stays the
-authoritative nameserver and does what it is good at; this service owns the
-question PowerDNS has no opinion about — *who is allowed to have which name, and
-with which key* — and configures it accordingly through its HTTP API.
+Put plainly: this is the self-service layer over a hardened [PowerDNS](https://doc.powerdns.com/) installation. PowerDNS stays the authoritative nameserver and does what it is good at; this service owns the question PowerDNS has no opinion about — *who is allowed to have which name, and with which key* — and configures it accordingly through its HTTP API.
 
-It is an API and usable on its own: zones, records, keys and policy are all
-reachable over HTTP, and it ships a generated TypeScript client. If you want a
-browser interface rather than building one,
-[**self-service-ui**](https://github.com/pfisterer/self-service-ui) is one — zone
-and record management, API tokens, the policy view and ready-made snippets for
-`nsupdate`, `external-dns` and `cert-manager`. Its README has screenshots.
+It is an API and usable on its own: zones, records, keys and policy are all reachable over HTTP, and it ships a generated TypeScript client. If you want a browser interface rather than building one, [**self-service-ui**](https://github.com/pfisterer/self-service-ui) is one — zone and record management, API tokens, the policy view and ready-made snippets for `nsupdate`, `external-dns` and `cert-manager`. Its README has screenshots.
 
 ## What it does
 
-- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`,
-  where `%u` stands for the requester) may be created by whom
-  (`target_user_filter`: single addresses or `*@domain`), under which
-  authoritative zone (`zone_soa`), and whether subdomains and co-ownership are
-  permitted. Users can create exactly what a rule grants them — nothing else.
-- **Per-zone TSIG keys.** Each zone gets its own key. It is what `nsupdate`,
-  [external-dns](https://github.com/kubernetes-sigs/external-dns) or
-  [cert-manager](https://cert-manager.io/) use to write records, and it cannot
-  touch any other zone. Keys can be rotated.
-- **Records in the browser or over the API.** The same records can be edited in
-  the web UI or written by machines via RFC 2136.
-- **PowerDNS as the authoritative server.** The service configures PowerDNS
-  through its HTTP API and never edits zone files or the backend database itself.
-  Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS
-  configuration, not this service's business.
+- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`, where `%u` stands for the requester) may be created by whom (`target_user_filter`: single addresses or `*@domain`), under which authoritative zone (`zone_soa`), and whether subdomains and co-ownership are permitted. Users can create exactly what a rule grants them — nothing else.
+- **Per-zone TSIG keys.** Each zone gets its own key. It is what `nsupdate`, [external-dns](https://github.com/kubernetes-sigs/external-dns) or [cert-manager](https://cert-manager.io/) use to write records, and it cannot touch any other zone. Keys can be rotated.
+- **Records in the browser or over the API.** The same records can be edited in the web UI or written by machines via RFC 2136.
+- **PowerDNS as the authoritative server.** The service configures PowerDNS through its HTTP API and never edits zone files or the backend database itself. Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS configuration, not this service's business.
 - **Upstream delegation.** For the managed zones to resolve globally, the parent zone must delegate to this nameserver. Either configure that once upstream, or let this service keep its own `A`/`AAAA` record current in the upstream zone via RFC 2136 itself.
 - **Shared zones and delegated policy administration.** A zone may have several owners, one of whom created it: only the creator (or a super-admin) may delete the zone, remove other owners or rotate everyone's keys, while an owner who joined or was added may leave and rotate their own key. Subzones are created below a zone the requester owns, never below somebody else's; a *delegation* lets named people manage policy rules for one zone and its subdomains without being a global administrator. Anyone can list the delegations that apply to them (zone suffix and description); only super-admins see every delegation and whom it targets.
 - **Zone events.** Problems observed with a zone — for example a client that keeps failing TSIG against it — are shown to the zone's owners, and to super-admins for all zones together with the owners to contact. The service stores and serves them; producing them is left to a monitoring system (see [Zone events](#zone-events)).
-- **API tokens** for automation, optionally read-only (a read-only token is
-  refused on anything but `GET`, and never sees a zone's TSIG key).
+- **API tokens** for automation, optionally read-only (a read-only token is refused on anything but `GET`, and never sees a zone's TSIG key).
 
 ### Zones, rules and "orphaned" zones
 
-A zone's relationship to a policy rule is **recomputed, never stored**. A zone is
-*orphaned* when no current rule would produce that name for that owner — which
-happens when a rule is edited or deleted. The zone and its records keep working;
-what the owner loses is the right to manage it.
+A zone's relationship to a policy rule is **recomputed, never stored**. A zone is *orphaned* when no current rule would produce that name for that owner — which happens when a rule is edited or deleted. The zone and its records keep working; what the owner loses is the right to manage it.
 
-The remedy is therefore to **fix the rule**, not to delete the zone. A single typo
-in a `target_user_filter` orphans every zone that rule covered, and deleting the
-zones would destroy records that were never the problem. The UI lists orphaned
-zones for administrators so the mistake is visible.
+The remedy is therefore to **fix the rule**, not to delete the zone. A single typo in a `target_user_filter` orphans every zone that rule covered, and deleting the zones would destroy records that were never the problem. The UI lists orphaned zones for administrators so the mistake is visible.
+
+The zone list (`GET /v1/zones/`, and `list_my_zones` over MCP) tells for every top-level zone the zone it was given out of, as `zone_soa`: the governing rule's `zone_soa` (e.g. `users.dhbw.site` for a personal zone), or for a zone shared with the caller the SOA of the rule that governs it through its owners. It is the part of the name the user does not own, which the UI groups the zones by. It is left out for subzones, which carry their `parent` instead, and for a zone no rule governs any more.
+
+### Zone names
+
+A zone has exactly one spelling: every entry point (REST, MCP, the record endpoints) trims it, lower-cases it and drops one trailing dot before anything else looks at it, and only that canonical form is stored — PowerDNS treats `X.P`, `x.p` and `x.p.` as one zone, so a second spelling must never look like a different, unclaimed one. A name must be a plain host name of at least two labels, each label 1–63 characters of `[a-z0-9-]` without a leading or trailing hyphen, at most 253 characters in total. Underscores, wildcards and empty labels are refused rather than repaired, and an over-long name is refused with its length.
 
 ## API
 
-The service is served under `/v1` and publishes its own OpenAPI description — that
-spec is the authoritative reference, so it cannot drift from the implementation the
-way a hand-written endpoint list does:
+The service is served under `/v1` and publishes its own OpenAPI description — that spec is the authoritative reference, so it cannot drift from the implementation the way a hand-written endpoint list does:
 
 - **`GET /swagger.json`** — the OpenAPI spec
 - **`GET /healthz`** and **`GET /readyz`** — the probes, unauthenticated: alive while the process serves; ready while the database answers (503 with the failing checks under `failed`). The identity provider's keys are listed under `degraded` without making it 503, since API tokens and dyndns updates work without the provider
-- A generated TypeScript client is published to npm as `@dhbw-cloud/dynamic-zones-client`.
-  It used to be served from `/client/` and loaded by the browser at startup; consumers
-  now depend on a version at build time, so a missing operation is a build error there
-  instead of a silent no-op in the browser.
+- A generated TypeScript client is published to npm as `@dhbw-cloud/dynamic-zones-client`. It used to be served from `/client/` and loaded by the browser at startup; consumers now depend on a version at build time, so a missing operation is a build error there instead of a silent no-op in the browser.
 
-[self-service-ui](https://github.com/pfisterer/self-service-ui) renders the same
-spec in the browser under *DNS Zones → API Documentation*, which is usually the
-quickest way to look something up and try it out.
+Every text meant for people — error messages, refusals, the MCP tools' answers — exists in German and English. The caller picks with `Accept-Language`; German is the default when the header is missing or names neither, and answers carry `Vary: Accept-Language`. An error answer also carries a stable `code` (e.g. `unauthenticated`, `act_as_forbidden`) for clients to match on instead of the text, and a 5xx says only "internal error" while the cause goes to the log. Log messages stay English.
+
+[self-service-ui](https://github.com/pfisterer/self-service-ui) renders the same spec in the browser under *DNS Zones → API Documentation*, which is usually the quickest way to look something up and try it out.
 
 ### MCP
 
@@ -104,7 +68,7 @@ Both are part of the public `/v1` surface, so being logged in is not enough: onl
 
 ## Running it locally
 
-**Prerequisites:** Go 1.26+ ([swag](https://github.com/swaggo/swag) is installed by `make` when missing), a reachable PowerDNS with its API enabled, a reachable OIDC issuer (unless `OIDC_JWKS_URL` is set, startup fetches its discovery document, in development mode too), and optionally [air](https://github.com/air-verse/air) for live reload. Node.js is only needed to build the npm client package, Docker only for the tests.
+**Prerequisites:** Go 1.26+ (`go.mod` pins the toolchain, go1.27.4, which the `go` command fetches itself) ([swag](https://github.com/swaggo/swag) is installed by `make` when missing), a reachable PowerDNS with its API enabled, a reachable OIDC issuer (unless `OIDC_JWKS_URL` is set, startup fetches its discovery document, in development mode too), and optionally [air](https://github.com/air-verse/air) for live reload. Node.js is only needed to build the npm client package, Docker only for the tests.
 
 A minimal PowerDNS for development (SQLite backend, API on 8080, DNS on 53 — published on 15353 when run in a container, which is what the defaults below expect):
 
@@ -132,13 +96,24 @@ make all     # swagger + binary
 
 A fresh clone does not compile until `make bundle` (or `make all`) has generated `internal/generated_docs/`. Besides `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`, startup requires `PDNS_API_KEY`, `UPSTREAM_DNS_NAME` and `UPSTREAM_DNS_ZONE` (see [Upstream nameserver](#upstream-nameserver)); set `API_MODE=development` in the environment or in `.env`.
 
-`make test` runs integration tests: they start a PowerDNS container and the real application on `:8082`, so a running development server makes them fail with "address already in use", and they need the same OIDC and upstream variables.
+`make test` runs integration tests: they start a PowerDNS container and the real application on a free loopback port (so a running development server does not get in the way), in development mode with an in-memory SQLite database, and they need the same OIDC and upstream variables (from `.env` locally; CI sets them).
 
 `API_MODE=development` **bypasses authentication**: a request without a bearer is the dev user `DEV_AUTH_USER` (default `root.admin@uni.example`). That is the whole login in development — and the reason `API_MODE` must be `production` everywhere else. Other people are reached as in production, with `X-Act-As` (below), so the dev user should be a super admin.
 
 A super admin (`DNS_POLICY_SUPERADMIN_EMAILS`) may act on behalf of another person, e.g. for a ticket, by sending `X-Act-As: <email>` — the header every service of the platform reads, each checking it against its own admins. The request then is that person's: their zones, their policy rules, their `%u`, and no super-admin rights unless they have them. Writes are logged with both. Not with an API token (403); the person's own API tokens are managed like everything else of theirs. `GET /v1/me` reports `may_act_as` and `acting_as`.
 
-A `run-development.sh` in the workspace that holds the sibling repositories (not part of this repository) starts PowerDNS, this API, the role-provider, the OpenStack management API and the web UI together.
+A `run-development.sh` in the workspace that holds the sibling repositories (not part of this repository) starts PowerDNS, this API, the role-provider, the OpenStack management API and the web UI together. For this service it amounts to:
+
+```bash
+# PowerDNS from the power-dns-lua repository: API on :8080, DNS on :15353 (the PDNS_* defaults)
+API_MODE=development DEV_AUTH_USER=root.admin@uni.example \
+  DNS_POLICY_SUPERADMIN_EMAILS=root.admin@uni.example \
+  PDNS_API_KEY=my-default-api-key \
+  air                                         # the API on :8082
+sh scripts/dev-seed-zones.sh http://localhost:8082
+```
+
+The OIDC and upstream variables come from a local `.env`, as does `INITIAL_DATA_SCRIPT_PATH=initial_data_provider.js`. That script seeds the policy rules when the database has none — among them rules that give the dev user `root.admin@uni.example` zones like a busy admin's on production. `scripts/dev-seed-zones.sh` waits for `/readyz` and then creates those zones as the dev user: the personal zone `root-admin-at-uni-example.users.dhbw.site` with three subzones, `test.` and `bigdata.pfisterer.users.dhbw.site` (the latter with a subzone), and the shared team zones `wi-ma.dhbw.site` and `services.dhbw.cloud` with their subzones and two co-owners each from the mock identities (`admin@cs.example`, `faculty@cs.example`, `faculty@bio.example`). The database is in memory, so after a restart (air restarts on every change) run the script again; a zone or owner that already exists only answers with an error, which the script prints and ignores.
 
 ## Configuration
 
@@ -159,8 +134,9 @@ All configuration is environment variables. A `.env` file in the working directo
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated origins for the browser client |
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` | — | Bearer-token verification (required) |
 | `OIDC_JWKS_URL` | — | The provider's key set (`…/protocol/openid-connect/certs` on Keycloak). Set it and startup asks the provider nothing, so an identity provider that is down cannot keep this service from starting; empty discovers the address from the issuer, which needs the provider to answer right then. A token that cannot be checked while the provider is away is answered 503, not 401 |
-| `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy |
-| `INITIAL_DATA_SCRIPT_PATH` | — | JS file that seeds rules/zones on first start |
+| `DEV_AUTH_USER` | `root.admin@uni.example` | Who a request without a bearer is in development mode; ignored otherwise |
+| `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy and act on behalf of others |
+| `INITIAL_DATA_SCRIPT_PATH` | — | JavaScript file run at every start with a `policy` object (`getAll`, `createRule`, `updateRule`, `deleteRule`, …); the bundled `initial_data_provider.js` seeds the policy rules only when there are none |
 | `EXTERNAL_DNS_IMAGE_VERSION` | `v0.19.0` | external-dns image version used in the generated external-dns manifest (a request can override it with `image-version`, which must be a Docker image tag) |
 
 ### PowerDNS
@@ -183,17 +159,9 @@ Keeping that name's `A`/`AAAA` record current in the parent zone is optional and
 
 ### Zone defaults
 
-`ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records written into every newly
-created **user (leaf) zone**; `ZONE_DEFAULTS_SOA_RECORDS` go only into the
-**SOA/base (intermediate) zones** the service creates above them.
-`ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` name the admin key that is added to
-all of these zones. The split is deliberate: a record in the base zone cannot be
-deleted or overridden with the user's own zone key.
+`ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records written into every newly created **user (leaf) zone**; `ZONE_DEFAULTS_SOA_RECORDS` go only into the **SOA/base (intermediate) zones** the service creates above them. `ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` name the admin key that is added to all of these zones. The split is deliberate: a record in the base zone cannot be deleted or overridden with the user's own zone key.
 
-This is where **CAA** belongs. A `CAA` record must name the certificate authority
-that actually signs — not the ACME endpoint in front of it. Naming the proxy host
-instead makes every wildcard issuance fail with an opaque CA error, and
-`issuewild` must be present alongside `issue` or wildcard requests are refused.
+This is where **CAA** belongs. A `CAA` record must name the certificate authority that actually signs — not the ACME endpoint in front of it. Naming the proxy host instead makes every wildcard issuance fail with an opaque CA error, and `issuewild` must be present alongside `issue` or wildcard requests are refused.
 
 ### Zone events
 
@@ -240,34 +208,22 @@ dynamic-zones:
 
 ### What "hardened PowerDNS" means here
 
-An authoritative nameserver on the public internet is a reflection amplifier
-waiting to be used, so PowerDNS should not be exposed directly. Put [dnsdist](https://dnsdist.org/) in front of it and keep PowerDNS itself reachable only inside the cluster:
+An authoritative nameserver on the public internet is a reflection amplifier waiting to be used, so PowerDNS should not be exposed directly. Put [dnsdist](https://dnsdist.org/) in front of it and keep PowerDNS itself reachable only inside the cluster:
 
-- **ANY over UDP is truncated** (`TC=1`), which forces a legitimate client to retry
-  over TCP and gives a spoofed reflection source nothing worth amplifying.
-- **Per-source rate limiting** over UDP, likewise answered with `TC=1` rather than a
-  drop, so rate-limited but genuine clients still get through over TCP.
+- **ANY over UDP is truncated** (`TC=1`), which forces a legitimate client to retry over TCP and gives a spoofed reflection source nothing worth amplifying.
+- **Per-source rate limiting** over UDP, likewise answered with `TC=1` rather than a drop, so rate-limited but genuine clients still get through over TCP.
 - **Bogon and blocklist sources are dropped** outright.
-- **RFC 2136 UPDATE traffic and internal networks** are routed to the PowerDNS pool
-  — that is the path this service and its users' keys take.
-- PowerDNS's **HTTP API is cluster-internal**. Only this service talks to it; the
-  API key never leaves the namespace.
+- **RFC 2136 UPDATE traffic and internal networks** are routed to the PowerDNS pool — that is the path this service and its users' keys take.
+- PowerDNS's **HTTP API is cluster-internal**. Only this service talks to it; the API key never leaves the namespace.
 
 Two things that will bite whoever hardens it further:
 
-- **`disable-axfr` breaks this service.** It uses zone transfers internally, so
-  switching them off wholesale is not an option — restrict them by address instead.
-- **dnsdist has to run with `hostNetwork`.** Behind the cluster's service proxy the
-  source address of every query is rewritten, which silently defeats both the rate
-  limiting and the blocklists above, since every packet then appears to come from
-  the same host.
+- **`disable-axfr` breaks this service.** It uses zone transfers internally, so switching them off wholesale is not an option — restrict them by address instead.
+- **dnsdist has to run with `hostNetwork`.** Behind the cluster's service proxy the source address of every query is rewritten, which silently defeats both the rate limiting and the blocklists above, since every packet then appears to come from the same host.
 
 ### PowerDNS backend
 
-`gsqlite3` and `gpgsql` are both supported and chosen per environment. With
-`gpgsql`, authoritative DNS depends on the database: if Postgres is gone, the
-nameserver stops answering. On a single-node installation that matters less than it
-sounds, but it is a coupling that did not exist with SQLite.
+`gsqlite3` and `gpgsql` are both supported and chosen per environment. With `gpgsql`, authoritative DNS depends on the database: if Postgres is gone, the nameserver stops answering. On a single-node installation that matters less than it sounds, but it is a coupling that did not exist with SQLite.
 
 ## Related projects
 
