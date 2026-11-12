@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 	"github.com/pfisterer/dynamic-zones/internal/helper"
 )
 
@@ -21,7 +22,7 @@ func normalizeZone(zone string) string {
 func canonicalZoneName(raw string) (string, error) {
 	zone := normalizeZone(raw)
 	if err := helper.DnsValidateName(zone); err != nil {
-		return "", invalid("Ungültiger Zonenname %q: %w", raw, err)
+		return "", invalid("Ungültiger Zonenname %q: %w", "Invalid zone name %q: %w", raw, err)
 	}
 	return zone, nil
 }
@@ -30,7 +31,7 @@ func canonicalZoneName(raw string) (string, error) {
 func zoneParam(c *gin.Context, param string) (string, bool) {
 	zone, err := canonicalZoneName(c.Param(param))
 	if err != nil {
-		abortErr(c, http.StatusBadRequest, err.Error())
+		abortErr(c, http.StatusBadRequest, msg.TextOf(err))
 		return "", false
 	}
 	return zone, true

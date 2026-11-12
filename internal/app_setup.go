@@ -153,6 +153,9 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	// Set up the Gin router
 	router = gin.New()
 
+	// The language of every answer for people: German by default, English when the caller asks for it with Accept-Language (golib msg). First, so every middleware that refuses a request answers in it too.
+	router.Use(ginweb.Language())
+
 	if app.Config.DevMode {
 		app.Log.Debugf("Completely disabling caching in development mode.")
 		router.Use(ginweb.DisableCaching())

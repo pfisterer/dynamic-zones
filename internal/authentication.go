@@ -11,6 +11,7 @@ import (
 	"github.com/pfisterer/cloud-self-service-golib/authn"
 	"github.com/pfisterer/cloud-self-service-golib/credential"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 	"github.com/pfisterer/cloud-self-service-golib/oidcauth"
 	"github.com/pfisterer/cloud-self-service-golib/retry"
 	"github.com/pfisterer/cloud-self-service-golib/token"
@@ -183,7 +184,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		if p.ViaAPIToken() {
 			if ingestSubject != "" && p.Token.Subject == ingestSubject && !ingestRoutes[c.Request.Method+" "+c.FullPath()] {
 				log.Warnf("The zone-events ingest token was used for %s %s, refusing", c.Request.Method, c.Request.URL.Path)
-				abortErr(c, http.StatusForbidden, "Dieses Token darf nur Zonen-Ereignisse einliefern.")
+				abortErr(c, http.StatusForbidden, msg.T("Dieses Token darf nur Zonen-Ereignisse einliefern.", "This token may only submit zone events."))
 				return
 			}
 			c.Set(viaAPITokenKey, true)

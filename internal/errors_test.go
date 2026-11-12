@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/pfisterer/cloud-self-service-golib/apierr"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 // A service error answers with its status, the code that follows from it and its own text, never the cause; anything else is a generic 500.
@@ -18,17 +19,17 @@ func TestServiceErrors(t *testing.T) {
 		want apierr.Body
 		code int
 	}{
-		{"refusal", statusErr(http.StatusForbidden, "Kein Eigentümer dieser Zone.", cause), apierr.Body{Error: "Kein Eigentümer dieser Zone.", Code: "forbidden"}, 403},
+		{"refusal", statusErr(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), cause), apierr.Body{Error: "Kein Eigentümer dieser Zone.", Code: "forbidden"}, 403},
 		{"wrapped", errors.Join(errors.New("x"), errRuleNotFound), apierr.Body{Error: "Die Regel gibt es nicht.", Code: "not_found"}, 404},
 		{"no opinion", cause, apierr.Body{Error: "Interner Fehler.", Code: "internal"}, 500},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := serviceErrors.Classify(tc.err)
-			if e.Body() != tc.want || e.Status != tc.code {
-				t.Fatalf("got %d %+v, want %d %+v", e.Status, e.Body(), tc.code, tc.want)
+			if e.Body(msg.DE) != tc.want || e.Status != tc.code {
+				t.Fatalf("got %d %+v, want %d %+v", e.Status, e.Body(msg.DE), tc.code, tc.want)
 			}
-			if StatusOf(tc.err) != tc.code || MessageOf(tc.err) != tc.want.Error {
+			if StatusOf(tc.err) != tc.code || MessageOf(tc.err).String() != tc.want.Error {
 				t.Fatalf("StatusOf/MessageOf = %d %q", StatusOf(tc.err), MessageOf(tc.err))
 			}
 		})

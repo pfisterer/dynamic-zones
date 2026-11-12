@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 // The zone-events API: owners see problems with their zones, producers post
@@ -120,7 +121,7 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 		}
 		if err != nil {
 			app.Log.Errorf("zone-events: listing for %s: %v", user.Identity(), err)
-			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht laden.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Zonen-Ereignisse ließen sich nicht laden.", "The zone events could not be loaded."))
 			return
 		}
 
@@ -131,7 +132,7 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 		owners, err := app.Storage.ListOwnersForZones(zonesOfEvents(events))
 		if err != nil {
 			app.Log.Errorf("zone-events: resolving owners: %v", err)
-			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht laden.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Zonen-Ereignisse ließen sich nicht laden.", "The zone events could not be loaded."))
 			return
 		}
 		c.JSON(http.StatusOK, ZoneEventsResponse{Events: toZoneEventInfos(events, owners)})
@@ -146,7 +147,7 @@ func requireIngestIdentity(app *AppData, c *gin.Context) bool {
 	subject := app.Config.ZoneEvents.IngestSubject
 	if subject == "" || user.Identity() != subject {
 		app.Log.Warnf("zone-events: ingest refused for %q (not the ingest subject)", user.Identity())
-		abortErr(c, http.StatusForbidden, "Diese Identität darf keine Zonen-Ereignisse einliefern.")
+		abortErr(c, http.StatusForbidden, msg.T("Diese Identität darf keine Zonen-Ereignisse einliefern.", "This identity may not submit zone events."))
 		return false
 	}
 	return true
@@ -155,7 +156,7 @@ func requireIngestIdentity(app *AppData, c *gin.Context) bool {
 func requireIngestBudget(app *AppData, limiter *ingestLimiter, c *gin.Context) bool {
 	if !limiter.allow(time.Now()) {
 		app.Log.Warn("zone-events: ingest rate limit exceeded")
-		abortErr(c, http.StatusTooManyRequests, "Zu viele Anfragen zum Einliefern.")
+		abortErr(c, http.StatusTooManyRequests, msg.T("Zu viele Anfragen zum Einliefern.", "Too many submission requests."))
 		return false
 	}
 	return true
@@ -200,11 +201,11 @@ func ingestZoneEvents(app *AppData, limiter *ingestLimiter) gin.HandlerFunc {
 
 		var req ZoneEventsIngestRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 		if len(req.Events) > maxZoneEventBatch {
-			abortErr(c, http.StatusBadRequest, "Zu viele Ereignisse in einer Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Zu viele Ereignisse in einer Anfrage.", "Too many events in one request."))
 			return
 		}
 
@@ -223,7 +224,7 @@ func ingestZoneEvents(app *AppData, limiter *ingestLimiter) gin.HandlerFunc {
 		sum, err := applyZoneEvents(app, "generic", events)
 		if err != nil {
 			app.Log.Errorf("zone-events: generic ingest: %v", err)
-			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht speichern.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Zonen-Ereignisse ließen sich nicht speichern.", "The zone events could not be saved."))
 			return
 		}
 		c.JSON(http.StatusOK, sum)
@@ -270,11 +271,11 @@ func ingestAlertmanagerZoneEvents(app *AppData, limiter *ingestLimiter) gin.Hand
 
 		var payload AlertmanagerWebhook
 		if err := c.ShouldBindJSON(&payload); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 		if len(payload.Alerts) > maxZoneEventBatch {
-			abortErr(c, http.StatusBadRequest, "Zu viele Alarme in einer Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Zu viele Alarme in einer Anfrage.", "Too many alerts in one request."))
 			return
 		}
 
@@ -304,7 +305,7 @@ func ingestAlertmanagerZoneEvents(app *AppData, limiter *ingestLimiter) gin.Hand
 		sum, err := applyZoneEvents(app, "alertmanager", events)
 		if err != nil {
 			app.Log.Errorf("zone-events: alertmanager ingest: %v", err)
-			abortErr(c, http.StatusInternalServerError, "Die Zonen-Ereignisse ließen sich nicht speichern.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Zonen-Ereignisse ließen sich nicht speichern.", "The zone events could not be saved."))
 			return
 		}
 		sum.Skipped += len(payload.Alerts) - len(events)

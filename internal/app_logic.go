@@ -11,8 +11,11 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/apierr"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"gorm.io/gorm"
 )
 
@@ -151,7 +154,7 @@ func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error)
 	err := policyValidateRequest(req)
 	if err != nil {
 		app.Log.Errorf("Invalid policy rule request: %v", err)
-		return nil, statusErr(http.StatusBadRequest, err.Error(), nil)
+		return nil, statusErr(http.StatusBadRequest, msg.TextOf(err), nil)
 	}
 
 	// Create and store the new rule
@@ -178,7 +181,7 @@ func (app *AppData) PolicyUpdateRule(id int64, req PolicyRuleRequest) (*PolicyRu
 	err := policyValidateRequest(req)
 	if err != nil {
 		app.Log.Errorf("Invalid policy rule request: %v", err)
-		return nil, statusErr(http.StatusBadRequest, err.Error(), nil)
+		return nil, statusErr(http.StatusBadRequest, msg.TextOf(err), nil)
 	}
 
 	// Check if rule exists before update attempt
@@ -239,10 +242,10 @@ func (app *AppData) ZoneGet(ctx context.Context, user *UserClaims, zone, externa
 	// The zone must have been created by someone.
 	exists, err := app.Storage.ZoneExists(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob es die Zone gibt, ließ sich nicht prüfen.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Ob es die Zone gibt, ließ sich nicht prüfen.", "Whether the zone exists could not be checked."), fmt.Errorf("app.getZone: %w", err))
 	}
 	if !exists {
-		return errorResult(http.StatusNotFound, "Die Zone gibt es nicht.", fmt.Errorf("app.getZone: zone %s not found", zone))
+		return errorResult(http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."), fmt.Errorf("app.getZone: zone %s not found", zone))
 	}
 
 	// Access requires being an owner. Policy-entitled users of a shareable zone
@@ -250,16 +253,16 @@ func (app *AppData) ZoneGet(ctx context.Context, user *UserClaims, zone, externa
 	// self-join on read.
 	isOwner, err := app.Storage.IsZoneOwner(username, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), fmt.Errorf("app.getZone: %w", err))
 	}
 	if !isOwner {
-		return errorResult(http.StatusForbidden, "Kein Eigentümer dieser Zone.", fmt.Errorf("app.getZone: %s not owned by %s", zone, username))
+		return errorResult(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), fmt.Errorf("app.getZone: %s not owned by %s", zone, username))
 	}
 
 	// Get from PowerDNS — scoped to the caller's own key only.
 	pdnsZone, err := app.PowerDns.GetZone(ctx, zone, username)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Zone ließ sich nicht vom DNS-Server lesen.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht vom DNS-Server lesen.", "The zone could not be read from the DNS server."), fmt.Errorf("app.getZone: %w", err))
 	}
 
 	// Generate external-dns config (it carries the key, so not for a read-only token)
@@ -269,22 +272,22 @@ func (app *AppData) ZoneGet(ctx context.Context, user *UserClaims, zone, externa
 	} else {
 		valuesYaml, err = toExternalDNSConfig(app, pdnsZone, externalDnsVersion)
 		if err != nil {
-			return errorResult(http.StatusInternalServerError, "Die external-dns-Konfiguration ließ sich nicht erzeugen.", fmt.Errorf("app.getZone: %w", err))
+			return errorResult(http.StatusInternalServerError, msg.T("Die external-dns-Konfiguration ließ sich nicht erzeugen.", "The external-dns configuration could not be generated."), fmt.Errorf("app.getZone: %w", err))
 		}
 	}
 
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer ließen sich nicht laden.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer ließen sich nicht laden.", "The owners could not be loaded."), fmt.Errorf("app.getZone: %w", err))
 	}
 	creator, err := app.Storage.ZoneCreator(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Wer die Zone angelegt hat, ließ sich nicht ermitteln.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Wer die Zone angelegt hat, ließ sich nicht ermitteln.", "Who created the zone could not be determined."), fmt.Errorf("app.getZone: %w", err))
 	}
 
 	sharingAllowed, err := app.zoneSharingAllowed(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob die Zone geteilt werden darf, ließ sich nicht prüfen.", fmt.Errorf("app.getZone: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Ob die Zone geteilt werden darf, ließ sich nicht prüfen.", "Whether the zone may be shared could not be checked."), fmt.Errorf("app.getZone: %w", err))
 	}
 
 	// Return zone data
@@ -308,22 +311,22 @@ func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int,
 	// the caller's: deleting the parent cuts the delegation of all of them.
 	subzones, err := app.subzonesOf(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Subzonen ließen sich nicht laden.", fmt.Errorf("app.ZoneDelete: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Subzonen ließen sich nicht laden.", "The subzones could not be loaded."), fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 	if len(subzones) > 0 {
-		return errorResult(http.StatusConflict, "Die Zone hat noch Subzonen. Erst diese löschen.",
+		return errorResult(http.StatusConflict, msg.T("Die Zone hat noch Subzonen. Erst diese löschen.", "The zone still has subzones. Delete them first."),
 			fmt.Errorf("app.ZoneDelete: %s still has subzone %s", zone, subzones[0]))
 	}
 
 	if err := app.PowerDns.DeleteZone(ctx, zone, true); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Zone ließ sich nicht vom DNS-Server löschen.",
+		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht vom DNS-Server löschen.", "The zone could not be deleted from the DNS server."),
 			fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 
 	// Deleting the zone removes it for ALL owners (their per-owner keys are gone
 	// with the pdns zone above), so drop every owner row, not just the caller's.
 	if err := app.Storage.DeleteAllZoneOwners(zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Zone ließ sich nicht aus der Datenbank löschen.",
+		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht aus der Datenbank löschen.", "The zone could not be deleted from the database."),
 			fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 
@@ -339,37 +342,37 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 
 	exists, err := app.Storage.ZoneExists(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob es die Zone gibt, ließ sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Ob es die Zone gibt, ließ sich nicht prüfen.", "Whether the zone exists could not be checked."), err)
 	}
 	if !exists {
-		return errorResult(http.StatusNotFound, "Die Zone gibt es nicht.", nil)
+		return errorResult(http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."), nil)
 	}
 
 	if isOwner, err := app.Storage.IsZoneOwner(username, zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	} else if isOwner {
 		return app.ownersResult(zone) // already a member
 	}
 
 	allowed, zoneDef, err := app.PolicyIsZoneAllowedForUser(zone, user)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Regeln ließen sich nicht auswerten.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Regeln ließen sich nicht auswerten.", "The rules could not be evaluated."), err)
 	}
 	if !allowed || zoneDef == nil || !zoneDef.SharingAllowed {
-		return errorResult(http.StatusForbidden, "Keine Berechtigung, dieser Zone beizutreten.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Keine Berechtigung, dieser Zone beizutreten.", "No permission to join this zone."), nil)
 	}
 
 	if _, err := app.Storage.CreateZone(username, zone, false); err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Beitritt zur Zone ist fehlgeschlagen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Beitritt zur Zone ist fehlgeschlagen.", "Joining the zone failed."), err)
 	}
 	if err := app.PowerDns.AddOwnerKey(ctx, zone, username); err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Schlüssel für die Zone ließ sich nicht anlegen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Schlüssel für die Zone ließ sich nicht anlegen.", "The key for the zone could not be created."), err)
 	}
 
 	// Sharing covers the subtree: take over the zones already delegated below.
 	subzones, err := app.grantOwnerSubtree(ctx, username, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Zugriff auf die Subzonen ließ sich nicht einrichten.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Zugriff auf die Subzonen ließ sich nicht einrichten.", "Access to the subzones could not be set up."), err)
 	}
 	app.Log.Infof("app.ZoneJoin: %s joined shared zone %s (%d subzone(s))", username, zone, len(subzones))
 
@@ -380,11 +383,11 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 func (app *AppData) ownersResult(zone string) (int, any, error) {
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer ließen sich nicht laden.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer ließen sich nicht laden.", "The owners could not be loaded."), err)
 	}
 	creator, err := app.Storage.ZoneCreator(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Wer die Zone angelegt hat, ließ sich nicht ermitteln.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Wer die Zone angelegt hat, ließ sich nicht ermitteln.", "Who created the zone could not be determined."), err)
 	}
 	return http.StatusOK, gin.H{"owners": owners, "creator": creator}, nil
 }
@@ -445,33 +448,33 @@ func (app *AppData) zoneSharingAllowed(zone string) (bool, error) {
 func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, newOwner string) (int, any, error) {
 	newOwner = strings.ToLower(strings.TrimSpace(newOwner))
 	if _, err := mail.ParseAddress(newOwner); err != nil {
-		return errorResult(http.StatusBadRequest, "Ungültige E-Mail-Adresse des Eigentümers.", fmt.Errorf("app.ZoneAddOwner: %w", err))
+		return errorResult(http.StatusBadRequest, msg.T("Ungültige E-Mail-Adresse des Eigentümers.", "Invalid e-mail address of the owner."), fmt.Errorf("app.ZoneAddOwner: %w", err))
 	}
 
 	isOwner, err := app.Storage.IsZoneOwner(caller.Identity(), zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	}
 	if !isOwner {
-		return errorResult(http.StatusForbidden, "Kein Eigentümer dieser Zone.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), nil)
 	}
 
 	shareable, err := app.zoneSharingAllowed(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob die Zone geteilt werden darf, ließ sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Ob die Zone geteilt werden darf, ließ sich nicht prüfen.", "Whether the zone may be shared could not be checked."), err)
 	}
 	if !shareable {
-		return errorResult(http.StatusForbidden, "Teilen ist für diese Zone nicht eingeschaltet.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Teilen ist für diese Zone nicht eingeschaltet.", "Sharing is not switched on for this zone."), nil)
 	}
 
 	if already, err := app.Storage.IsZoneOwner(newOwner, zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	} else if !already {
 		if _, err := app.Storage.CreateZone(newOwner, zone, false); err != nil {
-			return errorResult(http.StatusInternalServerError, "Der Eigentümer ließ sich nicht hinzufügen.", err)
+			return errorResult(http.StatusInternalServerError, msg.T("Der Eigentümer ließ sich nicht hinzufügen.", "The owner could not be added."), err)
 		}
 		if err := app.PowerDns.AddOwnerKey(ctx, zone, newOwner); err != nil {
-			return errorResult(http.StatusInternalServerError, "Der Schlüssel des Eigentümers ließ sich nicht anlegen.", err)
+			return errorResult(http.StatusInternalServerError, msg.T("Der Schlüssel des Eigentümers ließ sich nicht anlegen.", "The owner's key could not be created."), err)
 		}
 		app.Log.Infof("app.ZoneAddOwner: %s added %s as owner of %s", caller.Identity(), newOwner, zone)
 	}
@@ -480,7 +483,7 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 	// this also repairs an owner who predates a subzone.
 	subzones, err := app.grantOwnerSubtree(ctx, newOwner, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Zugriff auf die Subzonen ließ sich nicht einrichten.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Zugriff auf die Subzonen ließ sich nicht einrichten.", "Access to the subzones could not be set up."), err)
 	}
 	for _, sub := range subzones {
 		app.Log.Infof("app.ZoneAddOwner: %s also owns subzone %s", newOwner, sub)
@@ -499,48 +502,48 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 
 	authority, err := app.zoneAuthorityOf(caller, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	}
 	if !authority.owner && !authority.superAdmin {
-		return errorResult(http.StatusForbidden, "Kein Eigentümer dieser Zone.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), nil)
 	}
 	if !self && !authority.manages() {
-		return errorResult(http.StatusForbidden, "Andere Eigentümer entfernen kann nur, wer die Zone angelegt hat; das eigene Konto lässt sich aber entfernen.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Andere Eigentümer entfernen kann nur, wer die Zone angelegt hat; das eigene Konto lässt sich aber entfernen.", "Only whoever created the zone can remove other owners; your own account can be removed, though."), nil)
 	}
 
 	if targetIsOwner, err := app.Storage.IsZoneOwner(owner, zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	} else if !targetIsOwner {
-		return errorResult(http.StatusNotFound, "Kein Eigentümer dieser Zone.", nil)
+		return errorResult(http.StatusNotFound, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), nil)
 	}
 
 	// The creator leaving would hand the zone to whoever joined first, without either of them deciding that. A super admin may still remove them (the next owner then becomes the creator, see Storage.DeleteZone).
 	if targetIsCreator, err := app.Storage.IsZoneCreator(owner, zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Wer die Zone angelegt hat, ließ sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Wer die Zone angelegt hat, ließ sich nicht prüfen.", "Who created the zone could not be checked."), err)
 	} else if targetIsCreator && !authority.superAdmin {
-		return errorResult(http.StatusConflict, "Wer die Zone angelegt hat, kann sie nicht verlassen, sondern nur löschen.", nil)
+		return errorResult(http.StatusConflict, msg.T("Wer die Zone angelegt hat, kann sie nicht verlassen, sondern nur löschen.", "Whoever created the zone cannot leave it, only delete it."), nil)
 	}
 
 	count, err := app.Storage.CountZoneOwners(zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer ließen sich nicht zählen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer ließen sich nicht zählen.", "The owners could not be counted."), err)
 	}
 	if count <= 1 {
-		return errorResult(http.StatusConflict, "Der letzte Eigentümer lässt sich nicht entfernen; stattdessen die Zone löschen.", nil)
+		return errorResult(http.StatusConflict, msg.T("Der letzte Eigentümer lässt sich nicht entfernen; stattdessen die Zone löschen.", "The last owner cannot be removed; delete the zone instead."), nil)
 	}
 
 	if err := app.Storage.DeleteZone(owner, zone); err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Eigentümer ließ sich nicht entfernen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Eigentümer ließ sich nicht entfernen.", "The owner could not be removed."), err)
 	}
 	if err := app.PowerDns.RemoveOwnerKey(ctx, zone, owner); err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Schlüssel des Eigentümers ließ sich nicht löschen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Schlüssel des Eigentümers ließ sich nicht löschen.", "The owner's key could not be deleted."), err)
 	}
 
 	// Symmetric to joining: giving up a zone gives up what it delegates. Subzones
 	// where they are the last owner are kept — see revokeOwnerSubtree.
 	revoked, kept, err := app.revokeOwnerSubtree(ctx, owner, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Der Zugriff auf die Subzonen ließ sich nicht entziehen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Der Zugriff auf die Subzonen ließ sich nicht entziehen.", "Access to the subzones could not be revoked."), err)
 	}
 	app.Log.Infof("app.ZoneRemoveOwner: %s removed %s from %s (%d subzone(s) revoked)", caller.Identity(), owner, zone, len(revoked))
 	for _, sub := range kept {
@@ -558,23 +561,23 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 func (app *AppData) ZoneRotateKeys(ctx context.Context, caller *UserClaims, zone string) (int, any, error) {
 	authority, err := app.zoneAuthorityOf(caller, zone)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	}
 	if !authority.owner && !authority.superAdmin {
-		return errorResult(http.StatusForbidden, "Kein Eigentümer dieser Zone.", nil)
+		return errorResult(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), nil)
 	}
 
 	owners := []string{caller.Identity()}
 	if authority.manages() {
 		if owners, err = app.Storage.ListZoneOwners(zone); err != nil {
-			return errorResult(http.StatusInternalServerError, "Die Eigentümer ließen sich nicht laden.", err)
+			return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer ließen sich nicht laden.", "The owners could not be loaded."), err)
 		}
 		if len(owners) == 0 {
-			return errorResult(http.StatusNotFound, "Die Zone gibt es nicht.", nil)
+			return errorResult(http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."), nil)
 		}
 	}
 	if err := app.PowerDns.RotateZoneKeys(ctx, zone, owners); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Schlüssel ließen sich nicht erneuern.", err)
+		return errorResult(http.StatusInternalServerError, msg.T("Die Schlüssel ließen sich nicht erneuern.", "The keys could not be renewed."), err)
 	}
 	app.Log.Infof("app.ZoneRotateKeys: %s rotated %d key(s) for %s", caller.Identity(), len(owners), zone)
 	return http.StatusOK, gin.H{"rotated": len(owners)}, nil
@@ -625,15 +628,15 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 
 	name, err := canonicalZoneName(zone.Zone)
 	if err != nil {
-		return errorResult(http.StatusBadRequest, err.Error(), fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusBadRequest, msg.TextOf(err), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 	soa := normalizeZone(zone.ZoneSOA)
 
 	// Somebody's zone under any spelling (rows stored before names were canonical included) is taken.
 	if exists, err := app.Storage.ZoneExistsAnySpelling(name); err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob es die Zone gibt, ließ sich nicht prüfen.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Ob es die Zone gibt, ließ sich nicht prüfen.", "Whether the zone exists could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
 	} else if exists {
-		return errorResult(http.StatusConflict, "Die Zone gibt es bereits.", fmt.Errorf("app.ZoneCreate: %s is stored", name))
+		return errorResult(http.StatusConflict, msg.T("Die Zone gibt es bereits.", "The zone already exists."), fmt.Errorf("app.ZoneCreate: %s is stored", name))
 	}
 
 	// Check which zones this nameserver is authoritative for. A nil result means
@@ -642,13 +645,13 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 	// the caller was authorized for. Refuse instead of silently skipping the loop.
 	authoritative := getAuthoritativeZones(name, soa)
 	if len(authoritative) == 0 {
-		return errorResult(http.StatusBadRequest, "Die Zone liegt nicht unter ihrem SOA.",
+		return errorResult(http.StatusBadRequest, msg.T("Die Zone liegt nicht unter ihrem SOA.", "The zone is not below its SOA."),
 			fmt.Errorf("app.ZoneCreate: zone %q is not at or below soa %q", name, soa))
 	}
 
 	parent, err := app.closestStoredParent(name)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die übergeordnete Zone ließ sich nicht ermitteln.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die übergeordnete Zone ließ sich nicht ermitteln.", "The parent zone could not be determined."), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 	parentInChain := parent != "" && (parent == soa || isSubdomainOf(parent, soa))
 	if parentInChain {
@@ -657,24 +660,24 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 
 	if zone.Subzone {
 		if !parentInChain {
-			return errorResult(http.StatusForbidden, "Subzonen lassen sich nur unter einer eigenen Zone anlegen.",
+			return errorResult(http.StatusForbidden, msg.T("Subzonen lassen sich nur unter einer eigenen Zone anlegen.", "Subzones can only be created under a zone of your own."),
 				fmt.Errorf("app.ZoneCreate: no stored parent of %q at or below %q", name, soa))
 		}
 		owns, err := app.Storage.IsZoneOwner(username, parent)
 		if err != nil {
-			return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone darüber ließen sich nicht prüfen.", fmt.Errorf("app.ZoneCreate: %w", err))
+			return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone darüber ließen sich nicht prüfen.", "The owners of the zone above could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
 		}
 		if !owns && !isSuperAdmin(app, user) {
-			return errorResult(http.StatusForbidden, "Die Zone darüber gehört jemand anderem.",
+			return errorResult(http.StatusForbidden, msg.T("Die Zone darüber gehört jemand anderem.", "The zone above belongs to someone else."),
 				fmt.Errorf("app.ZoneCreate: %q would be delegated from %q, which %q does not own", name, parent, username))
 		}
 		rules, err := app.Storage.PolicyGetAll()
 		if err != nil {
-			return errorResult(http.StatusInternalServerError, "Die Regeln ließen sich nicht lesen.", fmt.Errorf("app.ZoneCreate: %w", err))
+			return errorResult(http.StatusInternalServerError, msg.T("Die Regeln ließen sich nicht lesen.", "The rules could not be read."), fmt.Errorf("app.ZoneCreate: %w", err))
 		}
 		for _, z := range authoritative[1:] {
 			if rule, reserved := reservedByPolicy(rules, z, user); reserved {
-				return errorResult(http.StatusForbidden, fmt.Sprintf("%s ist durch eine Regel reserviert.", z),
+				return errorResult(http.StatusForbidden, msg.F("%s ist durch eine Regel reserviert.", "%s is reserved by a rule.", z),
 					fmt.Errorf("app.ZoneCreate: subzone %q of %q runs into %q, reserved by rule %d", name, username, z, rule.ID))
 			}
 		}
@@ -683,7 +686,7 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 	// The requested zone may already be served by PowerDNS as an ownerless intermediate zone; see above.
 	adopt, err := app.PowerDns.ZoneExists(ctx, name)
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Ob es die Zone gibt, ließ sich nicht prüfen.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Ob es die Zone gibt, ließ sich nicht prüfen.", "Whether the zone exists could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	if zone.Subzone {
@@ -692,14 +695,14 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 		for _, z := range authoritative[1 : len(authoritative)-1] {
 			exists, err := app.PowerDns.ZoneExists(ctx, z)
 			if err != nil {
-				return errorResult(http.StatusInternalServerError, "Eine Zone dazwischen ließ sich nicht prüfen.", fmt.Errorf("app.ZoneCreate: %w", err))
+				return errorResult(http.StatusInternalServerError, msg.T("Eine Zone dazwischen ließ sich nicht prüfen.", "A zone in between could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
 			}
 			if !exists {
 				missing++
 			}
 		}
 		if missing > maxIntermediateZones {
-			return errorResult(http.StatusBadRequest, fmt.Sprintf("Die Zone liegt zu tief: Unter einer bestehenden Zone lassen sich höchstens %d Ebenen auf einmal anlegen.", maxIntermediateZones+1),
+			return errorResult(http.StatusBadRequest, msg.F("Die Zone liegt zu tief: Unter einer bestehenden Zone lassen sich höchstens %d Ebenen auf einmal anlegen.", "The zone lies too deep: at most %d levels can be created at once under an existing zone.", maxIntermediateZones+1),
 				fmt.Errorf("app.ZoneCreate: %q needs %d intermediate zones", name, missing))
 		}
 	}
@@ -716,7 +719,7 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 
 		app.Log.Infof("app.ZoneCreate: Creating intermediate zone '%s' I'm authoritative for (with child zone delegation to %s)", z, nextChildZone)
 		if err := app.PowerDns.EnsureIntermediateZoneExists(ctx, z, nextChildZone); err != nil {
-			return errorResult(http.StatusInternalServerError, "Eine Zone dazwischen ließ sich nicht anlegen.", err)
+			return errorResult(http.StatusInternalServerError, msg.T("Eine Zone dazwischen ließ sich nicht anlegen.", "A zone in between could not be created."), err)
 		}
 	}
 
@@ -729,17 +732,17 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 		zoneResponse, err = app.PowerDns.CreateUserZone(ctx, username, name, false)
 	}
 	if err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Zone ließ sich nicht auf dem DNS-Server anlegen.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht auf dem DNS-Server anlegen.", "The zone could not be created on the DNS server."), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	if _, err := app.Storage.CreateZone(username, name, true); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Zone ließ sich nicht in der Datenbank anlegen.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht in der Datenbank anlegen.", "The zone could not be created in the database."), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	// A subzone under a shared zone belongs to that zone's owners as well, so it
 	// does not become invisible to the people who share the parent.
 	if err := app.inheritOwnersFromParent(ctx, name, username); err != nil {
-		return errorResult(http.StatusInternalServerError, "Die Eigentümer der Zone darüber ließen sich nicht übernehmen.", fmt.Errorf("app.ZoneCreate: %w", err))
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone darüber ließen sich nicht übernehmen.", "The owners of the zone above could not be taken over."), fmt.Errorf("app.ZoneCreate: %w", err))
 	}
 
 	return http.StatusCreated, gin.H{"success": zoneResponse}, nil
@@ -780,10 +783,18 @@ func slicesIndex(s []string, v string) int {
 	return 0
 }
 
-// errorResult is the answer of the older app methods: the status, the body of an apierr answer (the text for people and the code that follows from the status) and the cause for the log.
-func errorResult(code int, msg string, err error) (int, gin.H, error) {
-	body := apiErr(code, msg).Body()
-	return code, gin.H{"error": body.Error, "code": body.Code}, err
+// errorResult is the answer of the older app methods: the status, an apierr answer as the body (the text for people in German and English and the code that follows from the status; writeResult renders it in the caller's language) and the cause for the log.
+func errorResult(code int, text msg.Text, err error) (int, any, error) {
+	return code, apiErr(code, text), err
+}
+
+// writeResult answers a request with what an older app method returned: an error answer (errorResult) in the request's language, anything else as JSON with its status.
+func writeResult(c *gin.Context, status int, body any) {
+	if e, ok := body.(*apierr.Error); ok {
+		ginweb.AbortError(c, e)
+		return
+	}
+	c.JSON(status, body)
 }
 
 // Helper to get next element in slice or empty string if at end
@@ -805,8 +816,8 @@ func toExternalDNSConfig(app *AppData, pdnsZone *ZoneDataResponse, externalDnsVe
 	}
 
 	data := map[string]any{
-		"txtPrefix":        "dynamic-zones-dns-",
-		"txtOwnerId":       "dynamic-zones-dns",
+		"txtPrefix":  "dynamic-zones-dns-",
+		"txtOwnerId": "dynamic-zones-dns",
 		// external-dns runs in the user's cluster; advertise the public NS
 		// hostname (falls back to the literal IP when unset).
 		"dnsServerAddress": app.Config.PowerDns.AdvertisedServer(),
@@ -892,13 +903,13 @@ func policyValidateRequest(req PolicyRuleRequest) error {
 // foreign name including DNS-01 certificate issuance.
 func validatePatternWithinSoa(zonePattern, zoneSoa string) error {
 	if strings.TrimSpace(zoneSoa) == "" {
-		return invalid("zone_soa darf nicht leer sein.")
+		return invalid("zone_soa darf nicht leer sein.", "zone_soa must not be empty.")
 	}
 	// %u expands to a user label; any label keeps the suffix relationship intact.
 	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(strings.ReplaceAll(zonePattern, "%u", "a"))), ".")
 	soa := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zoneSoa)), ".")
 	if zone != soa && !isSubdomainOf(zone, soa) {
-		return invalid("zone_pattern %q muss gleich zone_soa %q sein oder darunter liegen.", zonePattern, zoneSoa)
+		return invalid("zone_pattern %q muss gleich zone_soa %q sein oder darunter liegen.", "zone_pattern %q must be equal to zone_soa %q or lie below it.", zonePattern, zoneSoa)
 	}
 	return nil
 }
@@ -932,7 +943,7 @@ func userCanAccessRule(email string, filter string) (bool, error) {
 }
 
 func validateUserFilter(filter string) error {
-	errInvalidUserFilter := invalid("Der Benutzerfilter muss eine durch Kommas getrennte Liste gültiger E-Mail-Adressen oder Muster wie *@domain.com sein.")
+	errInvalidUserFilter := invalid("Der Benutzerfilter muss eine durch Kommas getrennte Liste gültiger E-Mail-Adressen oder Muster wie *@domain.com sein.", "The user filter must be a comma-separated list of valid e-mail addresses or patterns such as *@domain.com.")
 
 	hasEntry := false
 	for _, raw := range strings.Split(filter, ",") {
@@ -976,7 +987,7 @@ func isSuperAdmin(app *AppData, user *UserClaims) bool {
 // with a valid character ('A') before performing standard DNS label checks.
 func validateZonePattern(value string) error {
 	if value == "" {
-		return invalid("Das Zonenmuster ist leer.")
+		return invalid("Das Zonenmuster ist leer.", "The zone pattern is empty.")
 	}
 
 	// 1. Replace '%u' with 'A' and trim whitespace
@@ -1192,30 +1203,30 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, zone string) (*ZoneDataResponse, error) {
 	zone, err := canonicalZoneName(zone)
 	if err != nil {
-		return nil, statusErr(http.StatusBadRequest, err.Error(), err)
+		return nil, statusErr(http.StatusBadRequest, msg.TextOf(err), err)
 	}
 
 	isAllowed, zoneDef, err := app.PolicyIsZoneAllowedForUser(zone, user)
 	if err != nil {
-		return nil, statusErr(http.StatusInternalServerError, "Die eigenen Zonen ließen sich nicht laden.", err)
+		return nil, statusErr(http.StatusInternalServerError, msg.T("Die eigenen Zonen ließen sich nicht laden.", "Your zones could not be loaded."), err)
 	}
 
 	if !isAllowed {
 		zoneDef, err = app.subzoneDefViaOwnedParent(zone, user.Identity())
 		if err != nil {
-			return nil, statusErr(http.StatusInternalServerError, "Die übergeordnete Zone ließ sich nicht ermitteln.", err)
+			return nil, statusErr(http.StatusInternalServerError, msg.T("Die übergeordnete Zone ließ sich nicht ermitteln.", "The parent zone could not be determined."), err)
 		}
 		isAllowed = zoneDef != nil
 	}
 
 	if !isAllowed {
-		return nil, statusErr(http.StatusForbidden, "Keine Berechtigung, diese Zone anzulegen.",
+		return nil, statusErr(http.StatusForbidden, msg.T("Keine Berechtigung, diese Zone anzulegen.", "No permission to create this zone."),
 			fmt.Errorf("app.ZoneCreateAuthorized: %q not allowed for %q", zone, user.Identity()))
 	}
 
 	status, body, err := app.ZoneCreate(ctx, user, *zoneDef)
 	if err != nil || status >= http.StatusBadRequest {
-		return nil, statusErr(status, messageFromBody(body, "Die Zone ließ sich nicht anlegen."), err)
+		return nil, statusErr(status, messageFromBody(body, msg.T("Die Zone ließ sich nicht anlegen.", "The zone could not be created.")), err)
 	}
 
 	// The body carries the created zone INCLUDING its TSIG key. Callers that may
@@ -1239,29 +1250,29 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 func (app *AppData) ZoneDeleteAuthorized(ctx context.Context, user *UserClaims, zone string) error {
 	authority, err := app.zoneAuthorityOf(user, zone)
 	if err != nil {
-		return statusErr(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return statusErr(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	}
 	if !authority.owner && !authority.superAdmin {
-		return statusErr(http.StatusForbidden, "Kein Eigentümer dieser Zone.",
+		return statusErr(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."),
 			fmt.Errorf("app.ZoneDeleteAuthorized: %q not owned by %q", zone, user.Identity()))
 	}
 	if !authority.manages() {
-		return statusErr(http.StatusForbidden, "Löschen kann die Zone nur, wer sie angelegt hat; das eigene Konto lässt sich aber als Eigentümer entfernen.",
+		return statusErr(http.StatusForbidden, msg.T("Löschen kann die Zone nur, wer sie angelegt hat; das eigene Konto lässt sich aber als Eigentümer entfernen.", "Only whoever created the zone can delete it; your own account can be removed as an owner, though."),
 			fmt.Errorf("app.ZoneDeleteAuthorized: %q is not the creator of %q", user.Identity(), zone))
 	}
 	if !authority.owner {
 		exists, err := app.Storage.ZoneExists(zone)
 		if err != nil {
-			return statusErr(http.StatusInternalServerError, "Ob es die Zone gibt, ließ sich nicht prüfen.", err)
+			return statusErr(http.StatusInternalServerError, msg.T("Ob es die Zone gibt, ließ sich nicht prüfen.", "Whether the zone exists could not be checked."), err)
 		}
 		if !exists {
-			return statusErr(http.StatusNotFound, "Die Zone gibt es nicht.", nil)
+			return statusErr(http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."), nil)
 		}
 	}
 
 	status, body, err := app.ZoneDelete(ctx, user.Identity(), zone)
 	if err != nil || status >= http.StatusBadRequest {
-		return statusErr(status, messageFromBody(body, "Die Zone ließ sich nicht löschen."), err)
+		return statusErr(status, messageFromBody(body, msg.T("Die Zone ließ sich nicht löschen.", "The zone could not be deleted.")), err)
 	}
 	return nil
 }
@@ -1269,11 +1280,9 @@ func (app *AppData) ZoneDeleteAuthorized(ctx context.Context, user *UserClaims, 
 // messageFromBody digs the message out of the gin.H the older app methods
 // answer with, so a caller that has no HTTP response to write still gets the
 // sentence that would have been in one.
-func messageFromBody(body any, fallback string) string {
-	if h, ok := body.(gin.H); ok {
-		if msg, ok := h["error"].(string); ok && msg != "" {
-			return msg
-		}
+func messageFromBody(body any, fallback msg.Text) msg.Text {
+	if e, ok := body.(*apierr.Error); ok && !e.Msg.IsZero() {
+		return e.Msg
 	}
 	return fallback
 }

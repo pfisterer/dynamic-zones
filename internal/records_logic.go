@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pfisterer/dynamic-zones/internal/helper"
 	"github.com/miekg/dns"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
+	"github.com/pfisterer/dynamic-zones/internal/helper"
 )
 
 // The record operations, as service methods rather than as HTTP handlers.
@@ -36,7 +37,7 @@ type TSIGCredentials struct {
 // handlers stay a translation into a response and the MCP tools into a message.
 type StatusError struct {
 	Status int
-	Msg    string
+	Msg    msg.Text
 	Err    error
 }
 
@@ -44,13 +45,14 @@ func (e *StatusError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %v", e.Msg, e.Err)
 	}
-	return e.Msg
+	return e.Msg.String()
 }
 
 func (e *StatusError) Unwrap() error { return e.Err }
 
-func statusErr(status int, msg string, err error) error {
-	return &StatusError{Status: status, Msg: msg, Err: err}
+// statusErr is an error answered with status and text, the text for people in German and English; err is the cause, for the log.
+func statusErr(status int, text msg.Text, err error) error {
+	return &StatusError{Status: status, Msg: text, Err: err}
 }
 
 // StatusOf reports the HTTP status an error asks for (serviceErrors), 500 for one that carries no opinion.
@@ -58,8 +60,8 @@ func StatusOf(err error) int {
 	return serviceErrors.Classify(err).Status
 }
 
-// MessageOf returns the caller-facing half of an error (serviceErrors): the StatusError message without the wrapped cause, which belongs in the log and not in a response; "Interner Fehler." for one that carries no message.
-func MessageOf(err error) string {
+// MessageOf returns the caller-facing half of an error (serviceErrors): the StatusError message without the wrapped cause, which belongs in the log and not in a response; "Interner Fehler." / "Internal error." for one that carries no message.
+func MessageOf(err error) msg.Text {
 	return serviceErrors.Classify(err).Msg
 }
 
@@ -72,14 +74,14 @@ func MessageOf(err error) string {
 func (app *AppData) requireZoneOwnership(username, zone string) (string, error) {
 	name, err := canonicalZoneName(zone)
 	if err != nil {
-		return "", statusErr(http.StatusBadRequest, err.Error(), nil)
+		return "", statusErr(http.StatusBadRequest, msg.TextOf(err), nil)
 	}
 	isOwner, err := app.Storage.IsZoneOwner(username, name)
 	if err != nil {
-		return "", statusErr(http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.", err)
+		return "", statusErr(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	}
 	if !isOwner {
-		return "", statusErr(http.StatusForbidden, "Kein Eigentümer dieser Zone.",
+		return "", statusErr(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."),
 			fmt.Errorf("user %q does not own zone %q", username, name))
 	}
 	return name, nil
@@ -105,12 +107,12 @@ func (app *AppData) OwnerTSIG(ctx context.Context, username, zone string) (TSIGC
 	// string, and a trailing dot makes it a different one.
 	zoneData, err := app.PowerDns.GetZone(ctx, name, username)
 	if err != nil {
-		return TSIGCredentials{}, statusErr(http.StatusInternalServerError, "Die Schlüssel der Zone ließen sich nicht lesen.", err)
+		return TSIGCredentials{}, statusErr(http.StatusInternalServerError, msg.T("Die Schlüssel der Zone ließen sich nicht lesen.", "The keys of the zone could not be read."), err)
 	}
 	if len(zoneData.ZoneKeys) == 0 {
 		// An owner without a key is a zone in an inconsistent state, not a
 		// permission problem: every owner gets one when they create or join.
-		return TSIGCredentials{}, statusErr(http.StatusConflict, "Für diese Zone gibt es keinen eigenen TSIG-Schlüssel.",
+		return TSIGCredentials{}, statusErr(http.StatusConflict, msg.T("Für diese Zone gibt es keinen eigenen TSIG-Schlüssel.", "There is no TSIG key of your own for this zone."),
 			fmt.Errorf("zone %q has no key for %q", zone, username))
 	}
 	k := zoneData.ZoneKeys[0]
@@ -139,27 +141,27 @@ func (app *AppData) RecordsList(ctx context.Context, username, zone string, cred
 		return nil, err
 	}
 	if !creds.complete() {
-		return nil, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
+		return nil, statusErr(http.StatusBadRequest, msg.T("TSIG-Zugangsdaten erforderlich.", "TSIG credentials required."), nil)
 	}
 	creds = creds.fqdn()
 	zoneFQDN := dns.Fqdn(name)
 
-	msg := new(dns.Msg)
-	msg.SetAxfr(zoneFQDN)
-	msg.SetTsig(creds.KeyName, creds.Algorithm, 300, time.Now().Unix())
+	axfr := new(dns.Msg)
+	axfr.SetAxfr(zoneFQDN)
+	axfr.SetTsig(creds.KeyName, creds.Algorithm, 300, time.Now().Unix())
 
 	tr := new(dns.Transfer)
 	tr.TsigSecret = map[string]string{creds.KeyName: creds.Key}
 
-	envChan, err := tr.In(msg, GetServerAddress(app))
+	envChan, err := tr.In(axfr, GetServerAddress(app))
 	if err != nil {
-		return nil, statusErr(http.StatusInternalServerError, "Die Zonenübertragung ist fehlgeschlagen.", err)
+		return nil, statusErr(http.StatusInternalServerError, msg.T("Die Zonenübertragung ist fehlgeschlagen.", "The zone transfer failed."), err)
 	}
 
 	var records []DNSRecord
 	for env := range envChan {
 		if env.Error != nil {
-			return nil, statusErr(http.StatusInternalServerError, "Die Zonenübertragung ist fehlgeschlagen.", env.Error)
+			return nil, statusErr(http.StatusInternalServerError, msg.T("Die Zonenübertragung ist fehlgeschlagen.", "The zone transfer failed."), env.Error)
 		}
 		for _, rr := range env.RR {
 			h := rr.Header()
@@ -222,7 +224,7 @@ func (app *AppData) RecordUpsert(ctx context.Context, username string, rec DNSRe
 		return DNSRecord{}, err
 	}
 	if !creds.complete() {
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, msg.T("TSIG-Zugangsdaten erforderlich.", "TSIG credentials required."), nil)
 	}
 	creds = creds.fqdn()
 
@@ -236,15 +238,15 @@ func (app *AppData) RecordUpsert(ctx context.Context, username string, rec DNSRe
 	case "A":
 		_, _ = helper.Rfc2136DeleteARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName)
 		if _, err := helper.Rfc2136AddARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName, rec.Value, rec.TTL); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht schreiben.", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, msg.T("Der DNS-Eintrag ließ sich nicht schreiben.", "The DNS record could not be written."), err)
 		}
 	case "AAAA":
 		_, _ = helper.Rfc2136DeleteAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName)
 		if _, err := helper.Rfc2136AddAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName, rec.Value, rec.TTL); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht schreiben.", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, msg.T("Der DNS-Eintrag ließ sich nicht schreiben.", "The DNS record could not be written."), err)
 		}
 	default:
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "Nicht unterstützter Typ (unterstützt: A, AAAA).", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, msg.T("Nicht unterstützter Typ (unterstützt: A, AAAA).", "Unsupported type (supported: A, AAAA)."), nil)
 	}
 
 	return DNSRecord{Zone: zoneFQDN, Name: recordName, Type: recType, TTL: rec.TTL, Value: rec.Value}, nil
@@ -257,7 +259,7 @@ func (app *AppData) RecordDelete(ctx context.Context, username string, rec DNSRe
 		return DNSRecord{}, err
 	}
 	if !creds.complete() {
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "TSIG-Zugangsdaten erforderlich.", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, msg.T("TSIG-Zugangsdaten erforderlich.", "TSIG credentials required."), nil)
 	}
 	creds = creds.fqdn()
 
@@ -269,14 +271,14 @@ func (app *AppData) RecordDelete(ctx context.Context, username string, rec DNSRe
 	switch recType {
 	case "A":
 		if _, err := helper.Rfc2136DeleteARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht löschen.", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, msg.T("Der DNS-Eintrag ließ sich nicht löschen.", "The DNS record could not be deleted."), err)
 		}
 	case "AAAA":
 		if _, err := helper.Rfc2136DeleteAAAARecord(creds.KeyName, creds.Algorithm, creds.Key, server, zoneFQDN, recordName); err != nil {
-			return DNSRecord{}, statusErr(http.StatusInternalServerError, "Der DNS-Eintrag ließ sich nicht löschen.", err)
+			return DNSRecord{}, statusErr(http.StatusInternalServerError, msg.T("Der DNS-Eintrag ließ sich nicht löschen.", "The DNS record could not be deleted."), err)
 		}
 	default:
-		return DNSRecord{}, statusErr(http.StatusBadRequest, "Nicht unterstützter Typ (unterstützt: A, AAAA).", nil)
+		return DNSRecord{}, statusErr(http.StatusBadRequest, msg.T("Nicht unterstützter Typ (unterstützt: A, AAAA).", "Unsupported type (supported: A, AAAA)."), nil)
 	}
 
 	return DNSRecord{Zone: zoneFQDN, Name: recordName, Type: recType, TTL: rec.TTL, Value: rec.Value}, nil

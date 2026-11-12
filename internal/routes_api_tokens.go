@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 )
 
@@ -29,7 +30,7 @@ type Token struct {
 	Prefix string `json:"token_prefix" example:"dynz_token_ab12cd34" swagger:"desc(First characters of the token, for identification)"`
 	// TokenString is set only in the response that creates a token. It is not
 	// stored and cannot be recovered afterwards.
-	TokenString string    `json:"token_string,omitempty" example:"dynz_token_abcdef123456" swagger:"desc(The API token — returned ONLY when it is created)"`
+	TokenString string `json:"token_string,omitempty" example:"dynz_token_abcdef123456" swagger:"desc(The API token — returned ONLY when it is created)"`
 	// ExpiresAt is null for a token that does not expire.
 	//
 	// A pointer, so that "no expiry" is null and not the year 1: Go's zero time
@@ -131,16 +132,16 @@ func resolveTokenTTL(cfg WebServerConfig, requestedHours int) (time.Duration, er
 }
 
 // ttlMessage is the answer to a lifetime this deployment does not grant (resolveTokenTTL), naming the limit; the same texts as the other services of the platform.
-func ttlMessage(cfg WebServerConfig, err error) string {
+func ttlMessage(cfg WebServerConfig, err error) msg.Text {
 	switch {
 	case errors.Is(err, token.ErrNeverExpiresNotAllowed):
-		return "API-Tokens ohne Ablaufdatum sind hier nicht erlaubt."
+		return msg.T("API-Tokens ohne Ablaufdatum sind hier nicht erlaubt.", "API tokens without an expiry date are not allowed here.")
 	case errors.Is(err, token.ErrTTLTooLong) && cfg.ApiTokenMaxTTLHours > 0:
-		return fmt.Sprintf("Die Laufzeit darf höchstens %d Stunden betragen.", cfg.ApiTokenMaxTTLHours)
+		return msg.F("Die Laufzeit darf höchstens %d Stunden betragen.", "The lifetime may be at most %d hours.", cfg.ApiTokenMaxTTLHours)
 	case errors.Is(err, token.ErrTTLTooLong):
-		return "Die gewünschte Laufzeit ist zu lang."
+		return msg.T("Die gewünschte Laufzeit ist zu lang.", "The requested lifetime is too long.")
 	default:
-		return "Ungültige Laufzeit."
+		return msg.T("Ungültige Laufzeit.", "Invalid lifetime.")
 	}
 }
 
@@ -161,7 +162,7 @@ func getTokens(app *AppData) gin.HandlerFunc {
 		records, err := app.Storage.Tokens.List(c.Request.Context(), subject)
 		if err != nil {
 			app.Log.Errorf("Error retrieving tokens for %s: %v", subject, err)
-			abortErr(c, http.StatusInternalServerError, "Die API-Tokens ließen sich nicht laden.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die API-Tokens ließen sich nicht laden.", "The API tokens could not be loaded."))
 			return
 		}
 
@@ -196,7 +197,7 @@ func createToken(app *AppData) gin.HandlerFunc {
 
 		var input CreateTokenRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 
@@ -217,12 +218,12 @@ func createToken(app *AppData) gin.HandlerFunc {
 		// fault, and the message says which limit. The description itself is
 		// never echoed into the log — it is arbitrary text from a request body.
 		if errors.Is(err, token.ErrDescriptionTooLong) {
-			abortErr(c, http.StatusBadRequest, fmt.Sprintf("Die Beschreibung darf höchstens %d Zeichen lang sein.", token.MaxDescriptionLen))
+			abortErr(c, http.StatusBadRequest, msg.F("Die Beschreibung darf höchstens %d Zeichen lang sein.", "The description may be at most %d characters long.", token.MaxDescriptionLen))
 			return
 		}
 		if err != nil {
 			app.Log.Errorf("Error creating token for %s: %v", subject, err)
-			abortErr(c, http.StatusInternalServerError, "Das API-Token ließ sich nicht anlegen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Das API-Token ließ sich nicht anlegen.", "The API token could not be created."))
 			return
 		}
 
@@ -250,7 +251,7 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Token-ID.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Token-ID.", "Invalid token ID."))
 			return
 		}
 
@@ -264,7 +265,7 @@ func deleteToken(app *AppData) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"status": "not found"})
 		case err != nil:
 			app.Log.Errorf("Error deleting token %d for %s: %v", id, subject, err)
-			abortErr(c, http.StatusInternalServerError, "Das API-Token ließ sich nicht löschen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Das API-Token ließ sich nicht löschen.", "The API token could not be deleted."))
 		default:
 			app.Log.Debugf("Deleted token %d for %s", id, subject)
 			c.JSON(http.StatusOK, gin.H{"status": "deleted"})

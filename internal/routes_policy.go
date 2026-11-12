@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 type ZoneResponse struct {
@@ -60,7 +61,7 @@ func listPolicyRules(app *AppData) gin.HandlerFunc {
 
 		if err != nil {
 			app.Log.Warnf("Failed to retrieve policy rules for user %s: %v", user.Identity(), err)
-			abortErr(c, http.StatusInternalServerError, "Die Regeln ließen sich nicht laden.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Regeln ließen sich nicht laden.", "The rules could not be loaded."))
 			return
 		}
 
@@ -90,16 +91,16 @@ func createPolicyRule(app *AppData) gin.HandlerFunc {
 		// Unmarshal and validate request body
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 
 		// Authorize: super-admin, or a delegation covering the rule's zone.
 		if allowed, err := app.userCanManageZoneSoa(user, req.ZoneSoa); err != nil {
-			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Berechtigung ließ sich nicht prüfen.", "The permission could not be checked."))
 			return
 		} else if !allowed {
-			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
+			abortErr(c, http.StatusForbidden, msg.T("Keine Berechtigung, die Regeln dieser Zone zu verwalten.", "No permission to manage the rules of this zone."))
 			return
 		}
 
@@ -138,14 +139,14 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Regel-ID.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Regel-ID.", "Invalid rule ID."))
 			return
 		}
 
 		// Unmarshal and validate the request
 		var req PolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 
@@ -153,17 +154,17 @@ func updatePolicyRule(app *AppData) gin.HandlerFunc {
 		// zone and the new zone (so a rule cannot be moved out of scope).
 		existing, err := app.Storage.PolicyGetByID(id)
 		if err != nil {
-			abortErr(c, http.StatusNotFound, "Die Regel gibt es nicht.")
+			abortErr(c, http.StatusNotFound, msg.T("Die Regel gibt es nicht.", "The rule does not exist."))
 			return
 		}
 		okOld, err1 := app.userCanManageZoneSoa(user, existing.ZoneSoa)
 		okNew, err2 := app.userCanManageZoneSoa(user, req.ZoneSoa)
 		if err1 != nil || err2 != nil {
-			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Berechtigung ließ sich nicht prüfen.", "The permission could not be checked."))
 			return
 		}
 		if !okOld || !okNew {
-			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
+			abortErr(c, http.StatusForbidden, msg.T("Keine Berechtigung, die Regeln dieser Zone zu verwalten.", "No permission to manage the rules of this zone."))
 			return
 		}
 
@@ -200,21 +201,21 @@ func deletePolicyRule(app *AppData) gin.HandlerFunc {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Regel-ID.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Regel-ID.", "Invalid rule ID."))
 			return
 		}
 
 		// Authorize: super-admin, or a delegation covering the rule's zone.
 		existing, err := app.Storage.PolicyGetByID(id)
 		if err != nil {
-			abortErr(c, http.StatusNotFound, "Die Regel gibt es nicht.")
+			abortErr(c, http.StatusNotFound, msg.T("Die Regel gibt es nicht.", "The rule does not exist."))
 			return
 		}
 		if allowed, err := app.userCanManageZoneSoa(user, existing.ZoneSoa); err != nil {
-			abortErr(c, http.StatusInternalServerError, "Die Berechtigung ließ sich nicht prüfen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Berechtigung ließ sich nicht prüfen.", "The permission could not be checked."))
 			return
 		} else if !allowed {
-			abortErr(c, http.StatusForbidden, "Keine Berechtigung, die Regeln dieser Zone zu verwalten.")
+			abortErr(c, http.StatusForbidden, msg.T("Keine Berechtigung, die Regeln dieser Zone zu verwalten.", "No permission to manage the rules of this zone."))
 			return
 		}
 

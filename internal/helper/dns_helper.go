@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 var dnsLabelCharRegex = regexp.MustCompile("^[A-Za-z0-9-]+$")
@@ -20,16 +21,16 @@ const (
 
 func DnsValidateName(value string) error {
 	if value == "" {
-		return invalid("Der Name ist leer.")
+		return invalid("Der Name ist leer.", "The name is empty.")
 	}
 
 	if len(value) > DnsMaxNameLength {
-		return invalid("Der Name hat %d Zeichen, erlaubt sind höchstens %d.", len(value), DnsMaxNameLength)
+		return invalid("Der Name hat %d Zeichen, erlaubt sind höchstens %d.", "The name has %d characters, at most %d are allowed.", len(value), DnsMaxNameLength)
 	}
 
 	parts := strings.Split(value, ".")
 	if len(parts) < 2 {
-		return invalid("Der Name braucht mindestens zwei Teile (domain.tld).")
+		return invalid("Der Name braucht mindestens zwei Teile (domain.tld).", "The name needs at least two parts (domain.tld).")
 	}
 
 	// 5. Label Validation Loop
@@ -48,17 +49,17 @@ func DnsIsValidLabel(label string) error {
 	// 1. Check length constraints
 	length := len(label)
 	if length < 1 || length > DnsMaxLabelLength {
-		return invalid("Jedes Label muss 1 bis %d Zeichen lang sein, eines hat %d.", DnsMaxLabelLength, length)
+		return invalid("Jedes Label muss 1 bis %d Zeichen lang sein, eines hat %d.", "Every label must be 1 to %d characters long, one has %d.", DnsMaxLabelLength, length)
 	}
 
 	// 2. Allowed characters: alphanumeric and hyphen (test with regex)
 	if !dnsLabelCharRegex.MatchString(label) {
-		return invalid("Labels dürfen nur Buchstaben, Ziffern und '-' enthalten.")
+		return invalid("Labels dürfen nur Buchstaben, Ziffern und '-' enthalten.", "Labels may only contain letters, digits and '-'.")
 	}
 
 	// 3. Must start and end with an alphanumeric character
 	if !IsAlphaNum(label[0]) || !IsAlphaNum(label[len(label)-1]) {
-		return invalid("Labels müssen mit einem Buchstaben oder einer Ziffer beginnen und enden.")
+		return invalid("Labels müssen mit einem Buchstaben oder einer Ziffer beginnen und enden.", "Labels must begin and end with a letter or a digit.")
 	}
 
 	return nil
@@ -140,7 +141,7 @@ func PerformALookup(nameserverAddress string, nameserverPort uint16, hostname st
 	return ips, nil
 }
 
-// invalid is a validation message for people; a function of its own because the texts are German sentences, capitalised and with a full stop, which staticcheck refuses in a literal fmt.Errorf.
-func invalid(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
+// invalid is a validation message for people in German and English (msg.Errorf).
+func invalid(de, en string, args ...any) error {
+	return msg.Errorf(de, en, args...)
 }

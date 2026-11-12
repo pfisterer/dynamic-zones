@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -36,9 +37,9 @@ func mcpTestApp(t *testing.T, superAdmins ...string) *AppData {
 		admins[strings.ToLower(a)] = struct{}{}
 	}
 	return &AppData{
-		Storage:     store,
-		Log:         zap.NewNop().Sugar(),
-		Config:      AppConfig{DnsPolicyConfig: DnsPolicyConfig{SuperAdminEmails: admins}},
+		Storage: store,
+		Log:     zap.NewNop().Sugar(),
+		Config:  AppConfig{DnsPolicyConfig: DnsPolicyConfig{SuperAdminEmails: admins}},
 	}
 }
 
@@ -174,7 +175,7 @@ func TestMCP_DeleteZoneRefusesAMismatchedName(t *testing.T) {
 	msg := callToolErr(t, session, "delete_zone", map[string]any{
 		"zone": "mine.users.example.com", "confirm_zone": "yours.users.example.com",
 	})
-	if !strings.Contains(msg, "does not match") {
+	if !strings.Contains(msg, "stimmt nicht") {
 		t.Errorf("a mismatched confirmation must be refused as such, got %q", msg)
 	}
 }
@@ -193,8 +194,17 @@ func TestMCP_DeletePolicyRuleRefusesAMismatchedPattern(t *testing.T) {
 	msg := callToolErr(t, session, "delete_policy_rule", map[string]any{
 		"id": rule.ID, "confirm_zone_pattern": "%u.staff.example.com",
 	})
-	if !strings.Contains(msg, "does not match") {
+	if !strings.Contains(msg, "stimmt nicht") {
 		t.Errorf("a mismatched confirmation must be refused as such, got %q", msg)
+	}
+
+	// In English when the client asks for it.
+	en := mcptest.DialLang(t, srv.URL+"/mcp", writeSecret, "en")
+	msg = callToolErr(t, en, "delete_policy_rule", map[string]any{
+		"id": rule.ID, "confirm_zone_pattern": "%u.staff.example.com",
+	})
+	if want := fmt.Sprintf(`confirm_zone_pattern "%%u.staff.example.com" does not match: rule %d is "%%u.users.example.com". Read it back before destroying it`, rule.ID); msg != want {
+		t.Errorf("got %q, want %q", msg, want)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 // dockerTagPattern is what a Docker image tag may look like. The image-version query parameter is written verbatim into the external-dns values YAML, so anything else (a newline, a colon and a space) would let the caller add keys of their own to a file people paste into their cluster.
@@ -53,7 +54,7 @@ func joinZone(app *AppData) gin.HandlerFunc {
 			return
 		}
 		status, resp, _ := app.ZoneJoin(c.Request.Context(), user, zone)
-		c.JSON(status, resp)
+		writeResult(c, status, resp)
 	}
 }
 
@@ -77,15 +78,15 @@ func listZoneOwners(app *AppData) gin.HandlerFunc {
 		}
 		isOwner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
 		if err != nil {
-			abortErr(c, http.StatusInternalServerError, "Die Eigentümer der Zone ließen sich nicht prüfen.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."))
 			return
 		}
 		if !isOwner {
-			abortErr(c, http.StatusForbidden, "Kein Eigentümer dieser Zone.")
+			abortErr(c, http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."))
 			return
 		}
 		status, resp, _ := app.ownersResult(zone)
-		c.JSON(status, resp)
+		writeResult(c, status, resp)
 	}
 }
 
@@ -111,11 +112,11 @@ func addZoneOwner(app *AppData) gin.HandlerFunc {
 		}
 		var req AddOwnerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			abortErr(c, http.StatusBadRequest, "Ungültige Anfrage.")
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
 			return
 		}
 		status, resp, _ := app.ZoneAddOwner(c.Request.Context(), user, zone, req.Email)
-		c.JSON(status, resp)
+		writeResult(c, status, resp)
 	}
 }
 
@@ -140,7 +141,7 @@ func removeZoneOwner(app *AppData) gin.HandlerFunc {
 		}
 		owner := c.Param("owner")
 		status, resp, _ := app.ZoneRemoveOwner(c.Request.Context(), user, zone, owner)
-		c.JSON(status, resp)
+		writeResult(c, status, resp)
 	}
 }
 
@@ -163,7 +164,7 @@ func rotateZoneKeys(app *AppData) gin.HandlerFunc {
 			return
 		}
 		status, resp, _ := app.ZoneRotateKeys(c.Request.Context(), user, zone)
-		c.JSON(status, resp)
+		writeResult(c, status, resp)
 	}
 }
 
@@ -215,7 +216,7 @@ func getZones(app *AppData) gin.HandlerFunc {
 		zonesWithStatus, err := app.ZoneList(user)
 		if err != nil {
 			app.Log.Errorf("Error listing zones: %v", err)
-			abortErr(c, http.StatusInternalServerError, "Die eigenen Zonen ließen sich nicht laden.")
+			abortErr(c, http.StatusInternalServerError, msg.T("Die eigenen Zonen ließen sich nicht laden.", "Your zones could not be loaded."))
 			return
 		}
 
@@ -252,14 +253,14 @@ func getZone(app *AppData) gin.HandlerFunc {
 		user := c.MustGet(UserDataKey).(*UserClaims)
 		externalDnsVersion := c.DefaultQuery("image-version", app.Config.WebServer.ExternalDnsVersion)
 		if !dockerTagPattern.MatchString(externalDnsVersion) {
-			abortErr(c, http.StatusBadRequest, "image-version muss ein Docker-Image-Tag sein.")
+			abortErr(c, http.StatusBadRequest, msg.T("image-version muss ein Docker-Image-Tag sein.", "image-version must be a Docker image tag."))
 			return
 		}
 
 		// The external-dns values carry the zone's TSIG key, which may write the zone. A read-only token gets the zone without it (see ZoneGet), and no values file at all.
 		readOnly := ginweb.IsReadOnly(c)
 		if format == "external-dns" && readOnly {
-			abortErr(c, http.StatusForbidden, "Ein Token nur zum Lesen bekommt die external-dns-Konfiguration nicht: Sie enthält den Schlüssel der Zone.")
+			abortErr(c, http.StatusForbidden, msg.T("Ein Token nur zum Lesen bekommt die external-dns-Konfiguration nicht: Sie enthält den Schlüssel der Zone.", "A read-only token does not get the external-dns configuration: it contains the zone's key."))
 			return
 		}
 
@@ -284,21 +285,21 @@ func getZone(app *AppData) gin.HandlerFunc {
 				returnMap = genericMap
 			} else {
 				app.Log.Errorf("getZone: Failed to cast success returnValue (%T) to map[string]any or gin.H", returnValue)
-				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die Zone kam in einem unerwarteten Format.")
+				abortErr(c, http.StatusInternalServerError, msg.T("Interner Fehler: Die Zone kam in einem unerwarteten Format.", "Internal error: The zone came in an unexpected format."))
 				return
 			}
 
 			yamlValue, exists := returnMap["externalDnsValuesYaml"]
 			if !exists {
 				app.Log.Errorf("getZone: Key 'externalDnsValuesYaml' missing from successful response map")
-				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die external-dns-Konfiguration fehlt.")
+				abortErr(c, http.StatusInternalServerError, msg.T("Interner Fehler: Die external-dns-Konfiguration fehlt.", "Internal error: The external-dns configuration is missing."))
 				return
 			}
 
 			yamlString, ok := yamlValue.(string)
 			if !ok {
 				app.Log.Errorf("getZone: Failed to cast externalDnsValuesYaml value (%T) to string", yamlValue)
-				abortErr(c, http.StatusInternalServerError, "Interner Fehler: Die external-dns-Konfiguration ist kein Text.")
+				abortErr(c, http.StatusInternalServerError, msg.T("Interner Fehler: Die external-dns-Konfiguration ist kein Text.", "Internal error: The external-dns configuration is not text."))
 				return
 			}
 
@@ -308,7 +309,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 
 		// Default return for JSON format or any non-200 status code
 		app.Log.Debug("🟢 getZoneReturning zone with status ", statusCode)
-		c.JSON(statusCode, returnValue)
+		writeResult(c, statusCode, returnValue)
 	}
 }
 

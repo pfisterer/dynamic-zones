@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/mcpserve"
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 // The MCP endpoint, so an LLM can work with this API on a person's behalf.
@@ -72,7 +72,7 @@ func RegisterMCPRoutes(group *gin.RouterGroup, app *AppData) {
 	group.Any("", func(c *gin.Context) {
 		// Nothing here answers a CORS preflight (MCP clients are not browsers), and an OPTIONS request is no MCP call either.
 		if c.Request.Method == http.MethodOptions {
-			abortErr(c, http.StatusMethodNotAllowed, "Methode nicht erlaubt.")
+			abortErr(c, http.StatusMethodNotAllowed, msg.T("Methode nicht erlaubt.", "Method not allowed."))
 			return
 		}
 		// c.Get, not MustGet: a request that reached this without an identity must be refused, not panic.
@@ -106,25 +106,30 @@ func newMCPServer(app *AppData, caller mcpCaller) *mcp.Server {
 // answer with into an error a tool can return, or nil when the call succeeded.
 // The message comes from the body, which is where those methods put the sentence
 // meant for a person.
-func legacyResult(status int, body any, err error, what string) error {
+func legacyResult(status int, body any, err error, what msg.Text) error {
 	if err == nil && status < http.StatusBadRequest {
 		return nil
 	}
-	return mcpErr("%s: %s", what, messageFromBody(body, errInternal.Msg))
+	return opErr(what, messageFromBody(body, errInternal.Msg))
 }
 
-// toolErr renders a service error for a model by serviceErrors, as REST answers it: the message, never the wrapped cause, which is for the log; what names the operation, in German like the message.
-func (app *AppData) toolErr(what string, err error) error {
+// toolErr renders a service error for a model by serviceErrors, as REST answers it: the message, never the wrapped cause, which is for the log; what names the operation. Both in German and English; mcpserve.AddTool renders the error in the language of the request.
+func (app *AppData) toolErr(what msg.Text, err error) error {
 	e := serviceErrors.Classify(err)
 	if e.Status >= http.StatusInternalServerError && app.Log != nil {
-		app.Log.Errorw("MCP tool failed", "operation", what, "error", err)
+		app.Log.Errorw("MCP tool failed", "operation", what.String(), "error", err)
 	}
-	return mcpErr("%s: %s", what, e.Msg)
+	return opErr(what, e.Msg)
 }
 
-// mcpErr is an error text for a model; German like every message to people, which staticcheck refuses in a literal fmt.Errorf.
-func mcpErr(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
+// opErr is the error of a tool: the operation, then what went wrong, in both languages.
+func opErr(what, text msg.Text) error {
+	return msg.Err(msg.F("%s: %s", "%s: %s", what, text))
+}
+
+// inLang is t in the language of the tool call, for a text in a tool's result (mcpserve.ToolLang).
+func inLang(ctx context.Context, req *mcp.CallToolRequest, t msg.Text) string {
+	return t.In(mcpserve.ToolLang(ctx, req))
 }
 
 // ── Tool payloads ───────────────────────────────────────────────────────────
@@ -281,7 +286,7 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, mcpZoneList, error) {
 		zones, err := app.ZoneList(caller.user)
 		if err != nil {
-			return nil, mcpZoneList{}, app.toolErr("Zonen auflisten", err)
+			return nil, mcpZoneList{}, app.toolErr(msg.T("Zonen auflisten", "list zones"), err)
 		}
 		out := make([]mcpZone, 0, len(zones))
 		for _, z := range zones {
@@ -297,7 +302,7 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpZone, error) {
 		zones, err := app.ZoneList(caller.user)
 		if err != nil {
-			return nil, mcpZone{}, app.toolErr("Zone nachschlagen", err)
+			return nil, mcpZone{}, app.toolErr(msg.T("Zone nachschlagen", "look up zone"), err)
 		}
 		want, err := canonicalZoneName(in.Zone)
 		if err != nil {
@@ -308,23 +313,23 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 				return nil, toMCPZone(z), nil
 			}
 		}
-		return nil, mcpZone{}, mcpErr("Keine Zone %q, die einem gehört oder zusteht.", in.Zone)
+		return nil, mcpZone{}, msg.Errorf("Keine Zone %q, die einem gehört oder zusteht.", "No zone %q that you own or are entitled to.", in.Zone)
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "create_zone",
 		Description: "Create a DNS zone the calling user is entitled to, or a delegated subzone under a zone " +
 			"they own that allows subdomains. The zone gets its own TSIG key, which stays on the server.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP create_zone", "user", caller.user.Identity(), "zone", zone)
 		if _, err := app.ZoneCreateAuthorized(ctx, caller.user, zone); err != nil {
-			return nil, mcpStatus{}, app.toolErr("Zone anlegen", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Zone anlegen", "create zone"), err)
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: "Zone angelegt."}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.T("Zone angelegt.", "Zone created."))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
@@ -333,21 +338,21 @@ func registerZoneTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			"owner's key are gone, and anything updating it (external-dns, ACME) stops working. Only the zone's " +
 			"creator may. Ask the person before calling this. To leave a shared zone without deleting it, use " +
 			"remove_zone_owner on yourself.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpZoneDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		// Normalized on both sides: a trailing dot is the same zone, and being
 		// refused over one would teach a model to retry rather than to check.
-		if err := mcpserve.ConfirmEcho("confirm_zone", normalizeZone(in.ConfirmZone), zone, "the zone"); err != nil {
+		if err := mcpserve.ConfirmEcho("confirm_zone", normalizeZone(in.ConfirmZone), zone, msg.T("die Zone", "the zone")); err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP delete_zone", "user", caller.user.Identity(), "zone", zone)
 		if err := app.ZoneDeleteAuthorized(ctx, caller.user, zone); err != nil {
-			return nil, mcpStatus{}, app.toolErr("Zone löschen", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Zone löschen", "delete zone"), err)
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: "Zone für alle Eigentümer gelöscht."}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.T("Zone für alle Eigentümer gelöscht.", "Zone deleted for all owners."))}, nil
 	})
 }
 
@@ -365,7 +370,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	withKey := func(ctx context.Context, zone string, f func(TSIGCredentials) error) error {
 		creds, err := app.OwnerTSIG(ctx, caller.user.Identity(), zone)
 		if err != nil {
-			return app.toolErr("Schlüssel der Zone ermitteln", err)
+			return app.toolErr(msg.T("Schlüssel der Zone ermitteln", "find the zone's key"), err)
 		}
 		return f(creds)
 	}
@@ -379,7 +384,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
 			records, err := app.RecordsList(ctx, caller.user.Identity(), in.Zone, creds)
 			if err != nil {
-				return app.toolErr("DNS-Einträge auflisten", err)
+				return app.toolErr(msg.T("DNS-Einträge auflisten", "list DNS records"), err)
 			}
 			out = mcpRecordList{Records: toMCPRecords(records)}
 			return nil
@@ -403,7 +408,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
 			written, err := app.RecordUpsert(ctx, caller.user.Identity(), rec, creds)
 			if err != nil {
-				return app.toolErr("DNS-Eintrag setzen", err)
+				return app.toolErr(msg.T("DNS-Eintrag setzen", "set DNS record"), err)
 			}
 			out = mcpRecord{Zone: written.Zone, Name: written.Name, Type: written.Type, TTL: written.TTL, Value: written.Value}
 			return nil
@@ -423,7 +428,7 @@ func registerRecordTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		err := withKey(ctx, in.Zone, func(creds TSIGCredentials) error {
 			deleted, err := app.RecordDelete(ctx, caller.user.Identity(), rec, creds)
 			if err != nil {
-				return app.toolErr("DNS-Eintrag löschen", err)
+				return app.toolErr(msg.T("DNS-Eintrag löschen", "delete DNS record"), err)
 			}
 			out = mcpRecord{Zone: deleted.Zone, Name: deleted.Name, Type: deleted.Type}
 			return nil
@@ -443,61 +448,61 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	mcpserve.AddTool(s, caller, false, &mcp.Tool{
 		Name:        "list_zone_owners",
 		Description: "List who manages a zone. Only an owner may ask.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		isOwner, err := app.Storage.IsZoneOwner(caller.user.Identity(), zone)
 		if err != nil {
-			return nil, mcpStatus{}, app.toolErr("Eigentümer prüfen", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Eigentümer prüfen", "check owners"), err)
 		}
 		if !isOwner {
-			return nil, mcpStatus{}, mcpErr("Kein Eigentümer von %q.", zone)
+			return nil, mcpStatus{}, msg.Errorf("Kein Eigentümer von %q.", "Not an owner of %q.", zone)
 		}
 		owners, err := app.Storage.ListZoneOwners(zone)
 		if err != nil {
-			return nil, mcpStatus{}, app.toolErr("Eigentümer auflisten", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Eigentümer auflisten", "list owners"), err)
 		}
 		creator, err := app.Storage.ZoneCreator(zone)
 		if err != nil {
-			return nil, mcpStatus{}, app.toolErr("Ermitteln, wer die Zone angelegt hat", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Ermitteln, wer die Zone angelegt hat", "find out who created the zone"), err)
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: strings.Join(owners, ", ") + " (angelegt von " + creator + ")"}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.F("%s (angelegt von %s)", "%s (created by %s)", strings.Join(owners, ", "), creator))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "join_zone",
 		Description: "Become a co-owner of an existing zone the calling user is entitled to and that allows " +
 			"sharing. list_my_zones marks those with can_join.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP join_zone", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneJoin(ctx, caller.user, zone)
-		if err := legacyResult(status, body, err, "Zone beitreten"); err != nil {
+		if err := legacyResult(status, body, err, msg.T("Zone beitreten", "join zone")); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: "Jetzt Miteigentümer der Zone."}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.T("Jetzt Miteigentümer der Zone.", "Now a co-owner of the zone."))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
 		Name: "add_zone_owner",
 		Description: "Add someone as a co-owner of a zone. They get their own key and can manage the zone as " +
 			"the caller does. Owner-only, and the zone must allow sharing.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP add_zone_owner", "user", caller.user.Identity(), "zone", zone, "new_owner", in.Email)
 		status, body, err := app.ZoneAddOwner(ctx, caller.user, zone, in.Email)
-		if err := legacyResult(status, body, err, "Eigentümer hinzufügen"); err != nil {
+		if err := legacyResult(status, body, err, msg.T("Eigentümer hinzufügen", "add owner")); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: in.Email + " ist jetzt Miteigentümer."}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.F("%s ist jetzt Miteigentümer.", "%s is now a co-owner.", in.Email))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
@@ -505,17 +510,17 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "Remove an owner from a zone; their key is revoked. Only the zone's creator may remove " +
 			"someone else; anyone else may only pass their own address, to leave a shared zone. The creator " +
 			"cannot leave and the last owner cannot be removed — deleting the zone is a separate, destructive act.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpOwnerInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP remove_zone_owner", "user", caller.user.Identity(), "zone", zone, "owner", in.Email)
 		status, body, err := app.ZoneRemoveOwner(ctx, caller.user, zone, in.Email)
-		if err := legacyResult(status, body, err, "Eigentümer entfernen"); err != nil {
+		if err := legacyResult(status, body, err, msg.T("Eigentümer entfernen", "remove owner")); err != nil {
 			return nil, mcpStatus{}, err
 		}
-		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: in.Email + " verwaltet diese Zone nicht mehr."}, nil
+		return nil, mcpStatus{Status: "ok", Zone: zone, Detail: inLang(ctx, req, msg.F("%s verwaltet diese Zone nicht mehr.", "%s no longer manages this zone.", in.Email))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, true, &mcp.Tool{
@@ -523,18 +528,18 @@ func registerSharingTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Description: "Replace TSIG keys of a zone, e.g. after one leaked: the zone's creator replaces every " +
 			"owner's key, any other owner only their own. Disruptive: everything using an old key (external-dns, " +
 			"ACME clients) stops updating until it is reconfigured. Nothing is lost.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpZoneInput) (*mcp.CallToolResult, mcpStatus, error) {
 		zone, err := canonicalZoneName(in.Zone)
 		if err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP rotate_zone_keys", "user", caller.user.Identity(), "zone", zone)
 		status, body, err := app.ZoneRotateKeys(ctx, caller.user, zone)
-		if err := legacyResult(status, body, err, "Schlüssel erneuern"); err != nil {
+		if err := legacyResult(status, body, err, msg.T("Schlüssel erneuern", "renew keys")); err != nil {
 			return nil, mcpStatus{}, err
 		}
 		return nil, mcpStatus{Status: "ok", Zone: zone,
-			Detail: "Schlüssel erneuert; jeder Eigentümer muss seinen neuen Schlüssel im Portal abholen."}, nil
+			Detail: inLang(ctx, req, msg.T("Schlüssel erneuert; jeder Eigentümer muss seinen neuen Schlüssel im Portal abholen.", "Keys renewed; every owner has to fetch their new key in the portal."))}, nil
 	})
 }
 
@@ -568,17 +573,17 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	mayManage := func(zoneSoa string) error {
 		allowed, err := app.userCanManageZoneSoa(caller.user, zoneSoa)
 		if err != nil {
-			return app.toolErr("Berechtigung prüfen", err)
+			return app.toolErr(msg.T("Berechtigung prüfen", "check permission"), err)
 		}
 		if !allowed {
-			return mcpErr("Keine Berechtigung, die Regeln von %q zu verwalten.", zoneSoa)
+			return msg.Errorf("Keine Berechtigung, die Regeln von %q zu verwalten.", "No permission to manage the rules of %q.", zoneSoa)
 		}
 		return nil
 	}
 
 	requireSuperAdmin := func() error {
 		if !isSuperAdmin(app, caller.user) {
-			return mcpErr("%s", errNotSuperAdmin)
+			return msg.Err(errNotSuperAdmin)
 		}
 		return nil
 	}
@@ -590,7 +595,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, PolicyRulesResponse, error) {
 		rules, err := app.PolicyGetAllUserRules(caller.user)
 		if err != nil {
-			return nil, PolicyRulesResponse{}, app.toolErr("Regeln auflisten", err)
+			return nil, PolicyRulesResponse{}, app.toolErr(msg.T("Regeln auflisten", "list rules"), err)
 		}
 		return nil, *rules, nil
 	})
@@ -606,7 +611,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		app.Log.Infow("MCP create_policy_rule", "user", caller.user.Identity(), "zone_pattern", in.ZonePattern)
 		rule, err := app.PolicyCreateRule(toRuleRequest(in))
 		if err != nil {
-			return nil, PolicyRule{}, app.toolErr("Regel anlegen", err)
+			return nil, PolicyRule{}, app.toolErr(msg.T("Regel anlegen", "create rule"), err)
 		}
 		return nil, *rule, nil
 	})
@@ -618,7 +623,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpRuleUpdateInput) (*mcp.CallToolResult, PolicyRule, error) {
 		existing, err := app.Storage.PolicyGetByID(in.ID)
 		if err != nil {
-			return nil, PolicyRule{}, mcpErr("Keine Regel mit der ID %d.", in.ID)
+			return nil, PolicyRule{}, msg.Errorf("Keine Regel mit der ID %d.", "No rule with the ID %d.", in.ID)
 		}
 		// Both ends, so a rule cannot be moved out of the caller's scope.
 		if err := mayManage(existing.ZoneSoa); err != nil {
@@ -630,7 +635,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		app.Log.Infow("MCP update_policy_rule", "user", caller.user.Identity(), "rule_id", in.ID)
 		rule, err := app.PolicyUpdateRule(in.ID, toRuleRequest(in.mcpRuleInput))
 		if err != nil {
-			return nil, PolicyRule{}, app.toolErr(fmt.Sprintf("Regel %d ändern", in.ID), err)
+			return nil, PolicyRule{}, app.toolErr(msg.F("Regel %d ändern", "change rule %d", in.ID), err)
 		}
 		return nil, *rule, nil
 	})
@@ -639,13 +644,13 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Name: "delete_policy_rule",
 		Description: "Delete a policy rule. Everyone it granted a zone to loses that entitlement at once, and " +
 			"their existing zones become orphaned. Ask the person before calling this.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpRuleDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpRuleDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
 		existing, err := app.Storage.PolicyGetByID(in.ID)
 		if err != nil {
-			return nil, mcpStatus{}, mcpErr("Keine Regel mit der ID %d.", in.ID)
+			return nil, mcpStatus{}, msg.Errorf("Keine Regel mit der ID %d.", "No rule with the ID %d.", in.ID)
 		}
 		if err := mcpserve.ConfirmEcho("confirm_zone_pattern", in.ConfirmZonePattern, existing.ZonePattern,
-			fmt.Sprintf("rule %d", in.ID)); err != nil {
+			msg.F("Regel %d", "rule %d", in.ID)); err != nil {
 			return nil, mcpStatus{}, err
 		}
 		if err := mayManage(existing.ZoneSoa); err != nil {
@@ -653,9 +658,9 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		}
 		app.Log.Infow("MCP delete_policy_rule", "user", caller.user.Identity(), "rule_id", in.ID)
 		if err := app.PolicyDeleteRule(in.ID); err != nil {
-			return nil, mcpStatus{}, app.toolErr(fmt.Sprintf("Regel %d löschen", in.ID), err)
+			return nil, mcpStatus{}, app.toolErr(msg.F("Regel %d löschen", "delete rule %d", in.ID), err)
 		}
-		return nil, mcpStatus{Status: "ok", Detail: "Regel gelöscht: " + existing.ZonePattern}, nil
+		return nil, mcpStatus{Status: "ok", Detail: inLang(ctx, req, msg.F("Regel gelöscht: %s", "Rule deleted: %s", existing.ZonePattern))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, false, &mcp.Tool{
@@ -668,7 +673,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		}
 		delegations, err := app.DelegationGetAll()
 		if err != nil {
-			return nil, DelegationsResponse{}, app.toolErr("Delegationen auflisten", err)
+			return nil, DelegationsResponse{}, app.toolErr(msg.T("Delegationen auflisten", "list delegations"), err)
 		}
 		return nil, DelegationsResponse{Delegations: delegations}, nil
 	})
@@ -688,7 +693,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			Description:      in.Description,
 		})
 		if err != nil {
-			return nil, DelegationPolicy{}, app.toolErr("Delegation anlegen", err)
+			return nil, DelegationPolicy{}, app.toolErr(msg.T("Delegation anlegen", "create delegation"), err)
 		}
 		return nil, *delegation, nil
 	})
@@ -707,7 +712,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			Description:      in.Description,
 		})
 		if err != nil {
-			return nil, DelegationPolicy{}, app.toolErr(fmt.Sprintf("Delegation %d ändern", in.ID), err)
+			return nil, DelegationPolicy{}, app.toolErr(msg.F("Delegation %d ändern", "change delegation %d", in.ID), err)
 		}
 		return nil, *delegation, nil
 	})
@@ -716,13 +721,13 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		Name: "delete_delegation",
 		Description: "Withdraw a delegation. The user immediately loses the right to manage rules for that zone; " +
 			"the rules they created stay. Super-admins only.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in mcpDelegationDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in mcpDelegationDeleteInput) (*mcp.CallToolResult, mcpStatus, error) {
 		if err := requireSuperAdmin(); err != nil {
 			return nil, mcpStatus{}, err
 		}
 		delegations, err := app.DelegationGetAll()
 		if err != nil {
-			return nil, mcpStatus{}, app.toolErr("Delegationen auflisten", err)
+			return nil, mcpStatus{}, app.toolErr(msg.T("Delegationen auflisten", "list delegations"), err)
 		}
 		var found *DelegationPolicy
 		for i := range delegations {
@@ -732,17 +737,17 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			}
 		}
 		if found == nil {
-			return nil, mcpStatus{}, mcpErr("Keine Delegation mit der ID %d.", in.ID)
+			return nil, mcpStatus{}, msg.Errorf("Keine Delegation mit der ID %d.", "No delegation with the ID %d.", in.ID)
 		}
 		if err := mcpserve.ConfirmEcho("confirm_zone_suffix", in.ConfirmZoneSuffix, found.ZoneSuffix,
-			fmt.Sprintf("delegation %d", in.ID)); err != nil {
+			msg.F("Delegation %d", "delegation %d", in.ID)); err != nil {
 			return nil, mcpStatus{}, err
 		}
 		app.Log.Infow("MCP delete_delegation", "user", caller.user.Identity(), "delegation_id", in.ID)
 		if err := app.DelegationDelete(in.ID); err != nil {
-			return nil, mcpStatus{}, app.toolErr(fmt.Sprintf("Delegation %d löschen", in.ID), err)
+			return nil, mcpStatus{}, app.toolErr(msg.F("Delegation %d löschen", "delete delegation %d", in.ID), err)
 		}
-		return nil, mcpStatus{Status: "ok", Detail: "Delegation für " + found.ZoneSuffix + " zurückgezogen."}, nil
+		return nil, mcpStatus{Status: "ok", Detail: inLang(ctx, req, msg.F("Delegation für %s zurückgezogen.", "Delegation for %s withdrawn.", found.ZoneSuffix))}, nil
 	})
 
 	mcpserve.AddTool(s, caller, false, &mcp.Tool{
@@ -756,7 +761,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 		}
 		zones, err := app.OrphanedZones()
 		if err != nil {
-			return nil, OrphanedZonesResponse{}, app.toolErr("Verwaiste Zonen auflisten", err)
+			return nil, OrphanedZonesResponse{}, app.toolErr(msg.T("Verwaiste Zonen auflisten", "list orphaned zones"), err)
 		}
 		return nil, OrphanedZonesResponse{Zones: zones}, nil
 	})

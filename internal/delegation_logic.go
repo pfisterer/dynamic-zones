@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pfisterer/cloud-self-service-golib/msg"
 	"gorm.io/gorm"
 )
 
@@ -109,15 +110,15 @@ func zoneInScope(zone, suffix string) bool {
 }
 
 // errDelegationNotFound is the answer for a delegation id that does not exist.
-var errDelegationNotFound = statusErr(http.StatusNotFound, "Die Delegation gibt es nicht.", nil)
+var errDelegationNotFound = statusErr(http.StatusNotFound, msg.T("Die Delegation gibt es nicht.", "The delegation does not exist."), nil)
 
 // validateDelegationRequest refuses a delegation without a valid user filter or zone suffix, with 400.
 func validateDelegationRequest(req DelegationPolicyRequest) error {
 	if err := validateUserFilter(req.TargetUserFilter); err != nil {
-		return statusErr(http.StatusBadRequest, err.Error(), nil)
+		return statusErr(http.StatusBadRequest, msg.TextOf(err), nil)
 	}
 	if strings.TrimSpace(req.ZoneSuffix) == "" {
-		return statusErr(http.StatusBadRequest, "zone_suffix ist erforderlich.", nil)
+		return statusErr(http.StatusBadRequest, msg.T("zone_suffix ist erforderlich.", "zone_suffix is required."), nil)
 	}
 	return nil
 }
