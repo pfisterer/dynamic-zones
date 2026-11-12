@@ -30,7 +30,7 @@
             },
             {
                 zone_pattern: "some-project.dhbw.cloud",
-                zone_soa: "project.dhbw.cloud",
+                zone_soa: "dhbw.cloud",
                 target_user_filter: "dennis.pfisterer@dhbw.de, clemens.martin@dhbw.de",
                 allow_subdomains: true,
                 sharing_allowed: true,
@@ -43,6 +43,47 @@
                 allow_subdomains: true,
                 sharing_allowed: false,
                 description: "All Uni-Luebeck users can create subdomains"
+            },
+            // The dev user (root.admin@uni.example, run-development.sh) gets zones shaped like a busy admin's on prod: a personal zone, two extra zones under a shared name, and two shared team zones; scripts/dev-seed-zones.sh creates them with their subzones and co-owners.
+            {
+                zone_pattern: "%u.users.dhbw.site",
+                zone_soa: "users.dhbw.site",
+                target_user_filter: "*@uni.example, *@cs.example, *@bio.example",
+                allow_subdomains: true,
+                sharing_allowed: false,
+                description: "Personal zones (dev)"
+            },
+            {
+                zone_pattern: "test.pfisterer.users.dhbw.site",
+                zone_soa: "users.dhbw.site",
+                target_user_filter: "root.admin@uni.example",
+                allow_subdomains: true,
+                sharing_allowed: false,
+                description: "Extra test zone (dev)"
+            },
+            {
+                zone_pattern: "bigdata.pfisterer.users.dhbw.site",
+                zone_soa: "users.dhbw.site",
+                target_user_filter: "root.admin@uni.example",
+                allow_subdomains: true,
+                sharing_allowed: false,
+                description: "Course zone (dev)"
+            },
+            {
+                zone_pattern: "wi-ma.dhbw.site",
+                zone_soa: "dhbw.site",
+                target_user_filter: "root.admin@uni.example, admin@cs.example, faculty@cs.example",
+                allow_subdomains: true,
+                sharing_allowed: true,
+                description: "Shared team zone (dev)"
+            },
+            {
+                zone_pattern: "services.dhbw.cloud",
+                zone_soa: "dhbw.cloud",
+                target_user_filter: "root.admin@uni.example, admin@cs.example, faculty@bio.example",
+                allow_subdomains: true,
+                sharing_allowed: true,
+                description: "Shared platform zone (dev)"
             }
         ];
 
