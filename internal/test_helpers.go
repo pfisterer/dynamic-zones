@@ -73,18 +73,13 @@ func SetupEnvironmentForTests(t *testing.T) {
 	// happened to supply working values, and on a clean checkout the tests ran
 	// against production defaults.
 	//
-	// Note that .env still wins where it exists — the app loads it with
-	// godotenv.Overload — but it sets the same development values, and on a
-	// machine without one (CI) these apply.
+	// These win over .env: the app loads it with godotenv.Load, which leaves variables that are already set alone, so .env only fills in what is not set here (and on a machine without one, CI, nothing).
 	t.Setenv("API_MODE", "development")
 	t.Setenv("DEV_AUTH_USER", expectedUserName)
 	t.Setenv("DB_TYPE", "sqlite")
 	t.Setenv("DB_CONNECTION_STRING", "file::memory:?cache=shared")
 
-	// A port the kernel just handed out, not a fixed one, so two test packages
-	// running at the same time cannot collide. .env does not set API_BIND, so
-	// godotenv.Overload leaves this alone — if it ever does set it, this is
-	// where the collision comes back.
+	// A port the kernel just handed out, not a fixed one, so two test packages running at the same time cannot collide. godotenv.Load does not override it, even if .env sets API_BIND.
 	addr := freeLoopbackAddr(t)
 	t.Setenv("API_BIND", addr)
 	baseURL = "http://" + addr
