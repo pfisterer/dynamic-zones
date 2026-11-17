@@ -628,31 +628,65 @@ func (app *AppData) ZoneRotateKeys(ctx context.Context, caller *UserClaims, zone
 	return http.StatusOK, gin.H{"rotated": len(owners)}, nil
 }
 
-// OrphanedZone is a stored zone that is no longer covered by any policy rule for
-// its owner (e.g. because the policy was later deleted or changed).
+// OrphanedZone is a stored zone that is no longer covered by any policy rule for its creator (e.g. because the policy was later deleted or changed). User is the creator.
 type OrphanedZone struct {
 	Zone string `json:"zone"`
 	User string `json:"user"`
 }
 
-// OrphanedZones returns all stored zones that no current policy would grant to
-// their owner anymore. Ownership is checked against the stored username. A zone whose owner's group tokens are unknown (role provider unreachable, nothing cached) is not orphaned: unknown counts as covered.
+// zoneOrphanCheck decides whether `zone` is orphaned and names the owner it was judged by. A zone belongs to its creator: co-owners got it by sharing or joining under the creator's rule, so whether a rule covers them themselves does not matter — a shared zone is orphaned only when no rule covers its creator anymore. A zone without a creator row (should not happen, see backfillZoneCreators) is judged by its first owner row. An owner whose group tokens are unknown (role provider unreachable, nothing cached) counts as covered.
+func (app *AppData) zoneOrphanCheck(zone string, owners []string) (bool, string, error) {
+	creator, err := app.Storage.ZoneCreator(zone)
+	if err != nil {
+		return false, "", err
+	}
+	if creator == "" {
+		if len(owners) == 0 {
+			return false, "", nil
+		}
+		creator = owners[0]
+	}
+	covered, _, err := app.policyZoneCovered(zone, creator)
+	if err != nil {
+		return false, "", err
+	}
+	return !covered, creator, nil
+}
+
+// OrphanedZones returns every stored zone that no current policy would grant to its creator anymore, once per zone.
 func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
-	zones, err := app.Storage.ListAllZones()
+	rows, err := app.Storage.ListAllZones()
 	if err != nil {
 		return nil, err
 	}
+	owners := map[string][]string{}
+	order := []string{}
+	for _, z := range rows {
+		if _, seen := owners[z.Zone]; !seen {
+			order = append(order, z.Zone)
+		}
+		owners[z.Zone] = append(owners[z.Zone], z.Username)
+	}
 	orphaned := make([]OrphanedZone, 0)
-	for _, z := range zones {
-		allowed, _, err := app.policyZoneCovered(z.Zone, z.Username)
+	for _, zone := range order {
+		isOrphan, creator, err := app.zoneOrphanCheck(zone, owners[zone])
 		if err != nil {
 			return nil, err
 		}
-		if !allowed {
-			orphaned = append(orphaned, OrphanedZone{Zone: z.Zone, User: z.Username})
+		if isOrphan {
+			orphaned = append(orphaned, OrphanedZone{Zone: zone, User: creator})
 		}
 	}
 	return orphaned, nil
+}
+
+// ZoneIsOrphaned reports whether `zone` is orphaned in the sense of OrphanedZones, and its creator.
+func (app *AppData) ZoneIsOrphaned(zone string) (bool, string, error) {
+	owners, err := app.Storage.ListZoneOwners(zone)
+	if err != nil {
+		return false, "", err
+	}
+	return app.zoneOrphanCheck(zone, owners)
 }
 
 // maxIntermediateZones caps how many zones that do not exist yet one subzone request may create between the zone it delegates from and the zone it asks for. Each of them is an ownerless zone in PowerDNS that nobody can see, manage or delete through this API, so "a.b.c.d.e.mine.example.com" must not mint four of them as a side effect. Zones granted by a rule of their own are not capped: their depth is what the rule's author wrote.

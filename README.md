@@ -25,7 +25,7 @@ It is an API and usable on its own: zones, records, keys and policy are all reac
 
 ### Zones, rules and "orphaned" zones
 
-A zone's relationship to a policy rule is **recomputed, never stored**. A zone is *orphaned* when no current rule would produce that name for that owner — which happens when a rule is edited or deleted. The zone and its records keep working; what the owner loses is the right to manage it.
+A zone's relationship to a policy rule is **recomputed, never stored**. A zone is *orphaned* when no current rule would produce that name for its **creator** — which happens when a rule is edited or deleted. Co-owners of a shared zone got it by sharing or joining under the creator's rule, so whether a rule covers them themselves does not matter; a shared zone is listed once, under its creator. The zone and its records keep working; what the owner loses is the right to manage it.
 
 The remedy is therefore to **fix the rule**, not to delete the zone. A single typo in a `target_user_filter` orphans every zone that rule covered, and deleting the zones would destroy records that were never the problem. The UI lists orphaned zones for administrators so the mistake is visible.
 

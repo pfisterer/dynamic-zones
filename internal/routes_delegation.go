@@ -217,17 +217,17 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 			abortErr(c, http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."))
 			return
 		}
-		// Safety: only delete through this endpoint if the zone really is orphaned — an owner whose group tokens are unknown (role provider unreachable) counts as covered.
-		allowed, _, err := app.policyZoneCovered(zoneName, z.Username)
+		// Safety: only delete through this endpoint if the zone really is orphaned, judged by its creator like the list: a co-owner without a rule of their own does not make a shared zone orphaned, and an owner whose group tokens are unknown (role provider unreachable) counts as covered.
+		orphaned, creator, err := app.ZoneIsOrphaned(zoneName)
 		if err != nil {
 			abortErr(c, http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht prüfen.", "The zone could not be checked."))
 			return
 		}
-		if allowed {
+		if !orphaned {
 			abortErr(c, http.StatusConflict, msg.T("Die Zone ist von einer Regel abgedeckt; sie lässt sich nur in der Zonenverwaltung löschen.", "The zone is covered by a rule; it can only be deleted in the zone management."))
 			return
 		}
-		statusCode, returnValue, err := app.ZoneDelete(c.Request.Context(), z.Username, zoneName)
+		statusCode, returnValue, err := app.ZoneDelete(c.Request.Context(), creator, zoneName)
 		if err != nil {
 			app.Log.Error("deleteOrphanedZone failed: ", err)
 		}
