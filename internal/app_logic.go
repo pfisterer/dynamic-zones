@@ -36,7 +36,9 @@ type PolicyRuleRequest struct {
 	TargetUserFilter string `json:"target_user_filter" binding:"required"`
 	AllowSubdomains  bool   `json:"allow_subdomains"`
 	SharingAllowed   bool   `json:"sharing_allowed"`
-	Description      string `json:"description"`
+	// Deprecated: existing zones of the rule keep working, but it offers no new zones (see PolicyRule.Deprecated).
+	Deprecated  bool   `json:"deprecated"`
+	Description string `json:"description"`
 }
 
 // PolicyRulesResponse wraps policy rules for list endpoint.
@@ -166,6 +168,7 @@ func (app *AppData) PolicyCreateRule(req PolicyRuleRequest) (*PolicyRule, error)
 		TargetUserFilter: req.TargetUserFilter,
 		AllowSubdomains:  req.AllowSubdomains,
 		SharingAllowed:   req.SharingAllowed,
+		Deprecated:       req.Deprecated,
 		Description:      req.Description,
 	}
 
@@ -203,6 +206,7 @@ func (app *AppData) PolicyUpdateRule(id int64, req PolicyRuleRequest) (*PolicyRu
 	existingRule.TargetUserFilter = req.TargetUserFilter
 	existingRule.AllowSubdomains = req.AllowSubdomains
 	existingRule.SharingAllowed = req.SharingAllowed
+	existingRule.Deprecated = req.Deprecated
 	existingRule.Description = req.Description
 
 	app.Log.Infof("Updating policy rule #%d to: %+v", id, existingRule)
@@ -362,6 +366,10 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 	}
 	if !allowed || zoneDef == nil || !zoneDef.SharingAllowed {
 		return errorResult(http.StatusForbidden, msg.T("Keine Berechtigung, dieser Zone beizutreten.", "No permission to join this zone."), nil)
+	}
+	// Joining through the policy is a new zone for this user; a deprecated rule hands out none. Owners can still add co-owners (ZoneAddOwner).
+	if zoneDef.Deprecated {
+		return errorResult(http.StatusForbidden, msg.T("Die Regel dieser Zone ist veraltet; beitreten lässt sich nicht mehr. Die bisherigen Eigentümer können weitere Eigentümer hinzufügen.", "The rule of this zone is deprecated; it can no longer be joined. Its current owners can add further owners."), nil)
 	}
 
 	if _, err := app.Storage.CreateZone(username, zone, false); err != nil {
@@ -641,6 +649,12 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 		return errorResult(http.StatusConflict, msg.T("Die Zone gibt es bereits.", "The zone already exists."), fmt.Errorf("app.ZoneCreate: %s is stored", name))
 	}
 
+	// A deprecated rule keeps the zones it granted but offers no new ones (PolicyRule.Deprecated). Subzones (zone.Subzone) are not affected: they hang below a zone that exists.
+	if zone.Deprecated && !zone.Subzone {
+		return errorResult(http.StatusForbidden, app.deprecatedZoneText(user, name),
+			fmt.Errorf("app.ZoneCreate: %q is only granted to %q by a deprecated rule", name, username))
+	}
+
 	// Check which zones this nameserver is authoritative for. A nil result means
 	// the zone is NOT under its own SOA — the chain of intermediate zones cannot
 	// be built, and creating the zone anyway would mint a name outside the SOA
@@ -748,6 +762,22 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 	}
 
 	return http.StatusCreated, gin.H{"success": zoneResponse}, nil
+}
+
+// deprecatedZoneText is the refusal for a zone only a deprecated rule grants, naming the zones the user can create instead when there are any.
+func (app *AppData) deprecatedZoneText(user *UserClaims, zone string) msg.Text {
+	var offers []string
+	if zones, err := app.PolicyGetUserZones(user); err == nil {
+		for _, z := range zones {
+			if !z.Deprecated && z.Zone != zone {
+				offers = append(offers, z.Zone)
+			}
+		}
+	}
+	if len(offers) == 0 {
+		return msg.F("Die Regel für %s ist veraltet; neue Zonen bietet sie nicht mehr an.", "The rule for %s is deprecated; it no longer offers new zones.", zone)
+	}
+	return msg.F("Die Regel für %s ist veraltet; neue Zonen nur noch über die aktuellen Regeln, z. B. %s.", "The rule for %s is deprecated; new zones only through the current rules, e.g. %s.", zone, strings.Join(offers, ", "))
 }
 
 // reservedByPolicy reports whether a zone on the way to a subzone belongs to the policy rather than to whoever owns the zone above it: a rule's SOA (the base zone a whole rule delegates from), or a name some rule grants to someone other than `user`. A subzone created through allow_subdomains must not claim such a name or write delegations into it — that is the rule author's decision, not the parent owner's.
@@ -1092,6 +1122,7 @@ func ruleToZoneResponse(rule PolicyRule, user *UserClaims) (ZoneResponse, bool) 
 		ZoneSOA:         normalizeZone(rule.ZoneSoa),
 		AllowSubdomains: rule.AllowSubdomains,
 		SharingAllowed:  rule.SharingAllowed,
+		Deprecated:      rule.Deprecated,
 	}, true
 }
 
@@ -1104,11 +1135,14 @@ func rulesToUserZones(rules []PolicyRule, user *UserClaims) []ZoneResponse {
 			continue
 		}
 
-		// Check if the zone has already been added by another rule
+		// Check if the zone has already been added by another rule. A current rule wins over a deprecated one granting the same name, so the zone stays creatable.
 		isDuplicate := false
-		for _, existing := range zones {
+		for i, existing := range zones {
 			if existing.Zone == zone.Zone {
 				isDuplicate = true
+				if existing.Deprecated && !zone.Deprecated {
+					zones[i] = zone
+				}
 				break
 			}
 		}
@@ -1162,6 +1196,10 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 				}
 			}
 		}
+		// A deprecated rule only keeps what the user already owns; it offers nothing new — no zone to create, none to join, and no "taken" entry either.
+		if zone.Deprecated && !(existsInStorage && isOwner) {
+			continue
+		}
 		canJoin := existsInStorage && !isOwner && zone.SharingAllowed
 
 		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
@@ -1174,6 +1212,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			Owners:                    owners,
 			Creator:                   creator,
 			ZoneSoa:                   zone.ZoneSOA,
+			Deprecated:                zone.Deprecated,
 		})
 	}
 

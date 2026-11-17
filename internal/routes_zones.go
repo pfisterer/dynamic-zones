@@ -194,6 +194,8 @@ type ZoneStatus struct {
 	Creator string `json:"creator,omitempty"`
 	// SharingAllowed: whether this zone may be shared (governing rule opt-in).
 	SharingAllowed bool `json:"sharing_allowed"`
+	// Deprecated: the zone comes from a deprecated rule — it keeps working, but the rule offers no new zones (a newer rule usually grants a shorter name). Only listed when the user owns the zone.
+	Deprecated bool `json:"deprecated,omitempty"`
 }
 
 // getZones returns a list of available DNS zones for the authenticated user.

@@ -42,7 +42,16 @@ A `zone_pattern` may contain two placeholders, both replaced per user and made D
 
 `%l` gives shorter names. Since it drops the domain, a rule with `%l` is only accepted when its `target_user_filter` is limited to **one e-mail domain**: every comma-separated entry names that domain explicitly — `*@<domain>`, a prefix wildcard such as `s25*@<domain>`, or a full address — and all entries name the same one (case-insensitive). `*`, `*.dhbw.de`, a wildcard in the domain or a list with two domains are refused (400); otherwise `max@a.de` and `max@b.de` would be granted the same zone. A rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`). Pick the abbreviations so that no pattern can produce another's names; zone ownership is the last line regardless: a zone belongs to whoever created it first, and anyone else granted the same name sees it as taken and cannot create it.
 
-To introduce `%l` where `%u` rules exist, **keep the `%u` rules and add a `%l` rule per domain**. Replacing a `%u` rule would orphan every zone it granted, since a zone must still match a rule (see above); with both rules each person can have both names.
+To introduce `%l` where `%u` rules exist, **keep the `%u` rules and add a `%l` rule per domain**. Replacing a `%u` rule would orphan every zone it granted, since a zone must still match a rule (see above); with both rules each person can have both names. To have new users get only the short name, mark the `%u` rule as deprecated (below).
+
+### Deprecated rules
+
+A rule with `deprecated: true` keeps the zones it already granted but offers no new ones:
+
+- **Existing zones keep working fully.** The rule still covers them, so they are not orphaned, and every check that asks whether a rule grants a zone to its owner still says yes: records, keys, key rotation, deletion, sharing with further owners (if `sharing_allowed`) and subzones below the zone (if `allow_subdomains`; the parent exists, so a subzone is no new grant).
+- **No new zones.** In the zone list (`GET /v1/zones/`, `list_my_zones`) a deprecated rule contributes only a zone the user already owns, marked `deprecated: true`; it offers no zone to create, none to join and lists none as taken. Creating a zone that only deprecated rules grant is refused with 403, naming the zones the current rules offer instead; joining one through the policy is refused as well. If a current rule grants the same name, the current rule wins. A deleted zone of a deprecated rule cannot be created again.
+
+The column defaults to `false` (added by AutoMigrate), so existing rules behave as before. Switching it off again offers the zones again.
 
 ### Zone names
 

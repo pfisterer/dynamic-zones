@@ -150,6 +150,7 @@ type mcpZone struct {
 	ZoneSoa         string   `json:"zone_soa,omitempty" jsonschema:"for a top-level zone, the zone it was given out of (its policy rule's zone_soa, e.g. users.dhbw.site); empty for subzones"`
 	Owners          []string `json:"owners,omitempty" jsonschema:"who manages it; only visible to an owner"`
 	Creator         string   `json:"creator,omitempty" jsonschema:"which owner created it: the only one who may delete it or remove other owners; only visible to an owner"`
+	Deprecated      bool     `json:"deprecated,omitempty" jsonschema:"the zone comes from a deprecated rule: it keeps working, but that rule offers no new zones"`
 }
 
 func toMCPZone(z ZoneStatus) mcpZone {
@@ -164,6 +165,7 @@ func toMCPZone(z ZoneStatus) mcpZone {
 		ZoneSoa:         z.ZoneSoa,
 		Owners:          z.Owners,
 		Creator:         z.Creator,
+		Deprecated:      z.Deprecated,
 	}
 }
 
@@ -237,6 +239,7 @@ type mcpRuleInput struct {
 	TargetUserFilter string `json:"target_user_filter" jsonschema:"which users it applies to, e.g. *@dhbw.de"`
 	AllowSubdomains  bool   `json:"allow_subdomains,omitempty" jsonschema:"let owners create delegated subzones below the granted zone"`
 	SharingAllowed   bool   `json:"sharing_allowed,omitempty" jsonschema:"let the granted zone be shared with further owners"`
+	Deprecated       bool   `json:"deprecated,omitempty" jsonschema:"keep the zones this rule already granted working, but offer no new ones (e.g. an old %u rule next to a new %l rule); an update without it switches it off"`
 	Description      string `json:"description,omitempty" jsonschema:"a note about what this rule is for"`
 }
 
@@ -566,6 +569,7 @@ func registerPolicyTools(s *mcp.Server, app *AppData, caller mcpCaller) {
 			TargetUserFilter: in.TargetUserFilter,
 			AllowSubdomains:  in.AllowSubdomains,
 			SharingAllowed:   in.SharingAllowed,
+			Deprecated:       in.Deprecated,
 			Description:      in.Description,
 		}
 	}

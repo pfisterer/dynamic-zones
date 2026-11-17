@@ -66,9 +66,11 @@ type PolicyRule struct {
 	// (and policy-entitled users auto-join). Off by default (opt-in per rule);
 	// added via GORM AutoMigrate (new column, defaults to false -> backfills
 	// existing rules to false, preserving the old single-owner behaviour).
-	SharingAllowed bool      `gorm:"not null;default:false" json:"sharing_allowed"`
-	Description    string    `gorm:"type:text;default:null" json:"description,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	SharingAllowed bool `gorm:"not null;default:false" json:"sharing_allowed"`
+	// Deprecated keeps a rule for the zones it already granted but offers no new ones: an existing zone that matches it stays covered (not orphaned, fully manageable, subzones below it if AllowSubdomains), but nobody can create or join a zone that only a deprecated rule covers. Used when a newer rule (e.g. %l next to %u) should be the only one handing out new zones. Added via GORM AutoMigrate (new column, defaults to false, so existing rules behave as before).
+	Deprecated  bool      `gorm:"not null;default:false" json:"deprecated"`
+	Description string    `gorm:"type:text;default:null" json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // DelegationPolicy grants a user (or wildcard filter) the right to manage
@@ -396,7 +398,7 @@ func (s *Storage) PolicyUpdate(rule *PolicyRule) (*PolicyRule, error) {
 	// field here also forces GORM to write its ZERO value (Updates skips zero fields of a
 	// struct otherwise) — required for booleans like SharingAllowed/AllowSubdomains so
 	// that toggling them OFF actually persists (SEC #9: sharing must be revocable).
-	result := s.db.Model(rule).Select("ZonePattern", "ZoneSoa", "TargetUserFilter", "AllowSubdomains", "Description", "SharingAllowed").Updates(rule)
+	result := s.db.Model(rule).Select("ZonePattern", "ZoneSoa", "TargetUserFilter", "AllowSubdomains", "Description", "SharingAllowed", "Deprecated").Updates(rule)
 
 	if result.Error != nil {
 		return nil, fmt.Errorf("storage.Update: Failed to update rule %d: %w", rule.ID, result.Error)

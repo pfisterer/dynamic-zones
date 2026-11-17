@@ -83,6 +83,7 @@ func (p *JavaScriptEngine) createRuleWrapper() func(goja.FunctionCall) goja.Valu
 			TargetUserFilter: toString(obj.Get("target_user_filter")),
 			AllowSubdomains:  toBool(obj.Get("allow_subdomains")),
 			SharingAllowed:   toBool(obj.Get("sharing_allowed")),
+			Deprecated:       toBool(obj.Get("deprecated")),
 			Description:      toString(obj.Get("description")),
 		}
 
@@ -115,6 +116,7 @@ func (p *JavaScriptEngine) updateRuleWrapper() func(goja.FunctionCall) goja.Valu
 			TargetUserFilter: toString(obj.Get("target_user_filter")),
 			AllowSubdomains:  toBool(obj.Get("allow_subdomains")),
 			SharingAllowed:   toBool(obj.Get("sharing_allowed")),
+			Deprecated:       toBool(obj.Get("deprecated")),
 			Description:      toString(obj.Get("description")),
 		}
 
@@ -277,6 +279,7 @@ func (p *JavaScriptEngine) policyRuleToJSObject(rule *PolicyRule) goja.Value {
 	obj.Set("target_user_filter", rule.TargetUserFilter)
 	obj.Set("allow_subdomains", rule.AllowSubdomains)
 	obj.Set("sharing_allowed", rule.SharingAllowed)
+	obj.Set("deprecated", rule.Deprecated)
 	obj.Set("description", rule.Description)
 	obj.Set("created_at", rule.CreatedAt.String())
 	return obj

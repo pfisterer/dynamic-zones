@@ -20,6 +20,8 @@ type ZoneResponse struct {
 	SharingAllowed bool `json:"sharing_allowed"`
 	// Subzone marks a zone reached through a parent the caller holds (allow_subdomains) rather than granted by a rule directly. ZoneCreate requires the caller to own that parent, because creating the subzone writes its delegation into the parent.
 	Subzone bool `json:"-"`
+	// Deprecated: the zone comes only from a deprecated rule. An existing zone keeps working; a new one cannot be created or joined.
+	Deprecated bool `json:"deprecated,omitempty"`
 }
 
 // CreatePolicyApiGroup sets up the /policies API group and its routes.

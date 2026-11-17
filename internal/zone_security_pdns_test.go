@@ -458,3 +458,55 @@ func TestRuledIntermediateZoneIsAdoptedNotReplaced(t *testing.T) {
 		t.Errorf("creating the adopted zone again: got %v, want 409", err)
 	}
 }
+
+// A rule deprecated after its zone was created: the owner keeps the zone and may still delegate below it and delete it; a new person cannot create a zone from it and gets the newer rule's zone instead.
+func TestDeprecatedRuleAgainstPowerDns(t *testing.T) {
+	const (
+		alice = "alice@dhbw.de"
+		bob   = "bob@dhbw.de"
+		zone  = "alice-at-dhbw-de.users.dhbw.site"
+	)
+	app := newPdnsTestApp(t)
+	ctx := t.Context()
+
+	old, err := app.PolicyCreateRule(PolicyRuleRequest{ZonePattern: "%u.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", AllowSubdomains: true})
+	if err != nil {
+		t.Fatalf("creating the rule: %v", err)
+	}
+	if _, err := app.PolicyCreateRule(PolicyRuleRequest{ZonePattern: "%l.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", AllowSubdomains: true}); err != nil {
+		t.Fatalf("creating the %%l rule: %v", err)
+	}
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf(alice), zone); err != nil {
+		t.Fatalf("alice could not create her zone: %v", err)
+	}
+	if _, err := app.PolicyUpdateRule(old.ID, PolicyRuleRequest{ZonePattern: old.ZonePattern, ZoneSoa: old.ZoneSoa, TargetUserFilter: old.TargetUserFilter, AllowSubdomains: true, Deprecated: true}); err != nil {
+		t.Fatalf("deprecating the rule: %v", err)
+	}
+
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf(bob), "bob-at-dhbw-de.users.dhbw.site"); StatusOf(err) != http.StatusForbidden {
+		t.Errorf("bob creating a zone of the deprecated rule: got %v, want 403", err)
+	}
+	if pdnsZoneExists(t, app, "bob-at-dhbw-de.users.dhbw.site") {
+		t.Error("the refused zone exists in PowerDNS")
+	}
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf(bob), "bob.users.dhbw.site"); err != nil {
+		t.Errorf("bob could not create his %%l zone: %v", err)
+	}
+
+	if status, _, err := app.ZoneGet(ctx, claimsOf(alice), zone, "", false); status != http.StatusOK {
+		t.Errorf("alice reading her zone: %d, %v", status, err)
+	}
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf(alice), "iot."+zone); err != nil {
+		t.Errorf("alice could not create a subzone of her zone: %v", err)
+	}
+	if err := app.ZoneDeleteAuthorized(ctx, claimsOf(alice), "iot."+zone); err != nil {
+		t.Errorf("alice could not delete her subzone: %v", err)
+	}
+	if err := app.ZoneDeleteAuthorized(ctx, claimsOf(alice), zone); err != nil {
+		t.Errorf("alice could not delete her zone: %v", err)
+	}
+	// Gone is gone: the deprecated rule does not offer it again.
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf(alice), zone); StatusOf(err) != http.StatusForbidden {
+		t.Errorf("recreating the deleted zone: got %v, want 403", err)
+	}
+}
