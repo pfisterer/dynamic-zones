@@ -342,8 +342,8 @@ func TestDelegationsWithGroupTokens(t *testing.T) {
 
 func TestRoleProviderURLNeedsToken(t *testing.T) {
 	t.Setenv("ROLE_PROVIDER_URL", "http://role-provider-service:8085")
-	t.Setenv("ROLE_PROVIDER_TOKEN", "")
-	if _, err := GetAppConfigFromEnvironment(); err == nil || !strings.Contains(err.Error(), "ROLE_PROVIDER_TOKEN") {
-		t.Errorf("want a refusal naming ROLE_PROVIDER_TOKEN, got %v", err)
+	t.Setenv("ROLE_PROVIDER_API_TOKEN", "")
+	if _, err := GetAppConfigFromEnvironment(); err == nil || !strings.Contains(err.Error(), "ROLE_PROVIDER_API_TOKEN") {
+		t.Errorf("want a refusal naming ROLE_PROVIDER_API_TOKEN, got %v", err)
 	}
 }

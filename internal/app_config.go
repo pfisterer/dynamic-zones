@@ -155,7 +155,7 @@ type DnsPolicyConfig struct {
 type RoleProviderConfig struct {
 	// URL of role-provider-service, e.g. http://role-provider-service:8085 (ROLE_PROVIDER_URL).
 	URL string `json:"url"`
-	// Token is a read token of the role provider (one of its API_TOKENS; ROLE_PROVIDER_TOKEN).
+	// Token is a read token of the role provider (one of its API_TOKENS; ROLE_PROVIDER_API_TOKEN).
 	Token string `json:"token"`
 }
 
@@ -266,7 +266,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 
 		RoleProvider: RoleProviderConfig{
 			URL:   envconf.String("ROLE_PROVIDER_URL", ""),
-			Token: envconf.String("ROLE_PROVIDER_TOKEN", ""),
+			Token: envconf.String("ROLE_PROVIDER_API_TOKEN", ""),
 		},
 
 		InitialDataScriptPath: envconf.String("INITIAL_DATA_SCRIPT_PATH", ""),
@@ -279,7 +279,7 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		return AppConfig{}, err
 	}
 	if strings.TrimSpace(appConfig.RoleProvider.URL) != "" && strings.TrimSpace(appConfig.RoleProvider.Token) == "" {
-		return AppConfig{}, fmt.Errorf("ROLE_PROVIDER_URL is set but ROLE_PROVIDER_TOKEN is empty: the role provider answers nothing without a read token")
+		return AppConfig{}, fmt.Errorf("ROLE_PROVIDER_URL is set but ROLE_PROVIDER_API_TOKEN is empty: the role provider answers nothing without a read token")
 	}
 
 	err = appConfig.Validate()

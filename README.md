@@ -56,7 +56,7 @@ A rule's `target_user_filter` (and a delegation's) is a comma-separated list; th
 | `group:wwi23seb` | every member of the group, as resolved by the [role provider](https://github.com/pfisterer/role-provider-service) (nested groups and patterns included) |
 | `group:wwi23seb#studierende` | the members holding that relation in the group |
 
-Group entries need a role provider (`ROLE_PROVIDER_URL`, `ROLE_PROVIDER_TOKEN`, see [Configuration](#role-provider)); without one they match nobody and e-mail entries work exactly as before. The service asks `GET /v1/users/{email}/tokens` and reuses the answer for 60 seconds per person, so a membership change counts within a minute. The filter is at most 255 characters.
+Group entries need a role provider (`ROLE_PROVIDER_URL`, `ROLE_PROVIDER_API_TOKEN`, see [Configuration](#role-provider)); without one they match nobody and e-mail entries work exactly as before. The service asks `GET /v1/users/{email}/tokens` and reuses the answer for 60 seconds per person, so a membership change counts within a minute. The filter is at most 255 characters.
 
 **When the role provider is unreachable.** Every answer is kept for 24 hours as fallback, and after a failed request the role provider is not asked again for 15 seconds, so an outage does not make requests wait for timeouts. What happens then follows one principle — *a zone that exists is the owner's by the zones table; the rules decide only about new zones and about orphaning* — and an unknown answer never grants anything new:
 
@@ -152,7 +152,7 @@ A `run-development.sh` in the workspace that holds the sibling repositories (not
 API_MODE=development DEV_AUTH_USER=root.admin@uni.example \
   DNS_POLICY_SUPERADMIN_EMAILS=root.admin@uni.example \
   PDNS_API_KEY=my-default-api-key \
-  ROLE_PROVIDER_URL=http://localhost:8085 ROLE_PROVIDER_TOKEN=dev-read \
+  ROLE_PROVIDER_URL=http://localhost:8085 ROLE_PROVIDER_API_TOKEN=dev-read \
   air                                         # the API on :8082
 sh scripts/dev-seed-zones.sh http://localhost:8082
 ```
@@ -212,7 +212,7 @@ This is where **CAA** belongs. A `CAA` record must name the certificate authorit
 | Variable | Default | Purpose |
 |---|---|---|
 | `ROLE_PROVIDER_URL` | — | [role-provider-service](https://github.com/pfisterer/role-provider-service), e.g. `http://role-provider-service:8085`; empty = no role provider, group entries in user filters match nobody |
-| `ROLE_PROVIDER_TOKEN` | — | A **read** token of the role provider (one of its `API_TOKENS`); required when the URL is set, startup fails without it |
+| `ROLE_PROVIDER_API_TOKEN` | — | A **read** token of the role provider (one of its `API_TOKENS`); required when the URL is set, startup fails without it |
 
 Cache and outage behaviour: see [Who a rule applies to](#who-a-rule-applies-to-user-filters-and-groups). In the chart: `dynamicZonesAPI.roleProvider.url`, and the token from the key `role-provider-api-token` of the Secret (`dynamicZonesAPI.existingSecret`, or `dynamicZonesAPI.roleProvider.apiToken` when the chart creates it).
 
