@@ -49,7 +49,7 @@ func listDelegations(app *AppData) gin.HandlerFunc {
 
 // createDelegation creates a delegation policy.
 // @Summary Create a delegation policy
-// @Description Grant a user (or wildcard filter) the right to manage policy rules for a zone and its subdomains. Super-admins only.
+// @Description Grant the people a user filter names (e-mail addresses, *-patterns, user:/group:/group:#relation tokens of the role provider) the right to manage policy rules for a zone and its subdomains. Super-admins only.
 // @Tags policies
 // @Accept json
 // @Produce json
@@ -158,7 +158,7 @@ func deleteDelegation(app *AppData) gin.HandlerFunc {
 
 // listOrphanedZones lists zones no policy covers anymore.
 // @Summary List orphaned zones
-// @Description Zones that still exist but are no longer covered by any policy for their owner (the policy was deleted or changed). Super-admins only.
+// @Description Zones that still exist but are no longer covered by any policy for their owner (the policy was deleted or changed). An owner whose group tokens cannot be looked up (role provider unreachable) counts as covered. Super-admins only.
 // @Tags policies
 // @Produce json
 // @Success 200 {object} OrphanedZonesResponse "List of orphaned zones"
@@ -217,9 +217,8 @@ func deleteOrphanedZone(app *AppData) gin.HandlerFunc {
 			abortErr(c, http.StatusNotFound, msg.T("Die Zone gibt es nicht.", "The zone does not exist."))
 			return
 		}
-		// Safety: only delete through this endpoint if the zone really is orphaned.
-		owner := &UserClaims{Email: z.Username}
-		allowed, _, err := app.PolicyIsZoneAllowedForUser(zoneName, owner)
+		// Safety: only delete through this endpoint if the zone really is orphaned — an owner whose group tokens are unknown (role provider unreachable) counts as covered.
+		allowed, _, err := app.policyZoneCovered(zoneName, z.Username)
 		if err != nil {
 			abortErr(c, http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht prüfen.", "The zone could not be checked."))
 			return

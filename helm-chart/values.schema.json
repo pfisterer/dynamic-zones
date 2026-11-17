@@ -79,6 +79,14 @@
             }
           }
         },
+        "roleProvider": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string" },
+            "apiToken": { "type": "string" }
+          }
+        },
         "zoneDefaults": {
           "type": "object",
           "additionalProperties": false,

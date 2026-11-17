@@ -29,10 +29,10 @@ func InjectAppLogic(app *AppData) gin.HandlerFunc {
 
 // PolicyRuleRequest is used for create/update operations.
 type PolicyRuleRequest struct {
-	// ZonePattern is the zone the rule grants. %u stands for the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de.users.dhbw.site for %u.users.dhbw.site), %l for its local part only (s252690@student.dhbw-mannheim.de → s252690-stma.users.dhbw.site for %l-stma.users.dhbw.site). %l is only accepted when target_user_filter is limited to one e-mail domain.
+	// ZonePattern is the zone the rule grants. %u stands for the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de.users.dhbw.site for %u.users.dhbw.site), %l for its local part only (s252690@student.dhbw-mannheim.de → s252690-stma.users.dhbw.site for %l-stma.users.dhbw.site). Two people whose %l is the same compete for one name: whoever creates it first owns it.
 	ZonePattern string `json:"zone_pattern" binding:"required"`
 	ZoneSoa     string `json:"zone_soa" binding:"required"`
-	// TargetUserFilter is a comma-separated list of e-mail addresses and patterns with one '*' such as *@dhbw.de; the rule applies to whoever matches any entry.
+	// TargetUserFilter is a comma-separated list of e-mail addresses, patterns with one '*' such as *@dhbw.de, and role-provider tokens user:<email>, group:<id> and group:<id>#<relation>; the rule applies to whoever matches any entry.
 	TargetUserFilter string `json:"target_user_filter" binding:"required"`
 	AllowSubdomains  bool   `json:"allow_subdomains"`
 	SharingAllowed   bool   `json:"sharing_allowed"`
@@ -70,9 +70,10 @@ func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesRespons
 		app.Log.Errorf("Error retrieving delegations: %v", err)
 		return nil, err
 	}
+	p := app.principalOf(user.Identity())
 	var userDelegations []DelegationPolicy
 	for _, d := range delegations {
-		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok {
+		if matchFilter(p, d.TargetUserFilter).match {
 			userDelegations = append(userDelegations, d)
 		}
 	}
@@ -90,26 +91,44 @@ func (app *AppData) PolicyGetAllUserRules(user *UserClaims) (*PolicyRulesRespons
 	}
 
 	// Plain users: read-only view of the rules that grant them zones.
-	return &PolicyRulesResponse{Rules: filterUserRules(rules, user), EditAllowed: false}, nil
+	return &PolicyRulesResponse{Rules: filterUserRules(rules, p, false), EditAllowed: false}, nil
 }
 
+// PolicyGetUserZones is what the rules grant the user (offers): a group entry counts only when the user's tokens are known to contain it.
 func (app *AppData) PolicyGetUserZones(user *UserClaims) ([]ZoneResponse, error) {
-	// Get all rules that are applicable to the user
+	return app.policyZonesOf(app.principalOf(user.Identity()), false)
+}
+
+// policyZonesOf is the zones the rules grant a person. optimistic counts a group entry that cannot be checked (role provider unreachable, the person's tokens unknown) as matching — only for questions about zones that exist already (are they still covered?), never for granting a new one.
+func (app *AppData) policyZonesOf(p principal, optimistic bool) ([]ZoneResponse, error) {
 	rules, err := app.Storage.PolicyGetAll()
 	if err != nil {
 		app.Log.Errorf("Error retrieving policy rules: %v", err)
 		return nil, err
 	}
-
-	// Filter the rules based on user email
-	filteredRules := filterUserRules(rules, user)
-	zones := rulesToUserZones(filteredRules, user)
-
-	return zones, nil
+	return rulesToUserZones(filterUserRules(rules, p, optimistic), p.email), nil
 }
 
+// PolicyIsZoneAllowedForUser decides whether the rules grant the zone to the user, for creating or joining it: strict, so a group entry counts only when the user's tokens are known.
 func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (bool, *ZoneResponse, error) {
-	zones, err := app.PolicyGetUserZones(user)
+	return app.policyZoneAllowed(zone, app.principalOf(user.Identity()), false)
+}
+
+// policyZoneCovered asks the same for a zone that exists, on behalf of its owner (orphan detection, the governing rule of a shared zone): an unknown group entry counts as covering it, so an unreachable role provider never orphans a zone or changes its flags. Logged when that made the difference.
+func (app *AppData) policyZoneCovered(zone, owner string) (bool, *ZoneResponse, error) {
+	p := app.principalOf(owner)
+	allowed, def, err := app.policyZoneAllowed(zone, p, true)
+	if err == nil && allowed && !p.known {
+		if strict, _, _ := app.policyZoneAllowed(zone, p, false); !strict {
+			app.Log.Warnw("zone counted as covered because its owner's group tokens are unknown (role provider unreachable)", "zone", zone, "owner", owner)
+		}
+	}
+	return allowed, def, err
+}
+
+func (app *AppData) policyZoneAllowed(zone string, p principal, optimistic bool) (bool, *ZoneResponse, error) {
+	user := &UserClaims{Email: p.email}
+	zones, err := app.policyZonesOf(p, optimistic)
 	if err != nil {
 		app.Log.Errorf("Error getting user zones: %v", err)
 		return false, nil, err
@@ -143,6 +162,19 @@ func (app *AppData) PolicyIsZoneAllowedForUser(zone string, user *UserClaims) (b
 
 	app.Log.Debugf("User %s is not allowed to use zone %s", user.Identity(), zone)
 	return false, nil, nil
+}
+
+// msgGroupsUnavailable is the answer when a zone could only be granted through a group entry and the person's groups cannot be looked up right now.
+var msgGroupsUnavailable = msg.T("Die Gruppenzugehörigkeit lässt sich gerade nicht prüfen, weil der Gruppendienst nicht erreichbar ist. Zonen, die eine Regel über Gruppen vergibt, lassen sich deshalb im Moment nicht anlegen oder beitreten; bitte später erneut versuchen. Bestehende Zonen funktionieren weiter.", "Group membership cannot be checked right now because the group service is unreachable. Zones that a rule grants through groups can therefore not be created or joined at the moment; please try again later. Existing zones keep working.")
+
+// refusedForUnknownGroups reports whether the rules refuse the zone to the user only because their group tokens are unknown: with the unknown group entries counted as matching, a rule would grant it.
+func (app *AppData) refusedForUnknownGroups(zone string, user *UserClaims) bool {
+	p := app.principalOf(user.Identity())
+	if p.known {
+		return false
+	}
+	allowed, _, err := app.policyZoneAllowed(zone, p, true)
+	return err == nil && allowed
 }
 
 // isSubdomainOf reports whether child is a strict subdomain of parent
@@ -364,6 +396,9 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, msg.T("Die Regeln ließen sich nicht auswerten.", "The rules could not be evaluated."), err)
 	}
+	if !allowed && app.refusedForUnknownGroups(zone, user) {
+		return errorResult(http.StatusServiceUnavailable, msgGroupsUnavailable, fmt.Errorf("app.ZoneJoin: group tokens of %q unknown", username))
+	}
 	if !allowed || zoneDef == nil || !zoneDef.SharingAllowed {
 		return errorResult(http.StatusForbidden, msg.T("Keine Berechtigung, dieser Zone beizutreten.", "No permission to join this zone."), nil)
 	}
@@ -432,7 +467,7 @@ func (app *AppData) zoneGoverningDef(zone string) (*ZoneResponse, error) {
 		return nil, err
 	}
 	for _, o := range owners {
-		allowed, def, err := app.PolicyIsZoneAllowedForUser(zone, &UserClaims{Email: o})
+		allowed, def, err := app.policyZoneCovered(zone, o)
 		if err != nil {
 			return nil, err
 		}
@@ -601,7 +636,7 @@ type OrphanedZone struct {
 }
 
 // OrphanedZones returns all stored zones that no current policy would grant to
-// their owner anymore. Ownership is checked against the stored username.
+// their owner anymore. Ownership is checked against the stored username. A zone whose owner's group tokens are unknown (role provider unreachable, nothing cached) is not orphaned: unknown counts as covered.
 func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
 	zones, err := app.Storage.ListAllZones()
 	if err != nil {
@@ -609,8 +644,7 @@ func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
 	}
 	orphaned := make([]OrphanedZone, 0)
 	for _, z := range zones {
-		owner := &UserClaims{Email: z.Username}
-		allowed, _, err := app.PolicyIsZoneAllowedForUser(z.Zone, owner)
+		allowed, _, err := app.policyZoneCovered(z.Zone, z.Username)
 		if err != nil {
 			return nil, err
 		}
@@ -692,7 +726,7 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 			return errorResult(http.StatusInternalServerError, msg.T("Die Regeln ließen sich nicht lesen.", "The rules could not be read."), fmt.Errorf("app.ZoneCreate: %w", err))
 		}
 		for _, z := range authoritative[1:] {
-			if rule, reserved := reservedByPolicy(rules, z, user); reserved {
+			if rule, reserved := reservedByPolicy(rules, z, app.principalOf(username)); reserved {
 				return errorResult(http.StatusForbidden, msg.F("%s ist durch eine Regel reserviert.", "%s is reserved by a rule.", z),
 					fmt.Errorf("app.ZoneCreate: subzone %q of %q runs into %q, reserved by rule %d", name, username, z, rule.ID))
 			}
@@ -781,13 +815,15 @@ func (app *AppData) deprecatedZoneText(user *UserClaims, zone string) msg.Text {
 }
 
 // reservedByPolicy reports whether a zone on the way to a subzone belongs to the policy rather than to whoever owns the zone above it: a rule's SOA (the base zone a whole rule delegates from), or a name some rule grants to someone other than `user`. A subzone created through allow_subdomains must not claim such a name or write delegations into it — that is the rule author's decision, not the parent owner's.
-func reservedByPolicy(rules []PolicyRule, zone string, user *UserClaims) (PolicyRule, bool) {
+//
+// Strict: a rule whose group entry cannot be checked for the user counts as somebody else's.
+func reservedByPolicy(rules []PolicyRule, zone string, p principal) (PolicyRule, bool) {
 	for _, r := range rules {
 		if normalizeZone(r.ZoneSoa) == zone {
 			return r, true
 		}
 		if zonePatternMatches(r.ZonePattern, zone) {
-			if mine, _ := userCanAccessRule(user.Identity(), r.TargetUserFilter); !mine {
+			if !matchFilter(p, r.TargetUserFilter).match {
 				return r, true
 			}
 		}
@@ -795,7 +831,7 @@ func reservedByPolicy(rules []PolicyRule, zone string, user *UserClaims) (Policy
 	return PolicyRule{}, false
 }
 
-// The placeholders a zone pattern may contain: %u is the whole e-mail address of the user made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), %l only its local part (dennis.pfisterer@dhbw.de → dennis-pfisterer). %l drops the domain, so it is only accepted on a rule limited to one e-mail domain (validateLocalPartFilter).
+// The placeholders a zone pattern may contain: %u is the whole e-mail address of the user made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), %l only its local part (dennis.pfisterer@dhbw.de → dennis-pfisterer). %l drops the domain, so two people can be granted the same name; zone ownership settles it (the first to create it owns it, the other sees it as taken).
 const (
 	placeholderUser      = "%u"
 	placeholderLocalPart = "%l"
@@ -947,49 +983,7 @@ func policyValidateRequest(req PolicyRuleRequest) error {
 		return err
 	}
 
-	if err := validateLocalPartFilter(req.ZonePattern, req.TargetUserFilter); err != nil {
-		return err
-	}
-
 	return nil
-}
-
-// validateLocalPartFilter accepts %l in a zone pattern only on a rule whose user filter is limited to one e-mail domain. %l is the local part of the address without its domain, so on a rule for several domains max@a.de and max@b.de would be granted the same zone.
-//
-// Every entry of the comma-separated filter must name the domain explicitly — "*@<domain>", a prefix wildcard such as "s25*@<domain>", or a full address — and all entries must name the same domain (case-insensitive). "*", "*.dhbw.de" or "*@*" do not limit the domain and are refused, as is a list mixing "*@dhbw.de" with "x@cas.dhbw.de". Patterns without %l are not affected.
-func validateLocalPartFilter(zonePattern, filter string) error {
-	if !strings.Contains(zonePattern, placeholderLocalPart) {
-		return nil
-	}
-	if _, ok := singleFilterDomain(filter); !ok {
-		return invalid("Ein zone_pattern mit %s (dem lokalen Teil der E-Mail-Adresse, ohne Domain) ist nur in einer Regel erlaubt, deren target_user_filter auf genau eine E-Mail-Domain beschränkt ist: alle Einträge der Form *@domain oder Adressen derselben Domain, z. B. *@student.dhbw-mannheim.de. Sonst könnten Personen verschiedener Domains dieselbe Zone erhalten; für mehrere Domains %s verwenden oder je Domain eine Regel anlegen.", "A zone_pattern with %s (the local part of the e-mail address, without the domain) is only allowed on a rule whose target_user_filter is limited to exactly one e-mail domain: all entries of the form *@domain or addresses of the same domain, e.g. *@student.dhbw-mannheim.de. Otherwise people from different domains could get the same zone; for several domains use %s or create one rule per domain.", placeholderLocalPart, placeholderUser)
-	}
-	return nil
-}
-
-// singleFilterDomain returns the one e-mail domain every entry of a user filter is limited to, and false when the filter is empty, has an entry that leaves the domain open (a wildcard in or after the domain, no '@'), or names more than one domain.
-func singleFilterDomain(filter string) (string, bool) {
-	domain := ""
-	for _, raw := range strings.Split(filter, ",") {
-		p := strings.ToLower(strings.TrimSpace(raw))
-		if p == "" {
-			continue
-		}
-		at := strings.LastIndex(p, "@")
-		if at < 0 {
-			return "", false
-		}
-		local, d := p[:at], p[at+1:]
-		// The domain itself must be literal; a wildcard is only allowed in the local part, and then the local part must not hide a further '@' that would move the domain.
-		if d == "" || strings.Contains(d, "*") || (strings.Contains(local, "*") && strings.Contains(local, "@")) {
-			return "", false
-		}
-		if domain != "" && d != domain {
-			return "", false
-		}
-		domain = d
-	}
-	return domain, domain != ""
 }
 
 // validatePatternWithinSoa enforces that the zone a rule hands out actually lies
@@ -1030,20 +1024,12 @@ func emailMatchesPattern(email, pattern string) bool {
 	return strings.HasPrefix(e, parts[0]) && strings.HasSuffix(e, parts[1])
 }
 
-// userCanAccessRule reports whether the email matches the target user filter.
-// The filter may be a comma-separated list of patterns; access is granted if
-// the email matches ANY entry.
-func userCanAccessRule(email string, filter string) (bool, error) {
-	for _, p := range strings.Split(filter, ",") {
-		if emailMatchesPattern(email, p) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
+// validateUserFilter accepts a comma-separated list of e-mail addresses, patterns with one '*' (*@dhbw.de), and the role-provider tokens user:<email>, group:<id> and group:<id>#<relation>. At most 255 characters, the size of the column.
 func validateUserFilter(filter string) error {
-	errInvalidUserFilter := invalid("Der Benutzerfilter muss eine durch Kommas getrennte Liste gültiger E-Mail-Adressen oder Muster wie *@domain.com sein.", "The user filter must be a comma-separated list of valid e-mail addresses or patterns such as *@domain.com.")
+	errInvalidUserFilter := invalid("Der Benutzerfilter muss eine durch Kommas getrennte Liste sein aus E-Mail-Adressen, Mustern wie *@domain.de und Tokens wie user:name@domain.de, group:<gruppe> oder group:<gruppe>#<rolle>.", "The user filter must be a comma-separated list of e-mail addresses, patterns such as *@domain.com and tokens such as user:name@domain.com, group:<group> or group:<group>#<role>.")
+	if len(filter) > 255 {
+		return invalid("Der Benutzerfilter ist mit %d Zeichen zu lang (höchstens 255).", "The user filter is too long at %d characters (at most 255).", len(filter))
+	}
 
 	hasEntry := false
 	for _, raw := range strings.Split(filter, ",") {
@@ -1052,17 +1038,8 @@ func validateUserFilter(filter string) error {
 			continue // tolerate blank entries / trailing commas
 		}
 		hasEntry = true
-
-		// At most one wildcard asterisk allowed per entry.
-		if strings.Count(p, "*") > 1 {
+		if !validFilterEntry(p) {
 			return errInvalidUserFilter
-		}
-
-		// No wildcard: the entry must be a standard email address.
-		if !strings.Contains(p, "*") {
-			if _, err := mail.ParseAddress(p); err != nil {
-				return errInvalidUserFilter
-			}
 		}
 	}
 
@@ -1070,6 +1047,36 @@ func validateUserFilter(filter string) error {
 		return errInvalidUserFilter
 	}
 	return nil
+}
+
+// The shapes of the role provider's ids (role-provider-service common.GroupIDPattern and its relation names), compared case-insensitively.
+var (
+	filterGroupIDRe  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
+	filterRelationRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+)
+
+// validFilterEntry checks one entry of a user filter.
+func validFilterEntry(entry string) bool {
+	lower := strings.ToLower(entry)
+	switch {
+	case strings.HasPrefix(lower, tokenUserPrefix):
+		addr := strings.TrimPrefix(lower, tokenUserPrefix)
+		parsed, err := mail.ParseAddress(addr)
+		return err == nil && parsed.Address == addr && !strings.Contains(addr, "*")
+	case strings.HasPrefix(lower, tokenGroupPrefix):
+		id, relation, hasRelation := strings.Cut(strings.TrimPrefix(lower, tokenGroupPrefix), "#")
+		if !filterGroupIDRe.MatchString(id) {
+			return false
+		}
+		return !hasRelation || filterRelationRe.MatchString(relation)
+	case strings.Count(entry, "*") > 1:
+		return false
+	case strings.Contains(entry, "*"):
+		return !strings.Contains(entry, ":")
+	default:
+		_, err := mail.ParseAddress(entry)
+		return err == nil && !strings.Contains(entry, ":")
+	}
 }
 
 func isSuperAdmin(app *AppData, user *UserClaims) bool {
@@ -1096,13 +1103,11 @@ func validateZonePattern(value string) error {
 	return helper.DnsValidateName(s)
 }
 
-func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
-	// Make a new slice to hold filtered rules
+// filterUserRules keeps the rules whose user filter matches the person; optimistic as in policyZonesOf.
+func filterUserRules(rules []PolicyRule, p principal, optimistic bool) []PolicyRule {
 	filteredRules := make([]PolicyRule, 0, 10)
-
-	// Only include rules the user can access
 	for _, rule := range rules {
-		if canAccess, err := userCanAccessRule(user.Identity(), rule.TargetUserFilter); err == nil && canAccess {
+		if matchFilter(p, rule.TargetUserFilter).allowed(optimistic) {
 			filteredRules = append(filteredRules, rule)
 		}
 	}
@@ -1111,9 +1116,9 @@ func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
 }
 
 // ruleToZoneResponse is the zone a rule grants the user, with %u and %l expanded; false when a placeholder would expand to nothing for this user.
-func ruleToZoneResponse(rule PolicyRule, user *UserClaims) (ZoneResponse, bool) {
+func ruleToZoneResponse(rule PolicyRule, identity string) (ZoneResponse, bool) {
 	// Normalised like every requested name, or a rule written as "Lab.Example.com" would grant a zone no request can ever match.
-	zone, ok := expandZonePattern(rule.ZonePattern, user.Identity())
+	zone, ok := expandZonePattern(rule.ZonePattern, identity)
 	if !ok {
 		return ZoneResponse{}, false
 	}
@@ -1126,11 +1131,11 @@ func ruleToZoneResponse(rule PolicyRule, user *UserClaims) (ZoneResponse, bool) 
 	}, true
 }
 
-func rulesToUserZones(rules []PolicyRule, user *UserClaims) []ZoneResponse {
+func rulesToUserZones(rules []PolicyRule, identity string) []ZoneResponse {
 	zones := make([]ZoneResponse, 0, len(rules))
 
 	for _, rule := range rules {
-		zone, ok := ruleToZoneResponse(rule, user)
+		zone, ok := ruleToZoneResponse(rule, identity)
 		if !ok {
 			continue
 		}
@@ -1334,6 +1339,11 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 			return nil, statusErr(http.StatusInternalServerError, msg.T("Die übergeordnete Zone ließ sich nicht ermitteln.", "The parent zone could not be determined."), err)
 		}
 		isAllowed = zoneDef != nil
+	}
+
+	if !isAllowed && app.refusedForUnknownGroups(zone, user) {
+		return nil, statusErr(http.StatusServiceUnavailable, msgGroupsUnavailable,
+			fmt.Errorf("app.ZoneCreateAuthorized: %q for %q needs group tokens, which are unknown", zone, user.Identity()))
 	}
 
 	if !isAllowed {

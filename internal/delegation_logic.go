@@ -11,6 +11,7 @@ import (
 
 // DelegationPolicyRequest is used for create/update of delegation policies.
 type DelegationPolicyRequest struct {
+	// TargetUserFilter: comma-separated e-mail addresses, *-patterns and role-provider tokens (user:<email>, group:<id>, group:<id>#<relation>).
 	TargetUserFilter string `json:"target_user_filter" binding:"required"`
 	ZoneSuffix       string `json:"zone_suffix" binding:"required"`
 	Description      string `json:"description"`
@@ -34,9 +35,10 @@ func (app *AppData) DelegationsVisibleTo(user *UserClaims) ([]DelegationPolicy, 
 	if isSuperAdmin(app, user) {
 		return all, nil
 	}
+	p := app.principalOf(user.Identity())
 	visible := []DelegationPolicy{}
 	for _, d := range all {
-		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok {
+		if matchFilter(p, d.TargetUserFilter).match {
 			visible = append(visible, DelegationPolicy{ZoneSuffix: d.ZoneSuffix, Description: d.Description})
 		}
 	}
@@ -84,7 +86,7 @@ func (app *AppData) DelegationDelete(id int64) error {
 
 // userCanManageZoneSoa reports whether the user may create/edit/delete a policy
 // rule whose ZoneSoa is the given value: true for super-admins, or if a
-// delegation matches the user's email and covers the zone (zone + subdomains).
+// delegation matches the user (e-mail entry or a token they hold) and covers the zone (zone + subdomains). Strict: a group entry that cannot be checked (role provider unreachable, nothing cached) grants nothing.
 func (app *AppData) userCanManageZoneSoa(user *UserClaims, zoneSoa string) (bool, error) {
 	if isSuperAdmin(app, user) {
 		return true, nil
@@ -93,8 +95,9 @@ func (app *AppData) userCanManageZoneSoa(user *UserClaims, zoneSoa string) (bool
 	if err != nil {
 		return false, err
 	}
+	p := app.principalOf(user.Identity())
 	for _, d := range delegations {
-		if ok, _ := userCanAccessRule(user.Identity(), d.TargetUserFilter); ok && zoneInScope(zoneSoa, d.ZoneSuffix) {
+		if matchFilter(p, d.TargetUserFilter).match && zoneInScope(zoneSoa, d.ZoneSuffix) {
 			return true, nil
 		}
 	}

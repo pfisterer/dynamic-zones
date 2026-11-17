@@ -179,6 +179,22 @@ spec:
                   key: zone-events-ingest-token
                   optional: true
 
+            # Role provider: group entries (group:<id>, group:<id>#<relation>) in
+            # user filters. Off without a URL. The read token is `optional`, like
+            # the ingest token above, so an existingSecret without the key does
+            # not wedge the pods; the service then refuses to start with a URL
+            # but no token, which names the problem.
+            {{- with (.Values.dynamicZonesAPI.roleProvider | default dict).url }}
+            - name: ROLE_PROVIDER_URL
+              value: {{ . | quote }}
+            - name: ROLE_PROVIDER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: role-provider-api-token
+                  optional: true
+            {{- end }}
+
             # Database Connection
             - name: DB_TYPE
               value: {{ .Values.dynamicZonesAPI.database.type | quote }}

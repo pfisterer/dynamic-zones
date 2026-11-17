@@ -234,9 +234,9 @@ type mcpOwnerInput struct {
 }
 
 type mcpRuleInput struct {
-	ZonePattern      string `json:"zone_pattern" jsonschema:"the zone names this rule grants, e.g. %u.users.dhbw.site where %u is the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), or %l-stma.users.dhbw.site where %l is only its local part (s252690@student.dhbw-mannheim.de → s252690); %l requires a target_user_filter limited to one e-mail domain"`
+	ZonePattern      string `json:"zone_pattern" jsonschema:"the zone names this rule grants, e.g. %u.users.dhbw.site where %u is the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), or %l-stma.users.dhbw.site where %l is only its local part (s252690@student.dhbw-mannheim.de → s252690); with %l two people can be granted the same name, the first to create it owns it"`
 	ZoneSoa          string `json:"zone_soa" jsonschema:"the base zone this nameserver is authoritative for, e.g. users.dhbw.site"`
-	TargetUserFilter string `json:"target_user_filter" jsonschema:"which users it applies to, e.g. *@dhbw.de"`
+	TargetUserFilter string `json:"target_user_filter" jsonschema:"which users it applies to, comma-separated: e-mail addresses, patterns such as *@dhbw.de, and role-provider tokens user:<email>, group:<id> or group:<id>#<relation>"`
 	AllowSubdomains  bool   `json:"allow_subdomains,omitempty" jsonschema:"let owners create delegated subzones below the granted zone"`
 	SharingAllowed   bool   `json:"sharing_allowed,omitempty" jsonschema:"let the granted zone be shared with further owners"`
 	Deprecated       bool   `json:"deprecated,omitempty" jsonschema:"keep the zones this rule already granted working, but offer no new ones (e.g. an old %u rule next to a new %l rule); an update without it switches it off"`
@@ -256,7 +256,7 @@ type mcpRuleDeleteInput struct {
 }
 
 type mcpDelegationInput struct {
-	TargetUserFilter string `json:"target_user_filter" jsonschema:"who is being delegated to, e.g. someone@dhbw.de or *@dhbw.de"`
+	TargetUserFilter string `json:"target_user_filter" jsonschema:"who is being delegated to, comma-separated: e.g. someone@dhbw.de, *@dhbw.de, group:<id> or group:<id>#<relation>"`
 	ZoneSuffix       string `json:"zone_suffix" jsonschema:"the zone they may manage rules for, including everything below it"`
 	Description      string `json:"description,omitempty" jsonschema:"a note about what this delegation is for"`
 }

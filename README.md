@@ -14,7 +14,7 @@ It is an API and usable on its own: zones, records, keys and policy are all reac
 
 ## What it does
 
-- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`, where `%u` stands for the requester's address and `%l` for its local part; see [Placeholders in zone patterns](#placeholders-in-zone-patterns-u-and-l)) may be created by whom (`target_user_filter`: single addresses or `*@domain`), under which authoritative zone (`zone_soa`), and whether subdomains and co-ownership are permitted. Users can create exactly what a rule grants them — nothing else.
+- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`, where `%u` stands for the requester's address and `%l` for its local part; see [Placeholders in zone patterns](#placeholders-in-zone-patterns-u-and-l)) may be created by whom (`target_user_filter`: addresses, `*@domain` patterns or groups of the role provider; see [Who a rule applies to](#who-a-rule-applies-to-user-filters-and-groups)), under which authoritative zone (`zone_soa`), and whether subdomains and co-ownership are permitted. Users can create exactly what a rule grants them — nothing else.
 - **Per-zone TSIG keys.** Each zone gets its own key. It is what `nsupdate`, [external-dns](https://github.com/kubernetes-sigs/external-dns) or [cert-manager](https://cert-manager.io/) use to write records, and it cannot touch any other zone. Keys can be rotated.
 - **Records in the browser or over the API.** The same records can be edited in the web UI or written by machines via RFC 2136.
 - **PowerDNS as the authoritative server.** The service configures PowerDNS through its HTTP API and never edits zone files or the backend database itself. Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS configuration, not this service's business.
@@ -40,9 +40,30 @@ A `zone_pattern` may contain two placeholders, both replaced per user and made D
 | `%u` | the whole e-mail address, `@` written as `-at-` | `dennis-pfisterer-at-dhbw-de` | `s252690-at-student-dhbw-mannheim-de` |
 | `%l` | only the local part, before the `@` | `dennis-pfisterer` | `s252690` |
 
-`%l` gives shorter names. Since it drops the domain, a rule with `%l` is only accepted when its `target_user_filter` is limited to **one e-mail domain**: every comma-separated entry names that domain explicitly — `*@<domain>`, a prefix wildcard such as `s25*@<domain>`, or a full address — and all entries name the same one (case-insensitive). `*`, `*.dhbw.de`, a wildcard in the domain or a list with two domains are refused (400); otherwise `max@a.de` and `max@b.de` would be granted the same zone. A rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`). Pick the abbreviations so that no pattern can produce another's names; zone ownership is the last line regardless: a zone belongs to whoever created it first, and anyone else granted the same name sees it as taken and cannot create it.
+`%l` gives shorter names and works with any `target_user_filter`, groups included. Since it drops the domain, two people can be granted the same name (`max@a.de` and `max@b.de`, or `max.muster` and `max_muster`); there is no special rule for that: a zone belongs to whoever created it first, and anyone else granted the same name sees it as taken and cannot create it. Where that matters, a rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`).
 
 To introduce `%l` where `%u` rules exist, **keep the `%u` rules and add a `%l` rule per domain**. Replacing a `%u` rule would orphan every zone it granted, since a zone must still match a rule (see above); with both rules each person can have both names. To have new users get only the short name, mark the `%u` rule as deprecated (below).
+
+### Who a rule applies to: user filters and groups
+
+A rule's `target_user_filter` (and a delegation's) is a comma-separated list; the rule applies to whoever matches **any** entry:
+
+| Entry | Matches |
+|---|---|
+| `max@dhbw.de` | that address (case-insensitive) |
+| `*@dhbw.de`, `s25*@student.dhbw-mannheim.de` | addresses matching the pattern (one `*`) |
+| `user:max@dhbw.de` | that address, like the plain form; the token the role provider and the UI's people picker use |
+| `group:wwi23seb` | every member of the group, as resolved by the [role provider](https://github.com/pfisterer/role-provider-service) (nested groups and patterns included) |
+| `group:wwi23seb#studierende` | the members holding that relation in the group |
+
+Group entries need a role provider (`ROLE_PROVIDER_URL`, `ROLE_PROVIDER_TOKEN`, see [Configuration](#role-provider)); without one they match nobody and e-mail entries work exactly as before. The service asks `GET /v1/users/{email}/tokens` and reuses the answer for 60 seconds per person, so a membership change counts within a minute. The filter is at most 255 characters.
+
+**When the role provider is unreachable.** Every answer is kept for 24 hours as fallback, and after a failed request the role provider is not asked again for 15 seconds, so an outage does not make requests wait for timeouts. What happens then follows one principle — *a zone that exists is the owner's by the zones table; the rules decide only about new zones and about orphaning* — and an unknown answer never grants anything new:
+
+- **Existing zones keep working.** Records, keys and ownership never depended on the rules. Where the rules are asked about a zone that exists — the orphan list, deleting an orphaned zone, the governing rule of a shared zone (its sharing and subdomain flags, `zone_soa`) — a group entry that cannot be checked counts as covering it, and the log says so. An unreachable role provider never orphans a zone.
+- **New zones through group entries are refused** while the person's tokens are unknown (unreachable and nothing of the last 24 hours cached): creating or joining a zone only a group entry would grant answers 503 with a message saying the group service is unreachable and to try again later. Zone offers leave such rules out until the answer is back. A zone no rule would grant even with every group counted is refused with 403 as always, so nobody gets in on an unknown answer.
+- **Delegations through group entries** grant nothing while unknown (strict), and the rules a plain user may see are likewise only those that match for certain.
+- **E-mail and `user:` entries keep working**, they need no role provider.
 
 ### Deprecated rules
 
@@ -131,6 +152,7 @@ A `run-development.sh` in the workspace that holds the sibling repositories (not
 API_MODE=development DEV_AUTH_USER=root.admin@uni.example \
   DNS_POLICY_SUPERADMIN_EMAILS=root.admin@uni.example \
   PDNS_API_KEY=my-default-api-key \
+  ROLE_PROVIDER_URL=http://localhost:8085 ROLE_PROVIDER_TOKEN=dev-read \
   air                                         # the API on :8082
 sh scripts/dev-seed-zones.sh http://localhost:8082
 ```
@@ -184,6 +206,15 @@ Keeping that name's `A`/`AAAA` record current in the parent zone is optional and
 `ZONE_DEFAULTS_ADMIN_RECORDS` (JSON) are records written into every newly created **user (leaf) zone**; `ZONE_DEFAULTS_SOA_RECORDS` go only into the **SOA/base (intermediate) zones** the service creates above them. `ZONE_DEFAULTS_ADMIN_TSIG_NAME/_ALG/_KEY` name the admin key that is added to all of these zones. The split is deliberate: a record in the base zone cannot be deleted or overridden with the user's own zone key.
 
 This is where **CAA** belongs. A `CAA` record must name the certificate authority that actually signs — not the ACME endpoint in front of it. Naming the proxy host instead makes every wildcard issuance fail with an opaque CA error, and `issuewild` must be present alongside `issue` or wildcard requests are refused.
+
+### Role provider
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ROLE_PROVIDER_URL` | — | [role-provider-service](https://github.com/pfisterer/role-provider-service), e.g. `http://role-provider-service:8085`; empty = no role provider, group entries in user filters match nobody |
+| `ROLE_PROVIDER_TOKEN` | — | A **read** token of the role provider (one of its `API_TOKENS`); required when the URL is set, startup fails without it |
+
+Cache and outage behaviour: see [Who a rule applies to](#who-a-rule-applies-to-user-filters-and-groups). In the chart: `dynamicZonesAPI.roleProvider.url`, and the token from the key `role-provider-api-token` of the Secret (`dynamicZonesAPI.existingSecret`, or `dynamicZonesAPI.roleProvider.apiToken` when the chart creates it).
 
 ### Zone events
 

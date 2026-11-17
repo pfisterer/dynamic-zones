@@ -54,9 +54,10 @@ type Zone struct {
 // PolicyRule represents a DNS policy rule.
 type PolicyRule struct {
 	// GORM field tags are usually preferred for primary keys
-	ID               int64  `gorm:"primaryKey" json:"id"`
-	ZonePattern      string `gorm:"type:varchar(255);not null" json:"zone_pattern"`
-	ZoneSoa          string `gorm:"type:varchar(255);not null" json:"zone_soa"`
+	ID          int64  `gorm:"primaryKey" json:"id"`
+	ZonePattern string `gorm:"type:varchar(255);not null" json:"zone_pattern"`
+	ZoneSoa     string `gorm:"type:varchar(255);not null" json:"zone_soa"`
+	// TargetUserFilter: comma-separated e-mail addresses, *-patterns (*@dhbw.de) and role-provider tokens (user:<email>, group:<id>, group:<id>#<relation>); the rule applies to whoever matches any entry.
 	TargetUserFilter string `gorm:"type:varchar(255);not null" json:"target_user_filter"`
 	// AllowSubdomains lets owners of a matched zone also create/manage delegated
 	// subzones under it (e.g. sub.example.com under example.com). Added via GORM

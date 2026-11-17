@@ -126,7 +126,7 @@ func TestCurrentRuleWinsOverDeprecatedForTheSameName(t *testing.T) {
 		{{ZonePattern: "%l.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", Deprecated: true}, {ZonePattern: "x.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "x@dhbw.de"}},
 		{{ZonePattern: "x.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "x@dhbw.de"}, {ZonePattern: "%l.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", Deprecated: true}},
 	} {
-		zones := rulesToUserZones(order, user)
+		zones := rulesToUserZones(order, user.Identity())
 		if len(zones) != 1 || zones[0].Deprecated {
 			t.Errorf("got %+v, want one current zone", zones)
 		}

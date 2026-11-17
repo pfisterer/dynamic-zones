@@ -151,7 +151,16 @@ type DnsPolicyConfig struct {
 	// Filename of a JavaScript script to initialize default policies and data
 }
 
+// RoleProviderConfig is where a person's group tokens come from (role-provider-service). Empty URL = no role provider.
+type RoleProviderConfig struct {
+	// URL of role-provider-service, e.g. http://role-provider-service:8085 (ROLE_PROVIDER_URL).
+	URL string `json:"url"`
+	// Token is a read token of the role provider (one of its API_TOKENS; ROLE_PROVIDER_TOKEN).
+	Token string `json:"token"`
+}
+
 type AppConfig struct {
+	RoleProvider    RoleProviderConfig      `json:"role_provider"`
 	UpstreamDns     UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
 	PowerDns        PowerDnsConfig          `json:"powerdns_config"`
 	Storage         StorageConfig           `json:"storage_config"`
@@ -255,6 +264,11 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 			TTLHours: envconf.Int("ZONE_EVENTS_TTL_HOURS", 24),
 		},
 
+		RoleProvider: RoleProviderConfig{
+			URL:   envconf.String("ROLE_PROVIDER_URL", ""),
+			Token: envconf.String("ROLE_PROVIDER_TOKEN", ""),
+		},
+
 		InitialDataScriptPath: envconf.String("INITIAL_DATA_SCRIPT_PATH", ""),
 		DevMode:               envconf.String("API_MODE", "production") == "development",
 		DevAuthUser:           envconf.String("DEV_AUTH_USER", "root.admin@uni.example"),
@@ -263,6 +277,9 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 	//Validate the configuration
 	if err != nil {
 		return AppConfig{}, err
+	}
+	if strings.TrimSpace(appConfig.RoleProvider.URL) != "" && strings.TrimSpace(appConfig.RoleProvider.Token) == "" {
+		return AppConfig{}, fmt.Errorf("ROLE_PROVIDER_URL is set but ROLE_PROVIDER_TOKEN is empty: the role provider answers nothing without a read token")
 	}
 
 	err = appConfig.Validate()

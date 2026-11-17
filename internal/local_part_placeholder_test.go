@@ -3,10 +3,7 @@ package app
 import (
 	"context"
 	"net/http"
-	"strings"
 	"testing"
-
-	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
 // %l expands to the local part of the address; %u stays the whole address.
@@ -51,41 +48,12 @@ func TestZonePatternMatchesLocalPart(t *testing.T) {
 	}
 }
 
-// %l drops the domain, so a rule with %l must be limited to one e-mail domain; %u rules are not affected.
-func TestLocalPartNeedsSingleDomainFilter(t *testing.T) {
-	for _, tc := range []struct {
-		name, pattern, filter string
-		ok                    bool
-	}{
-		{"one domain", "%l-stma.users.dhbw.site", "*@student.dhbw-mannheim.de", true},
-		{"domain in other case, blanks", "%l.users.dhbw.site", " *@DHBW.de ", true},
-		{"explicit addresses of one domain", "%l.users.dhbw.site", "a@dhbw.de, B@dhbw.de", true},
-		{"wildcard and address of the same domain", "%l.users.dhbw.site", "*@dhbw.de,x@DHBW.DE", true},
-		{"prefix wildcard of one domain", "%l.users.dhbw.site", "s25*@student.dhbw-mannheim.de", true},
-		{"trailing comma", "%l.users.dhbw.site", "*@dhbw.de,", true},
-		{"everyone", "%l.users.dhbw.site", "*", false},
-		{"subdomains open", "%l.users.dhbw.site", "*.dhbw.de", false},
-		{"wildcard in the domain", "%l.users.dhbw.site", "a@*.dhbw.de", false},
-		{"two domains", "%l.users.dhbw.site", "*@dhbw.de,*@cas.dhbw.de", false},
-		{"addresses of two domains", "%l.users.dhbw.site", "a@dhbw.de,b@cas.dhbw.de", false},
-		{"%u with several domains stays allowed", "%u.users.dhbw.site", "*@dhbw.de,*@cas.dhbw.de", true},
-		{"%u for everyone stays allowed", "%u.users.dhbw.site", "*", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := policyValidateRequest(PolicyRuleRequest{ZonePattern: tc.pattern, ZoneSoa: "users.dhbw.site", TargetUserFilter: tc.filter})
-			if tc.ok && err != nil {
-				t.Errorf("want accepted, got %v", err)
-			}
-			if !tc.ok {
-				if err == nil {
-					t.Fatal("want refused")
-				}
-				text := msg.TextOf(err)
-				if de, en := text.In(msg.DE), text.In(msg.EN); !strings.Contains(de, "genau eine E-Mail-Domain") || !strings.Contains(en, "exactly one e-mail domain") || !strings.Contains(de, "%l") || !strings.Contains(en, "%u") {
-					t.Errorf("unexpected message: %q / %q", de, en)
-				}
-			}
-		})
+// %l is accepted with any user filter (no single-domain rule any more): two people granted the same %l name compete for it, and zone ownership settles that.
+func TestLocalPartAcceptsAnyFilter(t *testing.T) {
+	for _, filter := range []string{"*@student.dhbw-mannheim.de", "*", "*@dhbw.de,*@cas.dhbw.de", "a@dhbw.de,b@cas.dhbw.de", "group:wwi23seb", "group:wwi23seb#studierende,*@dhbw.de", "user:max@dhbw.de"} {
+		if err := policyValidateRequest(PolicyRuleRequest{ZonePattern: "%l.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: filter}); err != nil {
+			t.Errorf("%%l with filter %q: %v", filter, err)
+		}
 	}
 }
 

@@ -18,7 +18,8 @@ dynamicZonesAPI:
   replicas: 1
 
   # Name of an existing Secret providing the keys `db-connection-string`,
-  # `pdns-api-key`, `upstream-tsig-secret` and `zone-admin-tsig-key`. When set,
+  # `pdns-api-key`, `upstream-tsig-secret` and `zone-admin-tsig-key` (and
+  # optionally `zone-events-ingest-token` and `role-provider-api-token`). When set,
   # the chart does NOT create its own Secret and the corresponding secret values
   # below (database.password/connectionString, powerDNS.apiKey,
   # upstreamDNS.tsigSecret, zoneDefaults.defaultAdminTsigKey) are ignored.
@@ -74,6 +75,15 @@ dynamicZonesAPI:
     superAdminEmails:
       - your_mail@example.com
       - second_mail@example.com
+
+  # Role provider (role-provider-service): lets user filters of rules and
+  # delegations name groups (group:<id>, group:<id>#<relation>). Empty url =
+  # off, only e-mail entries match. The read token (one of the role provider's
+  # API_TOKENS) comes from the Secret key `role-provider-api-token`; apiToken
+  # below fills it only when the chart creates the Secret (no existingSecret).
+  roleProvider:
+    url: ""
+    apiToken: ""
 
   # Zone Defaults
   zoneDefaults:

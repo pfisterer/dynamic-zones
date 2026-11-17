@@ -26,6 +26,8 @@ type AppData struct {
 	PowerDns *PowerDnsClient
 	Logger   *zap.Logger
 	Log      *zap.SugaredLogger
+	// Roles resolves a person's group tokens for user filters (ROLE_PROVIDER_URL); nil = no role provider, only e-mail entries and user:<email> match.
+	Roles *RoleProvider
 
 	// oidcVerifier is set once the web server is built; config.json asks it
 	// whether the identity provider is answering, which is a state that changes
@@ -104,6 +106,10 @@ func RunApplication() {
 		PowerDns: pdns,
 		Logger:   logger,
 		Log:      log,
+		Roles:    NewRoleProvider(appConfig.RoleProvider.URL, appConfig.RoleProvider.Token, log),
+	}
+	if appData.Roles == nil {
+		log.Info("app.RunApplication: no role provider configured (ROLE_PROVIDER_URL); group entries in user filters match nobody")
 	}
 
 	appData.warnAboutNonCanonicalZoneNames()
@@ -246,6 +252,7 @@ func logAppConfig(appConfig AppConfig, log *zap.SugaredLogger) {
 		appConfig.ZoneDefaults.DefaultAdminTsigKey = redact.Secret(appConfig.ZoneDefaults.DefaultAdminTsigKey)
 		appConfig.Storage.DbConnectionString = redact.ConnString(appConfig.Storage.DbConnectionString)
 		appConfig.ZoneEvents.IngestToken = redact.Secret(appConfig.ZoneEvents.IngestToken)
+		appConfig.RoleProvider.Token = redact.Secret(appConfig.RoleProvider.Token)
 		// In production mode, we use a compact JSON format without indentation
 		appConfigJson, err = json.Marshal(appConfig)
 	}
