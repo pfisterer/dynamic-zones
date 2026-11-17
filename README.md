@@ -14,7 +14,7 @@ It is an API and usable on its own: zones, records, keys and policy are all reac
 
 ## What it does
 
-- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`, where `%u` stands for the requester) may be created by whom (`target_user_filter`: single addresses or `*@domain`), under which authoritative zone (`zone_soa`), and whether subdomains and co-ownership are permitted. Users can create exactly what a rule grants them — nothing else.
+- **Policy-driven zone creation.** A rule says which zone names (`zone_pattern`, where `%u` stands for the requester's address and `%l` for its local part; see [Placeholders in zone patterns](#placeholders-in-zone-patterns-u-and-l)) may be created by whom (`target_user_filter`: single addresses or `*@domain`), under which authoritative zone (`zone_soa`), and whether subdomains and co-ownership are permitted. Users can create exactly what a rule grants them — nothing else.
 - **Per-zone TSIG keys.** Each zone gets its own key. It is what `nsupdate`, [external-dns](https://github.com/kubernetes-sigs/external-dns) or [cert-manager](https://cert-manager.io/) use to write records, and it cannot touch any other zone. Keys can be rotated.
 - **Records in the browser or over the API.** The same records can be edited in the web UI or written by machines via RFC 2136.
 - **PowerDNS as the authoritative server.** The service configures PowerDNS through its HTTP API and never edits zone files or the backend database itself. Backend (`gsqlite3` or `gpgsql`), DNSSEC and hardening are PowerDNS configuration, not this service's business.
@@ -30,6 +30,19 @@ A zone's relationship to a policy rule is **recomputed, never stored**. A zone i
 The remedy is therefore to **fix the rule**, not to delete the zone. A single typo in a `target_user_filter` orphans every zone that rule covered, and deleting the zones would destroy records that were never the problem. The UI lists orphaned zones for administrators so the mistake is visible.
 
 The zone list (`GET /v1/zones/`, and `list_my_zones` over MCP) tells for every top-level zone the zone it was given out of, as `zone_soa`: the governing rule's `zone_soa` (e.g. `users.dhbw.site` for a personal zone), or for a zone shared with the caller the SOA of the rule that governs it through its owners. It is the part of the name the user does not own, which the UI groups the zones by. It is left out for subzones, which carry their `parent` instead, and for a zone no rule governs any more.
+
+### Placeholders in zone patterns: `%u` and `%l`
+
+A `zone_pattern` may contain two placeholders, both replaced per user and made DNS-compliant by the same rules (characters other than letters, digits and `-` become `-`, runs of `-` collapse, leading and trailing `-` are dropped, everything lowercase):
+
+| Placeholder | Stands for | `dennis.pfisterer@dhbw.de` | `s252690@student.dhbw-mannheim.de` |
+|---|---|---|---|
+| `%u` | the whole e-mail address, `@` written as `-at-` | `dennis-pfisterer-at-dhbw-de` | `s252690-at-student-dhbw-mannheim-de` |
+| `%l` | only the local part, before the `@` | `dennis-pfisterer` | `s252690` |
+
+`%l` gives shorter names. Since it drops the domain, a rule with `%l` is only accepted when its `target_user_filter` is limited to **one e-mail domain**: every comma-separated entry names that domain explicitly — `*@<domain>`, a prefix wildcard such as `s25*@<domain>`, or a full address — and all entries name the same one (case-insensitive). `*`, `*.dhbw.de`, a wildcard in the domain or a list with two domains are refused (400); otherwise `max@a.de` and `max@b.de` would be granted the same zone. A rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`). Pick the abbreviations so that no pattern can produce another's names; zone ownership is the last line regardless: a zone belongs to whoever created it first, and anyone else granted the same name sees it as taken and cannot create it.
+
+To introduce `%l` where `%u` rules exist, **keep the `%u` rules and add a `%l` rule per domain**. Replacing a `%u` rule would orphan every zone it granted, since a zone must still match a rule (see above); with both rules each person can have both names.
 
 ### Zone names
 
@@ -100,7 +113,7 @@ A fresh clone does not compile until `make bundle` (or `make all`) has generated
 
 `API_MODE=development` **bypasses authentication**: a request without a bearer is the dev user `DEV_AUTH_USER` (default `root.admin@uni.example`). That is the whole login in development — and the reason `API_MODE` must be `production` everywhere else. Other people are reached as in production, with `X-Act-As` (below), so the dev user should be a super admin.
 
-A super admin (`DNS_POLICY_SUPERADMIN_EMAILS`) may act on behalf of another person, e.g. for a ticket, by sending `X-Act-As: <email>` — the header every service of the platform reads, each checking it against its own admins. The request then is that person's: their zones, their policy rules, their `%u`, and no super-admin rights unless they have them. Writes are logged with both. Not with an API token (403); the person's own API tokens are managed like everything else of theirs. `GET /v1/me` reports `may_act_as` and `acting_as`.
+A super admin (`DNS_POLICY_SUPERADMIN_EMAILS`) may act on behalf of another person, e.g. for a ticket, by sending `X-Act-As: <email>` — the header every service of the platform reads, each checking it against its own admins. The request then is that person's: their zones, their policy rules, their `%u` and `%l`, and no super-admin rights unless they have them. Writes are logged with both. Not with an API token (403); the person's own API tokens are managed like everything else of theirs. `GET /v1/me` reports `may_act_as` and `acting_as`.
 
 A `run-development.sh` in the workspace that holds the sibling repositories (not part of this repository) starts PowerDNS, this API, the role-provider, the OpenStack management API and the web UI together. For this service it amounts to:
 

@@ -73,7 +73,7 @@ func toAPIToken(rec token.Record) Token {
 // tokenSubject is the identity a token belongs to here.
 //
 // It is Claims.Identity(), and so is everything else now: zone ownership
-// (Storage.IsZoneOwner, Zone.Username), policy matching, the %u expansion, and
+// (Storage.IsZoneOwner, Zone.Username), policy matching, the %u and %l expansion, and
 // the claims the authentication path rebuilds from a token. This function stays
 // as the one place that names WHICH identity a token is issued under, because
 // issuing under a different string would leave tokens authenticating fine while

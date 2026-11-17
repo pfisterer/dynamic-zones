@@ -29,8 +29,10 @@ func InjectAppLogic(app *AppData) gin.HandlerFunc {
 
 // PolicyRuleRequest is used for create/update operations.
 type PolicyRuleRequest struct {
-	ZonePattern      string `json:"zone_pattern" binding:"required"`
-	ZoneSoa          string `json:"zone_soa" binding:"required"`
+	// ZonePattern is the zone the rule grants. %u stands for the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de.users.dhbw.site for %u.users.dhbw.site), %l for its local part only (s252690@student.dhbw-mannheim.de → s252690-stma.users.dhbw.site for %l-stma.users.dhbw.site). %l is only accepted when target_user_filter is limited to one e-mail domain.
+	ZonePattern string `json:"zone_pattern" binding:"required"`
+	ZoneSoa     string `json:"zone_soa" binding:"required"`
+	// TargetUserFilter is a comma-separated list of e-mail addresses and patterns with one '*' such as *@dhbw.de; the rule applies to whoever matches any entry.
 	TargetUserFilter string `json:"target_user_filter" binding:"required"`
 	AllowSubdomains  bool   `json:"allow_subdomains"`
 	SharingAllowed   bool   `json:"sharing_allowed"`
@@ -763,13 +765,39 @@ func reservedByPolicy(rules []PolicyRule, zone string, user *UserClaims) (Policy
 	return PolicyRule{}, false
 }
 
-// zonePatternMatches reports whether `zone` is a name the rule pattern can produce for SOME user (%u stands for any DNS label text).
+// The placeholders a zone pattern may contain: %u is the whole e-mail address of the user made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), %l only its local part (dennis.pfisterer@dhbw.de → dennis-pfisterer). %l drops the domain, so it is only accepted on a rule limited to one e-mail domain (validateLocalPartFilter).
+const (
+	placeholderUser      = "%u"
+	placeholderLocalPart = "%l"
+)
+
+// hasPlaceholder reports whether a zone pattern contains a user placeholder (%u or %l).
+func hasPlaceholder(pattern string) bool {
+	return strings.Contains(pattern, placeholderUser) || strings.Contains(pattern, placeholderLocalPart)
+}
+
+// replacePlaceholders replaces both user placeholders in s with the same text; for the checks that only need some label in their place.
+func replacePlaceholders(s, with string) string {
+	return strings.NewReplacer(placeholderUser, with, placeholderLocalPart, with).Replace(s)
+}
+
+// expandZonePattern is the zone a rule pattern grants the user with this identity: %u becomes the whole address made DNS-compliant, %l its local part. ok is false when a placeholder in the pattern would expand to nothing (an address of nothing but special characters), which would not be a valid name.
+func expandZonePattern(pattern, identity string) (zone string, ok bool) {
+	user := helper.DnsMakeCompliant(identity)
+	local := helper.DnsMakeCompliantLocalPart(identity)
+	if (strings.Contains(pattern, placeholderUser) && user == "") || (strings.Contains(pattern, placeholderLocalPart) && local == "") {
+		return "", false
+	}
+	return normalizeZone(strings.NewReplacer(placeholderUser, user, placeholderLocalPart, local).Replace(pattern)), true
+}
+
+// zonePatternMatches reports whether `zone` is a name the rule pattern can produce for SOME user (%u and %l stand for any DNS label text).
 func zonePatternMatches(pattern, zone string) bool {
 	p := normalizeZone(pattern)
-	if !strings.Contains(p, "%u") {
+	if !hasPlaceholder(p) {
 		return p == zone
 	}
-	re, err := regexp.Compile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), "%u", "[a-z0-9-]+") + "$")
+	re, err := regexp.Compile("^" + replacePlaceholders(regexp.QuoteMeta(p), "[a-z0-9-]+") + "$")
 	return err == nil && re.MatchString(zone)
 }
 
@@ -889,7 +917,49 @@ func policyValidateRequest(req PolicyRuleRequest) error {
 		return err
 	}
 
+	if err := validateLocalPartFilter(req.ZonePattern, req.TargetUserFilter); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// validateLocalPartFilter accepts %l in a zone pattern only on a rule whose user filter is limited to one e-mail domain. %l is the local part of the address without its domain, so on a rule for several domains max@a.de and max@b.de would be granted the same zone.
+//
+// Every entry of the comma-separated filter must name the domain explicitly — "*@<domain>", a prefix wildcard such as "s25*@<domain>", or a full address — and all entries must name the same domain (case-insensitive). "*", "*.dhbw.de" or "*@*" do not limit the domain and are refused, as is a list mixing "*@dhbw.de" with "x@cas.dhbw.de". Patterns without %l are not affected.
+func validateLocalPartFilter(zonePattern, filter string) error {
+	if !strings.Contains(zonePattern, placeholderLocalPart) {
+		return nil
+	}
+	if _, ok := singleFilterDomain(filter); !ok {
+		return invalid("Ein zone_pattern mit %s (dem lokalen Teil der E-Mail-Adresse, ohne Domain) ist nur in einer Regel erlaubt, deren target_user_filter auf genau eine E-Mail-Domain beschränkt ist: alle Einträge der Form *@domain oder Adressen derselben Domain, z. B. *@student.dhbw-mannheim.de. Sonst könnten Personen verschiedener Domains dieselbe Zone erhalten; für mehrere Domains %s verwenden oder je Domain eine Regel anlegen.", "A zone_pattern with %s (the local part of the e-mail address, without the domain) is only allowed on a rule whose target_user_filter is limited to exactly one e-mail domain: all entries of the form *@domain or addresses of the same domain, e.g. *@student.dhbw-mannheim.de. Otherwise people from different domains could get the same zone; for several domains use %s or create one rule per domain.", placeholderLocalPart, placeholderUser)
+	}
+	return nil
+}
+
+// singleFilterDomain returns the one e-mail domain every entry of a user filter is limited to, and false when the filter is empty, has an entry that leaves the domain open (a wildcard in or after the domain, no '@'), or names more than one domain.
+func singleFilterDomain(filter string) (string, bool) {
+	domain := ""
+	for _, raw := range strings.Split(filter, ",") {
+		p := strings.ToLower(strings.TrimSpace(raw))
+		if p == "" {
+			continue
+		}
+		at := strings.LastIndex(p, "@")
+		if at < 0 {
+			return "", false
+		}
+		local, d := p[:at], p[at+1:]
+		// The domain itself must be literal; a wildcard is only allowed in the local part, and then the local part must not hide a further '@' that would move the domain.
+		if d == "" || strings.Contains(d, "*") || (strings.Contains(local, "*") && strings.Contains(local, "@")) {
+			return "", false
+		}
+		if domain != "" && d != domain {
+			return "", false
+		}
+		domain = d
+	}
+	return domain, domain != ""
 }
 
 // validatePatternWithinSoa enforces that the zone a rule hands out actually lies
@@ -905,8 +975,8 @@ func validatePatternWithinSoa(zonePattern, zoneSoa string) error {
 	if strings.TrimSpace(zoneSoa) == "" {
 		return invalid("zone_soa darf nicht leer sein.", "zone_soa must not be empty.")
 	}
-	// %u expands to a user label; any label keeps the suffix relationship intact.
-	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(strings.ReplaceAll(zonePattern, "%u", "a"))), ".")
+	// %u and %l expand to a user label; any label keeps the suffix relationship intact.
+	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(replacePlaceholders(zonePattern, "a"))), ".")
 	soa := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zoneSoa)), ".")
 	if zone != soa && !isSubdomainOf(zone, soa) {
 		return invalid("zone_pattern %q muss gleich zone_soa %q sein oder darunter liegen.", "zone_pattern %q must be equal to zone_soa %q or lie below it.", zonePattern, zoneSoa)
@@ -982,16 +1052,14 @@ func isSuperAdmin(app *AppData, user *UserClaims) bool {
 	return false
 }
 
-// isValidZonePattern converts the provided JavaScript function to Go.
-// It validates a zone pattern by temporarily replacing the custom '%u' placeholder
-// with a valid character ('A') before performing standard DNS label checks.
+// validateZonePattern validates a zone pattern by temporarily replacing the placeholders %u and %l with a valid character ('A') before performing standard DNS label checks.
 func validateZonePattern(value string) error {
 	if value == "" {
 		return invalid("Das Zonenmuster ist leer.", "The zone pattern is empty.")
 	}
 
-	// 1. Replace '%u' with 'A' and trim whitespace
-	s := strings.ReplaceAll(value, "%u", "A")
+	// 1. Replace '%u' and '%l' with 'A' and trim whitespace
+	s := replacePlaceholders(value, "A")
 	s = strings.TrimSpace(s)
 
 	// Use existing DNS domain validation
@@ -1012,25 +1080,29 @@ func filterUserRules(rules []PolicyRule, user *UserClaims) []PolicyRule {
 	return filteredRules
 }
 
-func ruleToZoneResponse(rule PolicyRule, user *UserClaims) ZoneResponse {
-	// Prepare data for pattern replacement
-	userDnsLabel := helper.DnsMakeCompliant(user.Identity())
-	zone := normalizeZone(strings.ReplaceAll(rule.ZonePattern, "%u", userDnsLabel))
-
+// ruleToZoneResponse is the zone a rule grants the user, with %u and %l expanded; false when a placeholder would expand to nothing for this user.
+func ruleToZoneResponse(rule PolicyRule, user *UserClaims) (ZoneResponse, bool) {
 	// Normalised like every requested name, or a rule written as "Lab.Example.com" would grant a zone no request can ever match.
+	zone, ok := expandZonePattern(rule.ZonePattern, user.Identity())
+	if !ok {
+		return ZoneResponse{}, false
+	}
 	return ZoneResponse{
 		Zone:            zone,
 		ZoneSOA:         normalizeZone(rule.ZoneSoa),
 		AllowSubdomains: rule.AllowSubdomains,
 		SharingAllowed:  rule.SharingAllowed,
-	}
+	}, true
 }
 
 func rulesToUserZones(rules []PolicyRule, user *UserClaims) []ZoneResponse {
 	zones := make([]ZoneResponse, 0, len(rules))
 
 	for _, rule := range rules {
-		zone := ruleToZoneResponse(rule, user)
+		zone, ok := ruleToZoneResponse(rule, user)
+		if !ok {
+			continue
+		}
 
 		// Check if the zone has already been added by another rule
 		isDuplicate := false

@@ -29,7 +29,7 @@ const viaAPITokenKey = "__api_viaAPIToken"
 // ActorOf is the signed-in admin acting on behalf of the request's user, or "" when the user acts themself.
 func ActorOf(c *gin.Context) string { return c.GetString(actorKey) }
 
-// ActAsMiddleware lets a super admin act on behalf of another person, e.g. for a ticket: with X-Act-As the request's user (UserDataKey) becomes that person — their zones, their policies, their %u — and is no super admin unless they are one. Every service of the platform reads the same header and checks it against its own admins. Refused rather than ignored for anybody else, and for API tokens: acting on behalf is for people signed in. Must run after CombinedAuthMiddleware.
+// ActAsMiddleware lets a super admin act on behalf of another person, e.g. for a ticket: with X-Act-As the request's user (UserDataKey) becomes that person — their zones, their policies, their %u and %l — and is no super admin unless they are one. Every service of the platform reads the same header and checks it against its own admins. Refused rather than ignored for anybody else, and for API tokens: acting on behalf is for people signed in. Must run after CombinedAuthMiddleware.
 func ActAsMiddleware(superAdmins map[string]struct{}, log *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader(authn.ActAsHeader)
@@ -198,7 +198,7 @@ func CombinedAuthMiddleware(oidcVerifier *OIDCAuthVerifier, store *Storage, log 
 		// For an API token one field, because there is one identity. The token
 		// was issued under this subject (see tokenSubject) and Identity() reads
 		// Email first, so this is the string every later lookup resolves to —
-		// zone ownership, policy matching and the %u expansion alike.
+		// zone ownership, policy matching and the %u and %l expansion alike.
 		//
 		// It used to fill all three claims, and that was not tidiness: for a
 		// while it filled only preferred_username, while policy rules matched

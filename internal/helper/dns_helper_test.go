@@ -27,3 +27,27 @@ func TestDnsValidateNameLengthLimits(t *testing.T) {
 		t.Errorf("a 254-character name: got %v, want an error naming 254", err)
 	}
 }
+
+// %l in a zone pattern expands to the local part of the address, made DNS-compliant by the same rules as %u (DnsMakeCompliant) but without "-at-<domain>".
+func TestDnsMakeCompliantLocalPart(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"dennis.pfisterer@dhbw.de", "dennis-pfisterer"},
+		{"s252690@student.dhbw-mannheim.de", "s252690"},
+		{"Max.Mustermann@DHBW-Stuttgart.de", "max-mustermann"},
+		{"max+dns@dhbw.de", "max-dns"},
+		{"max_muster@dhbw.de", "max-muster"},
+		{"_max__muster_@dhbw.de", "max-muster"},
+		{"a.-b@dhbw.de", "a-b"},
+		{"fakestudent", "fakestudent"}, // no '@': the whole identity
+		{"\"a@b\"@dhbw.de", "a-at-b"},  // quoted local part: the domain is after the last '@'
+		{"+@dhbw.de", ""},
+	} {
+		if got := DnsMakeCompliantLocalPart(tc.in); got != tc.want {
+			t.Errorf("DnsMakeCompliantLocalPart(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// %u is unchanged: the whole address.
+	if got := DnsMakeCompliant("Dennis.Pfisterer@dhbw.de"); got != "dennis-pfisterer-at-dhbw-de" {
+		t.Errorf("DnsMakeCompliant = %q", got)
+	}
+}

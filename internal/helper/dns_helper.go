@@ -97,6 +97,15 @@ func DnsMakeCompliant(input string) string {
 	return dnsName
 }
 
+// DnsMakeCompliantLocalPart is the local part of an e-mail address (everything before the last '@'; the whole input if there is none) made DNS-compliant like DnsMakeCompliant: s252690@student.dhbw-mannheim.de → s252690, Dennis.Pfisterer@dhbw.de → dennis-pfisterer. It is what %l in a zone pattern expands to.
+func DnsMakeCompliantLocalPart(email string) string {
+	local := email
+	if at := strings.LastIndex(email, "@"); at >= 0 {
+		local = email[:at]
+	}
+	return DnsMakeCompliant(local)
+}
+
 // PerformALookup queries both A (IPv4) and AAAA (IPv6) records using a custom nameserver.
 // It ignores NXDOMAIN errors for individual record types and returns whatever results are available.
 func PerformALookup(nameserverAddress string, nameserverPort uint16, hostname string) ([]net.IP, error) {
