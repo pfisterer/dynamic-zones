@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pfisterer/cloud-self-service-golib/retry"
 	"github.com/pfisterer/cloud-self-service-golib/token"
 	"github.com/pfisterer/cloud-self-service-golib/tokengorm"
 	"go.uber.org/zap"
@@ -97,10 +96,9 @@ type Storage struct {
 	Tokens *token.Service
 }
 
-// NewStorage connects to the database and migrates it. A networked database (postgres, mysql) is waited for up to a minute, with every failed attempt logged when log is set: since the NetworkPolicies a new pod is let through only a moment after it starts, so the first attempt can be refused although nothing is wrong. A sqlite file is not waited for, since it does not come up later.
+// NewStorage connects to the database and migrates it. A networked database (postgres, mysql) that is not reachable yet is waited for up to a minute, with every failed attempt logged at warn level when log is set (openDBWithRetry): since the NetworkPolicies a new pod is let through only a moment after it starts, so the first attempts can be refused although nothing is wrong. Wrong credentials, a missing database and a sqlite file that cannot be opened are not waited for, since waiting does not fix them.
 func NewStorage(dbType string, connectionString string, log *zap.SugaredLogger) (*Storage, error) {
 	var dialector gorm.Dialector
-	var err error
 
 	switch dbType {
 	case "sqlite":
@@ -113,19 +111,7 @@ func NewStorage(dbType string, connectionString string, log *zap.SugaredLogger) 
 		return nil, fmt.Errorf("storage.NewStorage: Unsupported database type: %s", dbType)
 	}
 
-	var db *gorm.DB
-	err = retry.Do(context.Background(), retry.Policy{Total: time.Minute, OnRetry: func(attempt int, err error, wait time.Duration) {
-		if log != nil {
-			log.Infow("database not reachable yet, trying again", "type", dbType, "attempt", attempt, "in", wait.String(), "error", err)
-		}
-	}}, func(context.Context) error {
-		var err error
-		db, err = gorm.Open(dialector, &gorm.Config{})
-		if err != nil && dbType == "sqlite" {
-			return retry.Permanent(err)
-		}
-		return err
-	})
+	db, err := openDBWithRetry(context.Background(), dbStartupPolicy, log, dialector, nil)
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to connect to %s database: %w", dbType, err)
 	}
