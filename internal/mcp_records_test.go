@@ -41,7 +41,7 @@ func mcpRecordsTestApp(t *testing.T, user, zone, soa string) *AppData {
 }
 
 func TestMCP_RecordToolsNeverSeeTheZoneKey(t *testing.T) {
-	const user = "alice"
+	const user = "alice@example.com"
 	const zone = "alice.users.example.com"
 	const soa = "users.example.com"
 
@@ -107,7 +107,7 @@ func TestMCP_RecordToolsNeverSeeTheZoneKey(t *testing.T) {
 // A record tool must refuse a zone the caller does not own, even though the
 // service could resolve a key for it.
 func TestMCP_RecordToolsRefuseAZoneTheCallerDoesNotOwn(t *testing.T) {
-	const user = "alice"
+	const user = "alice@example.com"
 	const zone = "alice.users.example.com"
 
 	app := mcpRecordsTestApp(t, user, zone, "users.example.com")
@@ -118,7 +118,7 @@ func TestMCP_RecordToolsRefuseAZoneTheCallerDoesNotOwn(t *testing.T) {
 	}
 
 	// A token belonging to somebody else entirely.
-	srv, _, writeSecret := mcpTestServerFor(t, app, "mallory")
+	srv, _, writeSecret := mcpTestServerFor(t, app, "mallory@example.com")
 	session := mcptest.Dial(t, srv.URL+"/mcp", writeSecret)
 
 	msg := callToolErr(t, session, "set_dns_record", map[string]any{

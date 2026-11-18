@@ -398,10 +398,10 @@ func TestExplicitRuleMayDelegateBelowSomeoneElsesZone(t *testing.T) {
 		t.Errorf("petko could not create a subzone of his own zone: %v", err)
 	}
 
-	// The %u shape: an explicit rule for a student below the %u zone of a lecturer.
-	mustCreatePolicy(t, app, PolicyRule{ZonePattern: "%u.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "pfisterer", AllowSubdomains: true})
+	// The %l shape: an explicit rule for a student below the %l zone of a lecturer.
+	mustCreatePolicy(t, app, PolicyRule{ZonePattern: "%l.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "pfisterer@dhbw.de", AllowSubdomains: true})
 	mustCreatePolicy(t, app, PolicyRule{ZonePattern: "test.pfisterer.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "student@dhbw.de"})
-	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf("pfisterer"), "pfisterer.users.dhbw.site"); err != nil {
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf("pfisterer@dhbw.de"), "pfisterer.users.dhbw.site"); err != nil {
 		t.Fatalf("pfisterer could not create his zone: %v", err)
 	}
 	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf("student@dhbw.de"), "test.pfisterer.users.dhbw.site"); err != nil {
@@ -411,7 +411,7 @@ func TestExplicitRuleMayDelegateBelowSomeoneElsesZone(t *testing.T) {
 		t.Error("no delegation for the student's zone in pfisterer's zone")
 	}
 	// A policy SOA is not a place for allow_subdomains delegations either: pfisterer owns his zone, but users.dhbw.site belongs to the rule.
-	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf("pfisterer"), "x.test.pfisterer.users.dhbw.site"); StatusOf(err) != http.StatusForbidden {
+	if _, err := app.ZoneCreateAuthorized(ctx, claimsOf("pfisterer@dhbw.de"), "x.test.pfisterer.users.dhbw.site"); StatusOf(err) != http.StatusForbidden {
 		t.Errorf("pfisterer creating inside the student's zone: got %v, want 403", err)
 	}
 }

@@ -23,11 +23,10 @@ var baseURL = "http://127.0.0.1:8082"
 
 var expectedZones = []string{"example1.com", "test.org"}
 
-// The identity the roundtrip test acts as. It is used verbatim as the email,
-// because %u in a zone pattern expands to helper.DnsMakeCompliant(email) and
-// this one already is a valid DNS label — so the expected zones stay readable
-// as "fakestudent.example1.com" instead of "fakestudent-at-example-com...".
+// The roundtrip test acts as expectedUserEmail: an identity is always an e-mail address (golib's authn.CanonicalEmail). expectedUserName is its local part, which the seeded rules grant through %l, so the expected zones stay readable as "fakestudent.example1.com" instead of "fakestudent-at-example-org...".
 var expectedUserName = "fakestudent"
+
+var expectedUserEmail = expectedUserName + "@example.org"
 
 func GetExpectedZonesForTests() []string {
 	return expectedZones
@@ -75,7 +74,7 @@ func SetupEnvironmentForTests(t *testing.T) {
 	//
 	// These win over .env: the app loads it with godotenv.Load, which leaves variables that are already set alone, so .env only fills in what is not set here (and on a machine without one, CI, nothing).
 	t.Setenv("API_MODE", "development")
-	t.Setenv("DEV_AUTH_USER", expectedUserName)
+	t.Setenv("DEV_AUTH_USER", expectedUserEmail)
 	t.Setenv("DB_TYPE", "sqlite")
 	t.Setenv("DB_CONNECTION_STRING", "file::memory:?cache=shared")
 
@@ -122,9 +121,9 @@ func SeedPolicyRulesForTests(t *testing.T) {
 
 	for _, zone := range expectedZones {
 		rule := PolicyRule{
-			ZonePattern:      "%u." + zone,
+			ZonePattern:      "%l." + zone,
 			ZoneSoa:          zone,
-			TargetUserFilter: expectedUserName,
+			TargetUserFilter: expectedUserEmail,
 		}
 		if err := store.db.Create(&rule).Error; err != nil {
 			t.Fatalf("app.SeedPolicyRulesForTests: creating rule for %q: %v", zone, err)

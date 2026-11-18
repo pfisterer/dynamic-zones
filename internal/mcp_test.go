@@ -46,7 +46,7 @@ func mcpTestApp(t *testing.T, superAdmins ...string) *AppData {
 // mcpTestServer serves /mcp behind the real token authentication and returns the
 // two token secrets: one read-only, one that may write.
 func mcpTestServer(t *testing.T, app *AppData) (*httptest.Server, string, string) {
-	return mcpTestServerFor(t, app, "alice")
+	return mcpTestServerFor(t, app, "alice@example.com")
 }
 
 // mcpTestServerFor is the same, for a chosen token owner — which is how a test
@@ -212,7 +212,7 @@ func TestMCP_DeletePolicyRuleRefusesAMismatchedPattern(t *testing.T) {
 // policy rule granting alice a zone must show up for alice's token.
 func TestMCP_ToolsActAsTheTokenOwner(t *testing.T) {
 	app := mcpTestApp(t)
-	rule := PolicyRule{ZonePattern: "%u.users.example.com", ZoneSoa: "users.example.com", TargetUserFilter: "alice"}
+	rule := PolicyRule{ZonePattern: "%l.users.example.com", ZoneSoa: "users.example.com", TargetUserFilter: "alice@example.com"}
 	if err := app.Storage.db.Create(&rule).Error; err != nil {
 		t.Fatalf("seed rule: %v", err)
 	}

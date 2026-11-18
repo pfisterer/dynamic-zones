@@ -30,11 +30,11 @@ func readOnlyFixture(t *testing.T, useRESTRule bool) (http.Handler, string, stri
 		t.Fatalf("create storage: %v", err)
 	}
 	ctx := context.Background()
-	readOnly, err := store.Tokens.Issue(ctx, "alice", token.IssueOptions{TTL: time.Hour, ReadOnly: true})
+	readOnly, err := store.Tokens.Issue(ctx, "alice@example.com", token.IssueOptions{TTL: time.Hour, ReadOnly: true})
 	if err != nil {
 		t.Fatalf("issue read-only token: %v", err)
 	}
-	writable, err := store.Tokens.Issue(ctx, "alice", token.IssueOptions{TTL: time.Hour})
+	writable, err := store.Tokens.Issue(ctx, "alice@example.com", token.IssueOptions{TTL: time.Hour})
 	if err != nil {
 		t.Fatalf("issue write token: %v", err)
 	}
