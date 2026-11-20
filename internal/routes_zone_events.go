@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pfisterer/cloud-self-service-golib/ginweb"
 	"github.com/pfisterer/cloud-self-service-golib/msg"
 )
 
@@ -43,7 +44,7 @@ type ZoneEventInfo struct {
 	Count     int64     `json:"count" example:"3"`
 	FirstSeen time.Time `json:"first_seen" example:"2026-09-05T15:00:00Z"`
 	LastSeen  time.Time `json:"last_seen" example:"2026-09-06T09:00:00Z"`
-	// Source names the producer of the event (e.g. "alertmanager").
+	// Source names the producer of the event ("alertmanager", or "caa-check" for the service's own CAA check).
 	Source string `json:"source" example:"alertmanager"`
 	// Owners are the e-mail addresses managing the zone. For a zone's owner
 	// this repeats what the zone list already shows; for the super-admin view
@@ -51,9 +52,13 @@ type ZoneEventInfo struct {
 	Owners []string `json:"owners" example:"alice@example.edu"`
 }
 
-func toZoneEventInfos(events []ZoneEvent, owners map[string][]string) []ZoneEventInfo {
+// toZoneEventInfos shapes the events for the API; the events of the service's own CAA check are rendered in the caller's language l.
+func toZoneEventInfos(events []ZoneEvent, owners map[string][]string, l msg.Lang) []ZoneEventInfo {
 	out := make([]ZoneEventInfo, 0, len(events))
 	for _, ev := range events {
+		if message, detail, ok := caaEventText(ev, l); ok {
+			ev.Message, ev.Detail = message, detail
+		}
 		out = append(out, ZoneEventInfo{
 			Zone:      ev.Zone,
 			Class:     ev.Class,
@@ -91,7 +96,7 @@ type ZoneEventsResponse struct {
 
 // getZoneEvents lists the live events for the caller's zones
 // @Summary List zone events
-// @Description Live problems observed with the caller's zones (e.g. clients failing TSIG against a zone). Super-admins see events for all zones.
+// @Description Live problems observed with the caller's zones (e.g. clients failing TSIG against a zone, reported by the monitoring, or CAA records in the zone that override the enforced CAA, reported by the service's own CAA check with source caa-check). Super-admins see events for all zones.
 // @Tags zone-events
 // @Produce json
 // @Success 200 {object} ZoneEventsResponse
@@ -135,7 +140,7 @@ func getZoneEvents(app *AppData) gin.HandlerFunc {
 			abortErr(c, http.StatusInternalServerError, msg.T("Die Zonen-Ereignisse ließen sich nicht laden.", "The zone events could not be loaded."))
 			return
 		}
-		c.JSON(http.StatusOK, ZoneEventsResponse{Events: toZoneEventInfos(events, owners)})
+		c.JSON(http.StatusOK, ZoneEventsResponse{Events: toZoneEventInfos(events, owners, ginweb.Lang(c))})
 	}
 }
 

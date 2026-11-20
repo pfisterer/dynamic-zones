@@ -133,6 +133,18 @@ spec:
             - name: DNS_POLICY_SUPERADMIN_EMAILS
               value: {{ join "," .Values.dynamicZonesAPI.dnsPolicy.superAdminEmails | quote }}
             {{- end }}
+            {{- if hasKey .Values.dynamicZonesAPI.dnsPolicy "maxZonesPerUser" }}
+            - name: DNS_MAX_ZONES_PER_USER
+              value: {{ .Values.dynamicZonesAPI.dnsPolicy.maxZonesPerUser | toString | quote }}
+            {{- end }}
+            {{- with .Values.dynamicZonesAPI.caaCheck }}
+            {{- if hasKey . "intervalMinutes" }}
+            - name: CAA_CHECK_INTERVAL_MINUTES
+              value: {{ .intervalMinutes | toString | quote }}
+            {{- end }}
+            - name: CAA_CHECK_DELETE_RECORDS
+              value: {{ .deleteRecords | default false | toString | quote }}
+            {{- end }}
 
             # Auth Configuration
             - name: OIDC_ISSUER_URL

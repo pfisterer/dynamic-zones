@@ -116,6 +116,7 @@ func RunApplication() {
 
 	// Start application
 	go RunPeriodicUpstreamDnsUpdateCheck(appData)
+	go RunPeriodicCaaCheck(&appData)
 
 	// If requested, insert initial data into the database
 	if appConfig.InitialDataScriptPath != "" {

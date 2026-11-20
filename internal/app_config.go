@@ -148,6 +148,8 @@ type ZoneDefaults struct {
 
 type DnsPolicyConfig struct {
 	SuperAdminEmails map[string]struct{} `json:"super_admin_emails"`
+	// MaxZonesPerUser is how many zones one person may create (DNS_MAX_ZONES_PER_USER, default 50; 0 = no limit). Counted are the zones the person created, subzones included; zones shared with them or joined are not. Super admins are exempt.
+	MaxZonesPerUser int `json:"max_zones_per_user" validate:"min=0"`
 	// Filename of a JavaScript script to initialize default policies and data
 }
 
@@ -159,6 +161,14 @@ type RoleProviderConfig struct {
 	Token string `json:"token"`
 }
 
+// CaaCheckConfig configures the periodic search for CAA records in user zones. The enforced CAA lives in the base zones, where users cannot write; but a CAA lookup takes the closest CAA record set, so a CAA record in a user's own zone would override it for every name below. The check reports each such record set as a zone event and can remove it.
+type CaaCheckConfig struct {
+	// IntervalMinutes between two runs (CAA_CHECK_INTERVAL_MINUTES, default 60); 0 switches the check off.
+	IntervalMinutes int `json:"interval_minutes" validate:"min=0"`
+	// DeleteRecords removes every CAA record set found in a user zone (CAA_CHECK_DELETE_RECORDS, default false); the finding is still reported as a zone event.
+	DeleteRecords bool `json:"delete_records"`
+}
+
 type AppConfig struct {
 	RoleProvider    RoleProviderConfig      `json:"role_provider"`
 	UpstreamDns     UpstreamDnsUpdateConfig `json:"upstream_dns_config"`
@@ -168,6 +178,7 @@ type AppConfig struct {
 	ZoneDefaults    ZoneDefaults            `json:"zone_defaults"`
 	DnsPolicyConfig DnsPolicyConfig         `json:"dns_policy_config"`
 	ZoneEvents      ZoneEventsConfig        `json:"zone_events_config"`
+	CaaCheck        CaaCheckConfig          `json:"caa_check_config"`
 	// Path to the initial data script file (JavaScript) to run on startup
 	InitialDataScriptPath string `json:"initial_data_script_path,omitempty"`
 	// Flag indicating if the application is running in development mode
@@ -252,6 +263,11 @@ func GetAppConfigFromEnvironment() (AppConfig, error) {
 		},
 		DnsPolicyConfig: DnsPolicyConfig{
 			SuperAdminEmails: envconf.StringSet("DNS_POLICY_SUPERADMIN_EMAILS", map[string]struct{}{}, strings.ToLower),
+			MaxZonesPerUser:  envconf.Int("DNS_MAX_ZONES_PER_USER", 50),
+		},
+		CaaCheck: CaaCheckConfig{
+			IntervalMinutes: envconf.Int("CAA_CHECK_INTERVAL_MINUTES", 60),
+			DeleteRecords:   envconf.Bool("CAA_CHECK_DELETE_RECORDS", false),
 		},
 		ZoneEvents: ZoneEventsConfig{
 			IngestSubject: envconf.String("ZONE_EVENTS_INGEST_SUBJECT", "alertmanager@platform"),

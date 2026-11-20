@@ -234,7 +234,7 @@ type mcpOwnerInput struct {
 }
 
 type mcpRuleInput struct {
-	ZonePattern      string `json:"zone_pattern" jsonschema:"the zone names this rule grants, e.g. %u.users.dhbw.site where %u is the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), or %l-stma.users.dhbw.site where %l is only its local part (s252690@student.dhbw-mannheim.de → s252690); with %l two people can be granted the same name, the first to create it owns it"`
+	ZonePattern      string `json:"zone_pattern" jsonschema:"the zone names this rule grants, e.g. %u.users.dhbw.site where %u is the user's e-mail address made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), or %l-stma.users.dhbw.site where %l is only its local part (s252690@student.dhbw-mannheim.de → s252690); when the name is already somebody else's zone (with %l two people can be granted the same name), the later person is offered the name with a short hash of their address appended"`
 	ZoneSoa          string `json:"zone_soa" jsonschema:"the base zone this nameserver is authoritative for, e.g. users.dhbw.site"`
 	TargetUserFilter string `json:"target_user_filter" jsonschema:"which users it applies to, comma-separated: e-mail addresses, patterns such as *@dhbw.de, and role-provider tokens user:<email>, group:<id> or group:<id>#<relation>"`
 	AllowSubdomains  bool   `json:"allow_subdomains,omitempty" jsonschema:"let owners create delegated subzones below the granted zone"`

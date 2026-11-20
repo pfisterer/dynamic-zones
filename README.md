@@ -21,6 +21,8 @@ It is an API and usable on its own: zones, records, keys and policy are all reac
 - **Upstream delegation.** For the managed zones to resolve globally, the parent zone must delegate to this nameserver. Either configure that once upstream, or let this service keep its own `A`/`AAAA` record current in the upstream zone via RFC 2136 itself.
 - **Shared zones and delegated policy administration.** A zone may have several owners, one of whom created it: only the creator (or a super-admin) may delete the zone, remove other owners or rotate everyone's keys, while an owner who joined or was added may leave and rotate their own key. Subzones are created below a zone the requester owns, never below somebody else's; a *delegation* lets named people manage policy rules for one zone and its subdomains without being a global administrator. Anyone can list the delegations that apply to them (zone suffix and description); only super-admins see every delegation and whom it targets.
 - **Zone events.** Problems observed with a zone — for example a client that keeps failing TSIG against it — are shown to the zone's owners, and to super-admins for all zones together with the owners to contact. The service stores and serves them; producing them is left to a monitoring system (see [Zone events](#zone-events)).
+- **CAA cannot be overridden from a user zone.** The enforced CAA sits in the base zones, but a CAA lookup takes the closest CAA record set, so a CAA record in a user's own zone would replace it for every name below. A periodic check finds such records and reports them as zone events, and can remove them (see [CAA check](#caa-check)).
+- **A limit of zones per person** (`DNS_MAX_ZONES_PER_USER`, default 50): creating one more is refused with 403. Counted are the zones a person created, subzones included, not those shared with them; super-admins are exempt.
 - **API tokens** for automation, optionally read-only (a read-only token is refused on anything but `GET`, and never sees a zone's TSIG key).
 
 ### Zones, rules and "orphaned" zones
@@ -40,7 +42,7 @@ A `zone_pattern` may contain two placeholders, both replaced per user and made D
 | `%u` | the whole e-mail address, `@` written as `-at-` | `dennis-pfisterer-at-dhbw-de` | `s252690-at-student-dhbw-mannheim-de` |
 | `%l` | only the local part, before the `@` | `dennis-pfisterer` | `s252690` |
 
-`%l` gives shorter names and works with any `target_user_filter`, groups included. Since it drops the domain, two people can be granted the same name (`max@a.de` and `max@b.de`, or `max.muster` and `max_muster`); there is no special rule for that: a zone belongs to whoever created it first, and anyone else granted the same name sees it as taken and cannot create it. Where that matters, a rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`).
+`%l` gives shorter names and works with any `target_user_filter`, groups included. Since it drops the domain, two people can be granted the same name (`max@a.de` and `max@b.de`); and making an address DNS-compliant maps different addresses to the same text under both placeholders (`max.muster` and `max_muster` → `max-muster`). A zone belongs to whoever created it first. Anyone else whose address leads to a name that somebody else's zone already has is offered a **variant** instead: the placeholder's text with a short hash of their full address appended (`max-muster-3f9a1c.users.dhbw.site`). The hash depends only on the address, so a person always gets the same variant; once they created it, it stays theirs (and covered by the rule) even after the zone that forced it is deleted. Existing zones are never renamed, and the name somebody else holds is refused to them (it is no longer offered). Where readable names per domain matter, a rule per domain can carry the domain's abbreviation in the pattern itself, e.g. `%l-stma.users.dhbw.site` for `*@student.dhbw-mannheim.de` (→ `s252690-stma.users.dhbw.site`) next to `%l.users.dhbw.site` for `*@dhbw.de` (→ `dennis-pfisterer.users.dhbw.site`).
 
 To introduce `%l` where `%u` rules exist, **keep the `%u` rules and add a `%l` rule per domain**. Replacing a `%u` rule would orphan every zone it granted, since a zone must still match a rule (see above); with both rules each person can have both names. To have new users get only the short name, mark the `%u` rule as deprecated (below).
 
@@ -108,6 +110,12 @@ The destructive tools (`delete_zone`, `delete_policy_rule`, `delete_delegation`)
 Two endpoints accept events: `POST /v1/zone-events/` in a generic shape, and `POST /v1/zone-events/alertmanager`, which takes an Alertmanager webhook as is and turns every alert carrying a `zone` label into an event (class = `alertname`). The service knows nothing about the rules that fire them.
 
 Both are part of the public `/v1` surface, so being logged in is not enough: only the single identity `ZONE_EVENTS_INGEST_SUBJECT` may post, anyone else gets `403`. Its token is not issued through the token API — it would then act as the admin who issued it — but provisioned from `ZONE_EVENTS_INGEST_TOKEN` at startup, so rotating it is changing the value and restarting, and emptying it revokes it. It must start with the API-token prefix `dynz_token_`, followed by at least 16 characters. The ingest token works on the two ingest routes only; anywhere else in `/v1` and on `/mcp` it is refused with `403`. What a leaked token can do is bounded further: events for zones this service does not manage or for classes not in `ZONE_EVENTS_ALLOWED_CLASSES` are skipped (and reported back in the response and in the log), text is truncated, a request carries at most 200 events, and ingest is capped at 120 requests a minute.
+
+### CAA check
+
+Every `CAA_CHECK_INTERVAL_MINUTES` (default 60, the first run a minute after startup; `0` switches it off) the service reads the record sets of all stored zones from PowerDNS. A zone with a CAA record set gets a zone event of source `caa-check`, class `UserZoneCAA`, listing the record sets; its owners see it like every other zone event, super-admins see all. The event is refreshed by each run that still finds the records and resolved by the first that does not (and expires after three intervals, at least an hour, if the check stops). A record set whose entries all repeat the enforced CAA (`ZONE_DEFAULTS_SOA_RECORDS`, e.g. in a zone that was an intermediate zone before somebody adopted it) restricts nothing further and is not reported.
+
+With `CAA_CHECK_DELETE_RECORDS=true` (default `false`) the check removes such record sets itself and reports that instead (class `UserZoneCAARemoved`), which stays visible until it expires after `ZONE_EVENTS_TTL_HOURS`. These events are written by the service itself, so `ZONE_EVENTS_ALLOWED_CLASSES` (which guards the ingest) does not need to list them.
 
 ## Running it locally
 
@@ -180,6 +188,7 @@ All configuration is environment variables. A `.env` file in the working directo
 | `OIDC_JWKS_URL` | — | The provider's key set (`…/protocol/openid-connect/certs` on Keycloak). Set it and startup asks the provider nothing, so an identity provider that is down cannot keep this service from starting; empty discovers the address from the issuer, which needs the provider to answer right then. A token that cannot be checked while the provider is away is answered 503, not 401 |
 | `DEV_AUTH_USER` | `root.admin@uni.example` | Who a request without a bearer is in development mode; ignored otherwise |
 | `DNS_POLICY_SUPERADMIN_EMAILS` | — | Comma-separated addresses that may manage all policy and act on behalf of others |
+| `DNS_MAX_ZONES_PER_USER` | `50` | Zones one person may create (subzones included, shared or joined zones not); `0` = no limit; super-admins are exempt |
 | `INITIAL_DATA_SCRIPT_PATH` | — | JavaScript file run at every start with a `policy` object (`getAll`, `createRule`, `updateRule`, `deleteRule`, …); the bundled `initial_data_provider.js` seeds the policy rules only when there are none |
 | `EXTERNAL_DNS_IMAGE_VERSION` | `v0.19.0` | external-dns image version used in the generated external-dns manifest (a request can override it with `image-version`, which must be a Docker image tag) |
 
@@ -224,6 +233,8 @@ Cache and outage behaviour: see [Who a rule applies to](#who-a-rule-applies-to-u
 | `ZONE_EVENTS_INGEST_TOKEN` | — | Its token, provisioned into the token store at startup; empty disables ingest and revokes a previously provisioned token |
 | `ZONE_EVENTS_ALLOWED_CLASSES` | `DnsClientMisconfig` | Comma-separated event classes accepted (case-sensitive; for Alertmanager, alert names) |
 | `ZONE_EVENTS_TTL_HOURS` | `24` | Lifetime of an event that is not re-reported; must comfortably exceed the producer's re-notification interval, or events flap out of view |
+| `CAA_CHECK_INTERVAL_MINUTES` | `60` | Interval of the [CAA check](#caa-check); `0` = off |
+| `CAA_CHECK_DELETE_RECORDS` | `false` | Whether the CAA check removes the CAA record sets it finds in user zones |
 
 ## Build & CI
 

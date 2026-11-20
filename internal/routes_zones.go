@@ -320,7 +320,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 // postZone creates a new DNS zone.
 //
 //	@Summary		Create a DNS zone
-//	@Description	Creates a new DNS zone with the given name.
+//	@Description	Creates a new DNS zone with the given name. Refused with 403 when the caller already created as many zones as DNS_MAX_ZONES_PER_USER allows (super admins are exempt). A personal name (pattern with %u or %l) that is already somebody else's zone is not offered; the caller is offered the name with a short hash of their address appended instead (see GET /v1/zones/).
 //	@Tags			zones
 //	@Accept			json
 //	@Produce		json
@@ -328,7 +328,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 //	@Param		zone	path	string	true	"The name of the zone to create."
 //	@Success		201	{object}	ZoneDataResponse	"The created DNS zone."
 //	@Failure		400	{object}	map[string]any	"Bad request."
-//	@Failure		403	{object}	map[string]any	"Forbidden."
+//	@Failure		403	{object}	map[string]any	"Forbidden (no rule grants the zone, or the limit of zones per person is reached)."
 //	@Failure		409	{object}	map[string]any	"Conflict."
 //	@Failure		500	{object}	map[string]any	"Internal server error."
 //	@ID				createZone

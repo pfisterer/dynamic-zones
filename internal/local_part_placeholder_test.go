@@ -74,8 +74,8 @@ func TestLocalPartPatternValidation(t *testing.T) {
 	}
 }
 
-// Two addresses whose local parts make the same label (max.muster and max_muster) are granted the same %l zone: the first to create it owns it, the other sees it as taken and cannot create it. A %u zone next to it is unaffected.
-func TestLocalPartZoneOfSomeoneElseIsRefused(t *testing.T) {
+// Two addresses whose local parts make the same label (max.muster and max_muster) are granted the same %l name: the first to create it owns it, the other is offered a variant with a short hash of their address instead (personal_zone_names.go) and can no longer ask for the first one's zone. A %u zone next to it is unaffected.
+func TestLocalPartZoneOfSomeoneElseIsReplacedByAVariant(t *testing.T) {
 	app := newTestApp(t)
 	for _, rule := range []PolicyRule{
 		{ZonePattern: "%u.users.dhbw.site", ZoneSoa: "users.dhbw.site", TargetUserFilter: "*@dhbw.de", AllowSubdomains: true},
@@ -88,11 +88,17 @@ func TestLocalPartZoneOfSomeoneElseIsRefused(t *testing.T) {
 	addZone(t, app, "max.muster@dhbw.de", "max-muster.users.dhbw.site")
 
 	other := &UserClaims{Email: "max_muster@dhbw.de"}
-	allowed, def, err := app.PolicyIsZoneAllowedForUser("max-muster.users.dhbw.site", other)
-	if err != nil || !allowed {
-		t.Fatalf("the rule grants the name to both: allowed %v, err %v", allowed, err)
+	variant := "max-muster" + personalNameSuffix(other.Email) + ".users.dhbw.site"
+	if allowed, _, err := app.PolicyIsZoneAllowedForUser("max-muster.users.dhbw.site", other); err != nil || allowed {
+		t.Fatalf("the first one's zone must no longer be granted to the second: allowed %v, err %v", allowed, err)
 	}
-	status, body, _ := app.ZoneCreate(context.Background(), other, *def)
+	allowed, def, err := app.PolicyIsZoneAllowedForUser(variant, other)
+	if err != nil || !allowed || def.Zone != variant {
+		t.Fatalf("the variant %s must be granted: allowed %v, def %+v, err %v", variant, allowed, def, err)
+	}
+
+	// Asking for the taken zone directly still ends in 409 and no ownership.
+	status, body, _ := app.ZoneCreate(context.Background(), other, ZoneResponse{Zone: "max-muster.users.dhbw.site", ZoneSOA: "users.dhbw.site"})
 	if status != http.StatusConflict {
 		t.Fatalf("creating a zone owned by someone else: status %d (%v), want 409", status, body)
 	}
@@ -108,10 +114,18 @@ func TestLocalPartZoneOfSomeoneElseIsRefused(t *testing.T) {
 	for _, z := range zones {
 		seen[z.Name] = z
 	}
-	if z, ok := seen["max-muster.users.dhbw.site"]; !ok || !z.AlreadyTakenBySomeoneElse || z.Exists || len(z.Owners) != 0 {
-		t.Errorf("%%l zone of someone else: %+v (listed %v), want taken, not owned, owners hidden", z, ok)
+	if z, ok := seen["max-muster.users.dhbw.site"]; ok {
+		t.Errorf("the first one's zone must not be listed for the second: %+v", z)
+	}
+	if z, ok := seen[variant]; !ok || z.Exists || z.AlreadyTakenBySomeoneElse || z.CanJoin {
+		t.Errorf("variant %s: %+v (listed %v), want free to create", variant, z, ok)
 	}
 	if z, ok := seen["max-muster-at-dhbw-de.users.dhbw.site"]; !ok || z.AlreadyTakenBySomeoneElse {
 		t.Errorf("%%u zone: %+v (listed %v), want free", z, ok)
+	}
+
+	// The first person keeps the plain name.
+	if allowed, _, err := app.PolicyIsZoneAllowedForUser("max-muster.users.dhbw.site", &UserClaims{Email: "max.muster@dhbw.de"}); err != nil || !allowed {
+		t.Errorf("the creator must keep the plain name: allowed %v, err %v", allowed, err)
 	}
 }

@@ -76,7 +76,16 @@
             "superAdminEmails": {
               "type": "array",
               "items": { "type": "string", "format": "email" }
-            }
+            },
+            "maxZonesPerUser": { "type": "integer", "minimum": 0, "description": "Zones one person may create; 0 = no limit; super admins are exempt." }
+          }
+        },
+        "caaCheck": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "intervalMinutes": { "type": "integer", "minimum": 0, "description": "Interval of the check for CAA records in user zones; 0 = off." },
+            "deleteRecords": { "type": "boolean", "description": "Whether the check removes the CAA records it finds." }
           }
         },
         "roleProvider": {

@@ -106,7 +106,23 @@ func (app *AppData) policyZonesOf(p principal, optimistic bool) ([]ZoneResponse,
 		app.Log.Errorf("Error retrieving policy rules: %v", err)
 		return nil, err
 	}
-	return rulesToUserZones(filterUserRules(rules, p, optimistic), p.email), nil
+	// The names are derived collision-free (personalZoneName); the first error the storage reports ends the lookup.
+	var lookupErr error
+	zones := rulesToUserZonesWith(filterUserRules(rules, p, optimistic), p.email, func(pattern, identity string) (string, bool) {
+		if lookupErr != nil {
+			return "", false
+		}
+		zone, ok, err := app.personalZoneName(pattern, identity)
+		if err != nil {
+			lookupErr = err
+		}
+		return zone, ok
+	})
+	if lookupErr != nil {
+		app.Log.Errorf("Error deriving personal zone names: %v", lookupErr)
+		return nil, lookupErr
+	}
+	return zones, nil
 }
 
 // PolicyIsZoneAllowedForUser decides whether the rules grant the zone to the user, for creating or joining it: strict, so a group entry counts only when the user's tokens are known.
@@ -717,6 +733,18 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 		return errorResult(http.StatusConflict, msg.T("Die Zone gibt es bereits.", "The zone already exists."), fmt.Errorf("app.ZoneCreate: %s is stored", name))
 	}
 
+	// The limit of zones per person (DnsPolicyConfig.MaxZonesPerUser); super admins are exempt.
+	if limit := app.Config.DnsPolicyConfig.MaxZonesPerUser; limit > 0 && !isSuperAdmin(app, user) {
+		count, err := app.Storage.CountCreatedZones(username)
+		if err != nil {
+			return errorResult(http.StatusInternalServerError, msg.T("Die Zahl der eigenen Zonen ließ sich nicht prüfen.", "The number of your zones could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
+		}
+		if count >= int64(limit) {
+			return errorResult(http.StatusForbidden, msg.F("Pro Person lassen sich höchstens %d Zonen anlegen; dieses Konto hat bereits %d. Für eine neue Zone zuerst eine nicht mehr benötigte löschen.", "At most %d zones can be created per person; this account already has %d. To create a new zone, first delete one that is no longer needed.", limit, count),
+				fmt.Errorf("app.ZoneCreate: %q has created %d zones, the limit is %d", username, count, limit))
+		}
+	}
+
 	// A deprecated rule keeps the zones it granted but offers no new ones (PolicyRule.Deprecated). Subzones (zone.Subzone) are not affected: they hang below a zone that exists.
 	if zone.Deprecated && !zone.Subzone {
 		return errorResult(http.StatusForbidden, app.deprecatedZoneText(user, name),
@@ -865,7 +893,7 @@ func reservedByPolicy(rules []PolicyRule, zone string, p principal) (PolicyRule,
 	return PolicyRule{}, false
 }
 
-// The placeholders a zone pattern may contain: %u is the whole e-mail address of the user made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), %l only its local part (dennis.pfisterer@dhbw.de → dennis-pfisterer). %l drops the domain, so two people can be granted the same name; zone ownership settles it (the first to create it owns it, the other sees it as taken).
+// The placeholders a zone pattern may contain: %u is the whole e-mail address of the user made DNS-compliant (dennis@dhbw.de → dennis-at-dhbw-de), %l only its local part (dennis.pfisterer@dhbw.de → dennis-pfisterer). %l drops the domain, and making an address DNS-compliant can map two addresses to one name (max.mueller and max_mueller), so two people can be granted the same name; the first to create it owns it, the other is offered a variant with a short hash of their address (personal_zone_names.go).
 const (
 	placeholderUser      = "%u"
 	placeholderLocalPart = "%l"
@@ -1149,10 +1177,10 @@ func filterUserRules(rules []PolicyRule, p principal, optimistic bool) []PolicyR
 	return filteredRules
 }
 
-// ruleToZoneResponse is the zone a rule grants the user, with %u and %l expanded; false when a placeholder would expand to nothing for this user.
-func ruleToZoneResponse(rule PolicyRule, identity string) (ZoneResponse, bool) {
+// ruleToZoneResponse is the zone a rule grants the user, with %u and %l expanded by expand (expandZonePattern, or the collision-free personalZoneName); false when a placeholder would expand to nothing for this user.
+func ruleToZoneResponse(rule PolicyRule, identity string, expand func(pattern, identity string) (string, bool)) (ZoneResponse, bool) {
 	// Normalised like every requested name, or a rule written as "Lab.Example.com" would grant a zone no request can ever match.
-	zone, ok := expandZonePattern(rule.ZonePattern, identity)
+	zone, ok := expand(rule.ZonePattern, identity)
 	if !ok {
 		return ZoneResponse{}, false
 	}
@@ -1165,11 +1193,17 @@ func ruleToZoneResponse(rule PolicyRule, identity string) (ZoneResponse, bool) {
 	}, true
 }
 
+// rulesToUserZones is the zones the rules grant the user, the placeholders expanded without looking at existing zones.
 func rulesToUserZones(rules []PolicyRule, identity string) []ZoneResponse {
+	return rulesToUserZonesWith(rules, identity, expandZonePattern)
+}
+
+// rulesToUserZonesWith is rulesToUserZones with the placeholders expanded by expand.
+func rulesToUserZonesWith(rules []PolicyRule, identity string, expand func(pattern, identity string) (string, bool)) []ZoneResponse {
 	zones := make([]ZoneResponse, 0, len(rules))
 
 	for _, rule := range rules {
-		zone, ok := ruleToZoneResponse(rule, identity)
+		zone, ok := ruleToZoneResponse(rule, identity, expand)
 		if !ok {
 			continue
 		}

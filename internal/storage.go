@@ -288,6 +288,15 @@ func (storage *Storage) ZoneCreator(zone string) (string, error) {
 	return rows[0].Username, nil
 }
 
+// CountCreatedZones is how many zones `user` created (subzones included; zones shared with them or joined are not theirs in this sense).
+func (storage *Storage) CountCreatedZones(user string) (int64, error) {
+	var count int64
+	if err := storage.db.Model(&Zone{}).Where("username = ? AND creator = ?", user, true).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("storage.CountCreatedZones: Failed to count the zones of '%s': %w", user, err)
+	}
+	return count, nil
+}
+
 // IsZoneCreator reports whether `user` created `zone`.
 func (storage *Storage) IsZoneCreator(user string, zone string) (bool, error) {
 	var count int64

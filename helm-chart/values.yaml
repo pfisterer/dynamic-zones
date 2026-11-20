@@ -75,6 +75,13 @@ dynamicZonesAPI:
     superAdminEmails:
       - your_mail@example.com
       - second_mail@example.com
+    # Zones one person may create (subzones included, shared or joined zones not); 0 = no limit; super admins are exempt.
+    maxZonesPerUser: 50
+
+  # Periodic check for CAA records in user zones, which would override the enforced CAA of the base zones: each finding becomes a zone event for the zone's owners and the super admins. intervalMinutes 0 = off; deleteRecords also removes the records found.
+  caaCheck:
+    intervalMinutes: 60
+    deleteRecords: false
 
   # Role provider (role-provider-service): lets user filters of rules and
   # delegations name groups (group:<id>, group:<id>#<relation>). Empty url =
