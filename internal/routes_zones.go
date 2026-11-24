@@ -259,6 +259,8 @@ type ZoneStatus struct {
 	Groups []string `json:"groups,omitempty"`
 	// Via: the group through which the caller holds the zone; empty when it is theirs in their own right.
 	Via string `json:"via,omitempty"`
+	// OwnersVia: which owners hold the zone through which group (the rest own it in their own right). Only shown to an owner.
+	OwnersVia map[string]string `json:"owners_via,omitempty"`
 	// SharingAllowed: whether this zone may be shared (governing rule opt-in).
 	SharingAllowed bool `json:"sharing_allowed"`
 	// Deprecated: the zone comes from a deprecated rule — it keeps working, but the rule offers no new zones (a newer rule usually grants a shorter name). Only listed when the user owns the zone.

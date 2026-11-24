@@ -1344,6 +1344,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 			Groups:                    groups,
 			Via:                       via[user.Identity()],
+			OwnersVia:                 via,
 			Name:                      zone.Zone,
 			Exists:                    existsInStorage && isOwner,
 			CanJoin:                   canJoin,
@@ -1427,6 +1428,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 				Groups:          groups,
 				Via:             via[user.Identity()],
+				OwnersVia:       via,
 				Name:            cz.Zone,
 				Exists:          true,
 				AllowSubdomains: def != nil && def.AllowSubdomains,
@@ -1441,6 +1443,7 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
 			Groups:          groups,
 			Via:             via[user.Identity()],
+			OwnersVia:       via,
 			Name:            cz.Zone,
 			Exists:          true,
 			AllowSubdomains: true,                // subzones inherit the parent's allow_subdomains
