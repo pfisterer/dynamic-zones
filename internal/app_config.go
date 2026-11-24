@@ -148,7 +148,7 @@ type ZoneDefaults struct {
 
 type DnsPolicyConfig struct {
 	SuperAdminEmails map[string]struct{} `json:"super_admin_emails"`
-	// MaxZonesPerUser is how many zones one person may create (DNS_MAX_ZONES_PER_USER, default 50; 0 = no limit). Counted are the zones the person created, subzones included; zones shared with them or joined are not. Super admins are exempt.
+	// MaxZonesPerUser is how many zones one person may create (DNS_MAX_ZONES_PER_USER, default 50; 0 = no limit). Counted are the zones the person created and those they hold through a group share, subzones included; zones shared with them by address or joined are not. Super admins are exempt.
 	MaxZonesPerUser int `json:"max_zones_per_user" validate:"min=0"`
 	// Filename of a JavaScript script to initialize default policies and data
 }

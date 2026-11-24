@@ -48,6 +48,8 @@ type Zone struct {
 	Username  string    `gorm:"index" json:"user"`
 	// Creator marks the owner who created the zone, as opposed to one who joined it or was added. Exactly one row per zone carries it. Sharing hands out co-ownership, not the zone: only the creator (or a super admin) may delete the zone, remove other owners or rotate their keys — a co-owner may leave and rotate their own key. Rows from before this column get the earliest owner as creator, see backfillZoneCreators.
 	Creator bool `gorm:"not null;default:false" json:"-"`
+	// Via names the group share (group:<id> or group:<id>#<relation>, see ZoneGroupShare) this row exists through; empty for an owner in their own right (creator, joined, added by address). A row with Via is kept in step with the person's groups (syncGroupAccess): it appears when they are in the group and goes when they leave it or the share is removed. Added via GORM AutoMigrate (new column, default '' = every existing row is an owner in their own right).
+	Via string `gorm:"type:varchar(255);not null;default:''" json:"-"`
 }
 
 // PolicyRule represents a DNS policy rule.
@@ -144,7 +146,7 @@ func NewStorage(dbType string, connectionString string, log *zap.SugaredLogger) 
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetMaxIdleConns(5)
 
-	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{}, &ZoneEvent{})
+	err = db.AutoMigrate(&Zone{}, &PolicyRule{}, &DelegationPolicy{}, &ZoneEvent{}, &ZoneGroupShare{})
 	if err != nil {
 		return nil, fmt.Errorf("storage.NewStorage: Failed to auto-migrate database: %w", err)
 	}

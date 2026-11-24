@@ -117,6 +117,9 @@ func RunApplication() {
 	// Start application
 	go RunPeriodicUpstreamDnsUpdateCheck(appData)
 	go RunPeriodicCaaCheck(&appData)
+	if appData.Roles != nil {
+		go RunPeriodicGroupShareSync(&appData)
+	}
 
 	// If requested, insert initial data into the database
 	if appConfig.InitialDataScriptPath != "" {
@@ -214,6 +217,8 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	})
 	apiV1Group.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser(), app.Config.ZoneEvents.IngestSubject))
 	apiV1Group.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
+	// Owners through a group get (and lose) their rows before the request looks at them (zone_group_shares.go).
+	apiV1Group.Use(groupAccessMiddleware(app))
 
 	// The read-only rule for REST, mounted here rather than inside the auth
 	// middleware: "anything but GET is a write" is true of these routes and of
@@ -235,6 +240,7 @@ func setupGinWebserver(app *AppData) (router *gin.Engine) {
 	mcpGroup.Use(ginweb.RejectCrossOriginWrites(ginweb.CrossOriginOptions{DevMode: app.Config.DevMode, Log: app.Log}))
 	mcpGroup.Use(CombinedAuthMiddleware(oidcAuthVerifier, app.Storage, app.Log, app.Config.devUser(), app.Config.ZoneEvents.IngestSubject))
 	mcpGroup.Use(ActAsMiddleware(app.Config.DnsPolicyConfig.SuperAdminEmails, app.Log))
+	mcpGroup.Use(groupAccessMiddleware(app))
 	RegisterMCPRoutes(mcpGroup, app)
 
 	return router

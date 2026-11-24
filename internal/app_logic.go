@@ -347,10 +347,17 @@ func (app *AppData) ZoneGet(ctx context.Context, user *UserClaims, zone, externa
 	// Return zone data
 	app.Log.Infof("app.getZone: returning zone %s", zone)
 
+	groups, via, err := app.zoneSharing(zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, msg.T("Die Freigaben der Zone ließen sich nicht laden.", "The shares of the zone could not be loaded."), fmt.Errorf("app.getZone: %w", err))
+	}
+
 	body := gin.H{
 		"zoneData":        pdnsZone,
 		"owners":          owners,
 		"creator":         creator,
+		"groups":          groups,
+		"via":             via,
 		"sharing_allowed": sharingAllowed,
 	}
 	if !readOnly {
@@ -381,6 +388,10 @@ func (app *AppData) ZoneDelete(ctx context.Context, username, zone string) (int,
 	// with the pdns zone above), so drop every owner row, not just the caller's.
 	if err := app.Storage.DeleteAllZoneOwners(zone); err != nil {
 		return errorResult(http.StatusInternalServerError, msg.T("Die Zone ließ sich nicht aus der Datenbank löschen.", "The zone could not be deleted from the database."),
+			fmt.Errorf("app.ZoneDelete: %w", err))
+	}
+	if err := app.Storage.DeleteGroupSharesOfZone(zone); err != nil {
+		return errorResult(http.StatusInternalServerError, msg.T("Die Freigaben der Zone ließen sich nicht löschen.", "The shares of the zone could not be deleted."),
 			fmt.Errorf("app.ZoneDelete: %w", err))
 	}
 
@@ -440,7 +451,7 @@ func (app *AppData) ZoneJoin(ctx context.Context, user *UserClaims, zone string)
 	return app.ownersResult(zone)
 }
 
-// ownersResult is the answer of every call that changes or lists a zone's owners: who owns it, and which of them created it (the one who may delete it and remove the others).
+// ownersResult is the answer of every call that changes or lists a zone's owners: who owns it, which of them created it (the one who may delete it and remove the others), the groups it is shared with, and which owners hold it through which group (via).
 func (app *AppData) ownersResult(zone string) (int, any, error) {
 	owners, err := app.Storage.ListZoneOwners(zone)
 	if err != nil {
@@ -450,16 +461,25 @@ func (app *AppData) ownersResult(zone string) (int, any, error) {
 	if err != nil {
 		return errorResult(http.StatusInternalServerError, msg.T("Wer die Zone angelegt hat, ließ sich nicht ermitteln.", "Who created the zone could not be determined."), err)
 	}
-	return http.StatusOK, gin.H{"owners": owners, "creator": creator}, nil
+	groups, via, err := app.zoneSharing(zone)
+	if err != nil {
+		return errorResult(http.StatusInternalServerError, msg.T("Die Freigaben der Zone ließen sich nicht laden.", "The shares of the zone could not be loaded."), err)
+	}
+	return http.StatusOK, gin.H{"owners": owners, "creator": creator, "groups": groups, "via": via}, nil
 }
 
 // zoneAuthority is what the caller may do with a zone: whether they own it, whether they created it, and whether they are a super admin (who may do what a creator may, on any zone).
 type zoneAuthority struct {
 	owner, creator, superAdmin bool
+	// viaGroup: the caller owns the zone through a group share (Zone.Via).
+	viaGroup bool
 }
 
-// manages reports whether the caller may act on the zone as a whole — delete it, remove other owners, rotate everybody's keys.
+// manages reports whether the caller may act on the zone as a whole — remove other owners, rotate everybody's keys.
 func (a zoneAuthority) manages() bool { return a.creator || a.superAdmin }
+
+// deletes reports whether the caller may delete the zone: whoever manages it, and since 24.11.2026 also whoever holds it through a group (a group share hands the zone to the group, not only co-ownership).
+func (a zoneAuthority) deletes() bool { return a.manages() || a.viaGroup }
 
 func (app *AppData) zoneAuthorityOf(user *UserClaims, zone string) (zoneAuthority, error) {
 	owner, err := app.Storage.IsZoneOwner(user.Identity(), zone)
@@ -470,7 +490,15 @@ func (app *AppData) zoneAuthorityOf(user *UserClaims, zone string) (zoneAuthorit
 	if err != nil {
 		return zoneAuthority{}, err
 	}
-	return zoneAuthority{owner: owner, creator: creator, superAdmin: isSuperAdmin(app, user)}, nil
+	viaGroup := false
+	if owner {
+		row, err := app.Storage.GetZone(user.Identity(), zone)
+		if err != nil {
+			return zoneAuthority{}, err
+		}
+		viaGroup = row != nil && row.Via != ""
+	}
+	return zoneAuthority{owner: owner, creator: creator, superAdmin: isSuperAdmin(app, user), viaGroup: viaGroup}, nil
 }
 
 // zoneGoverningDef returns the policy ZoneResponse (sharing / subdomain flags)
@@ -530,7 +558,12 @@ func (app *AppData) ZoneAddOwner(ctx context.Context, caller *UserClaims, zone, 
 
 	if already, err := app.Storage.IsZoneOwner(newOwner, zone); err != nil {
 		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
-	} else if !already {
+	} else if already {
+		// Added by address while holding the zone through a group: from now on in their own right.
+		if err := app.Storage.ClearVia(newOwner, zone); err != nil {
+			return errorResult(http.StatusInternalServerError, msg.T("Der Eigentümer ließ sich nicht hinzufügen.", "The owner could not be added."), err)
+		}
+	} else {
 		if _, err := app.Storage.CreateZone(newOwner, zone, false); err != nil {
 			return errorResult(http.StatusInternalServerError, msg.T("Der Eigentümer ließ sich nicht hinzufügen.", "The owner could not be added."), err)
 		}
@@ -576,6 +609,13 @@ func (app *AppData) ZoneRemoveOwner(ctx context.Context, caller *UserClaims, zon
 		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
 	} else if !targetIsOwner {
 		return errorResult(http.StatusNotFound, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."), nil)
+	}
+
+	// An owner through a group comes back with the next sync; the share is what to remove.
+	if row, err := app.Storage.GetZone(owner, zone); err != nil {
+		return errorResult(http.StatusInternalServerError, msg.T("Die Eigentümer der Zone ließen sich nicht prüfen.", "The owners of the zone could not be checked."), err)
+	} else if row != nil && row.Via != "" {
+		return errorResult(http.StatusConflict, msg.F("%s verwaltet die Zone über die Gruppe %s; dafür die Freigabe für die Gruppe entfernen.", "%s manages the zone through the group %s; remove the share with the group instead.", owner, row.Via), nil)
 	}
 
 	// The creator leaving would hand the zone to whoever joined first, without either of them deciding that. A super admin may still remove them (the next owner then becomes the creator, see Storage.DeleteZone).
@@ -651,16 +691,35 @@ type OrphanedZone struct {
 }
 
 // zoneOrphanCheck decides whether `zone` is orphaned and names the owner it was judged by. A zone belongs to its creator: co-owners got it by sharing or joining under the creator's rule, so whether a rule covers them themselves does not matter — a shared zone is orphaned only when no rule covers its creator anymore. A zone without a creator row (should not happen, see backfillZoneCreators) is judged by its first owner row. An owner whose group tokens are unknown (role provider unreachable, nothing cached) counts as covered.
-func (app *AppData) zoneOrphanCheck(zone string, owners []string) (bool, string, error) {
+//
+// A zone is orphaned, too, when only owners through a group remain and none of them is still in their group (the group was deleted or emptied; syncGroupAccess keeps the last row instead of leaving a zone nobody can manage).
+func (app *AppData) zoneOrphanCheck(zone string, rows []Zone) (bool, string, error) {
 	creator, err := app.Storage.ZoneCreator(zone)
 	if err != nil {
 		return false, "", err
 	}
 	if creator == "" {
-		if len(owners) == 0 {
+		if len(rows) == 0 {
 			return false, "", nil
 		}
-		creator = owners[0]
+		creator = rows[0].Username
+	}
+	if len(rows) > 0 {
+		stale := true
+		for _, r := range rows {
+			if r.Via == "" {
+				stale = false
+				break
+			}
+			p := app.principalOf(r.Username)
+			if _, ok := p.tokens[r.Via]; ok || !p.known {
+				stale = false
+				break
+			}
+		}
+		if stale {
+			return true, creator, nil
+		}
 	}
 	covered, _, err := app.policyZoneCovered(zone, creator)
 	if err != nil {
@@ -669,23 +728,23 @@ func (app *AppData) zoneOrphanCheck(zone string, owners []string) (bool, string,
 	return !covered, creator, nil
 }
 
-// OrphanedZones returns every stored zone that no current policy would grant to its creator anymore, once per zone.
+// OrphanedZones returns every stored zone that no current policy would grant to its creator anymore, or whose only owners lost their group, once per zone.
 func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
 	rows, err := app.Storage.ListAllZones()
 	if err != nil {
 		return nil, err
 	}
-	owners := map[string][]string{}
+	byZone := map[string][]Zone{}
 	order := []string{}
 	for _, z := range rows {
-		if _, seen := owners[z.Zone]; !seen {
+		if _, seen := byZone[z.Zone]; !seen {
 			order = append(order, z.Zone)
 		}
-		owners[z.Zone] = append(owners[z.Zone], z.Username)
+		byZone[z.Zone] = append(byZone[z.Zone], z)
 	}
 	orphaned := make([]OrphanedZone, 0)
 	for _, zone := range order {
-		isOrphan, creator, err := app.zoneOrphanCheck(zone, owners[zone])
+		isOrphan, creator, err := app.zoneOrphanCheck(zone, byZone[zone])
 		if err != nil {
 			return nil, err
 		}
@@ -698,11 +757,11 @@ func (app *AppData) OrphanedZones() ([]OrphanedZone, error) {
 
 // ZoneIsOrphaned reports whether `zone` is orphaned in the sense of OrphanedZones, and its creator.
 func (app *AppData) ZoneIsOrphaned(zone string) (bool, string, error) {
-	owners, err := app.Storage.ListZoneOwners(zone)
+	rows, err := app.Storage.ListZoneOwnerRows(zone)
 	if err != nil {
 		return false, "", err
 	}
-	return app.zoneOrphanCheck(zone, owners)
+	return app.zoneOrphanCheck(zone, rows)
 }
 
 // maxIntermediateZones caps how many zones that do not exist yet one subzone request may create between the zone it delegates from and the zone it asks for. Each of them is an ownerless zone in PowerDNS that nobody can see, manage or delete through this API, so "a.b.c.d.e.mine.example.com" must not mint four of them as a side effect. Zones granted by a rule of their own are not capped: their depth is what the rule's author wrote.
@@ -739,6 +798,12 @@ func (app *AppData) ZoneCreate(ctx context.Context, user *UserClaims, zone ZoneR
 		if err != nil {
 			return errorResult(http.StatusInternalServerError, msg.T("Die Zahl der eigenen Zonen ließ sich nicht prüfen.", "The number of your zones could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
 		}
+		// Zones shared with a group count for every member (decided 24.11.2026).
+		groupZones, err := app.Storage.CountGroupZones(username)
+		if err != nil {
+			return errorResult(http.StatusInternalServerError, msg.T("Die Zahl der eigenen Zonen ließ sich nicht prüfen.", "The number of your zones could not be checked."), fmt.Errorf("app.ZoneCreate: %w", err))
+		}
+		count += groupZones
 		if count >= int64(limit) {
 			return errorResult(http.StatusForbidden, msg.F("Pro Person lassen sich höchstens %d Zonen anlegen; dieses Konto hat bereits %d. Für eine neue Zone zuerst eine nicht mehr benötigte löschen.", "At most %d zones can be created per person; this account already has %d. To create a new zone, first delete one that is no longer needed.", limit, count),
 				fmt.Errorf("app.ZoneCreate: %q has created %d zones, the limit is %d", username, count, limit))
@@ -1275,7 +1340,10 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 		}
 		canJoin := existsInStorage && !isOwner && zone.SharingAllowed
 
+		groups, via := app.listSharing(zone.Zone, existsInStorage && isOwner)
 		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+			Groups:                    groups,
+			Via:                       via[user.Identity()],
 			Name:                      zone.Zone,
 			Exists:                    existsInStorage && isOwner,
 			CanJoin:                   canJoin,
@@ -1355,7 +1423,10 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			if def != nil {
 				soa = def.ZoneSOA
 			}
+			groups, via := app.listSharing(cz.Zone, true)
 			zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+				Groups:          groups,
+				Via:             via[user.Identity()],
 				Name:            cz.Zone,
 				Exists:          true,
 				AllowSubdomains: def != nil && def.AllowSubdomains,
@@ -1366,7 +1437,10 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 			})
 			continue
 		}
+		groups, via := app.listSharing(cz.Zone, true)
 		zonesWithStatus = append(zonesWithStatus, ZoneStatus{
+			Groups:          groups,
+			Via:             via[user.Identity()],
 			Name:            cz.Zone,
 			Exists:          true,
 			AllowSubdomains: true,                // subzones inherit the parent's allow_subdomains
@@ -1378,6 +1452,19 @@ func (app *AppData) ZoneList(user *UserClaims) ([]ZoneStatus, error) {
 	}
 
 	return zonesWithStatus, nil
+}
+
+// listSharing is zoneSharing for the zone list: only for an owner (like the owner list), and a failure leaves the fields empty rather than failing the list.
+func (app *AppData) listSharing(zone string, owner bool) ([]string, map[string]string) {
+	if !owner {
+		return nil, nil
+	}
+	groups, via, err := app.zoneSharing(zone)
+	if err != nil {
+		app.Log.Warnf("app.ZoneList: shares of %s: %v", zone, err)
+		return nil, nil
+	}
+	return groups, via
 }
 
 // ZoneCreateAuthorized decides whether a user may create a zone and creates it.
@@ -1436,8 +1523,8 @@ func (app *AppData) ZoneCreateAuthorized(ctx context.Context, user *UserClaims, 
 	return nil, nil
 }
 
-// ZoneDeleteAuthorized deletes a zone for everyone, if the caller created it
-// (or is a super admin).
+// ZoneDeleteAuthorized deletes a zone for everyone, if the caller created it,
+// holds it through a group share, or is a super admin.
 //
 // Ownership alone is not enough: a co-owner shared in — by joining or by being
 // added — manages the zone's records, but the zone is not theirs to destroy for
@@ -1451,8 +1538,8 @@ func (app *AppData) ZoneDeleteAuthorized(ctx context.Context, user *UserClaims, 
 		return statusErr(http.StatusForbidden, msg.T("Kein Eigentümer dieser Zone.", "Not an owner of this zone."),
 			fmt.Errorf("app.ZoneDeleteAuthorized: %q not owned by %q", zone, user.Identity()))
 	}
-	if !authority.manages() {
-		return statusErr(http.StatusForbidden, msg.T("Löschen kann die Zone nur, wer sie angelegt hat; das eigene Konto lässt sich aber als Eigentümer entfernen.", "Only whoever created the zone can delete it; your own account can be removed as an owner, though."),
+	if !authority.deletes() {
+		return statusErr(http.StatusForbidden, msg.T("Löschen kann die Zone nur, wer sie angelegt hat oder sie über eine Gruppe verwaltet; das eigene Konto lässt sich aber als Eigentümer entfernen.", "Only whoever created the zone or manages it through a group can delete it; your own account can be removed as an owner, though."),
 			fmt.Errorf("app.ZoneDeleteAuthorized: %q is not the creator of %q", user.Identity(), zone))
 	}
 	if !authority.owner {

@@ -163,18 +163,30 @@ func (app *AppData) inheritOwnersFromParent(ctx context.Context, zone, creator s
 		return nil
 	}
 
-	owners, err := app.Storage.ListZoneOwners(parent)
+	rows, err := app.Storage.ListZoneOwnerRows(parent)
 	if err != nil {
 		return fmt.Errorf("app.inheritOwnersFromParent: %w", err)
 	}
-	for _, owner := range owners {
-		if owner == creator {
+	for _, row := range rows {
+		if row.Username == creator {
 			continue
 		}
-		if err := app.grantOwner(ctx, owner, zone); err != nil {
+		// An owner through a group holds the subzone through the same group, so leaving the group takes both.
+		if row.Via != "" {
+			if already, err := app.Storage.IsZoneOwner(row.Username, zone); err != nil {
+				return fmt.Errorf("app.inheritOwnersFromParent: %w", err)
+			} else if !already {
+				if _, err := app.Storage.CreateZoneVia(row.Username, zone, row.Via); err != nil {
+					return fmt.Errorf("app.inheritOwnersFromParent: %w", err)
+				}
+				if err := app.addOwnerKey(ctx, zone, row.Username); err != nil {
+					return fmt.Errorf("app.inheritOwnersFromParent: %w", err)
+				}
+			}
+		} else if err := app.grantOwner(ctx, row.Username, zone); err != nil {
 			return fmt.Errorf("app.inheritOwnersFromParent: %w", err)
 		}
-		app.Log.Infof("app.inheritOwnersFromParent: %s inherits '%s' from parent '%s'", owner, zone, parent)
+		app.Log.Infof("app.inheritOwnersFromParent: %s inherits '%s' from parent '%s'", row.Username, zone, parent)
 	}
 	return nil
 }

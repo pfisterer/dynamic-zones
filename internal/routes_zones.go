@@ -27,12 +27,75 @@ func CreateApiV1Zones(v1 *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 	v1.DELETE("/zones/:zone/owners/:owner", removeZoneOwner(app))
 	v1.POST("/zones/:zone/keys/rotate", rotateZoneKeys(app))
 
+	// Sharing with a group of the role provider: its members own the zone for as long as they are in the group.
+	v1.POST("/zones/:zone/groups", addZoneGroupShare(app))
+	v1.DELETE("/zones/:zone/groups/:group", removeZoneGroupShare(app))
+
 	return v1
 }
 
 // AddOwnerRequest is the request body for adding a zone owner.
 type AddOwnerRequest struct {
 	Email string `json:"email" binding:"required"`
+}
+
+// AddGroupShareRequest is the request body for sharing a zone with a group.
+type AddGroupShareRequest struct {
+	// Group is the role provider's token of the group, group:<id> or group:<id>#<relation>.
+	Group string `json:"group" binding:"required"`
+}
+
+// addZoneGroupShare shares a zone with a group.
+//
+//	@Summary		Share a zone with a group
+//	@Description	Shares the zone with a group of the role provider (group:<id> or group:<id>#<relation>): every member owns the zone and the zones delegated below it (own row and own TSIG key) for as long as they are in the group, may share it further and may delete it. Members get their access with their next request (or within 15 minutes) and lose it the same way when they leave the group. The zone counts toward each member's limit of zones. Needs an owner of the zone (or a super admin) and a rule that allows sharing.
+//	@Tags			zones
+//	@Produce		json
+//	@Security		Bearer
+//	@Param			zone	path		string					true	"The zone name."
+//	@Param			body	body		AddGroupShareRequest	true	"The group."
+//	@Success		200		{object}	map[string]any			"The updated owners and groups."
+//	@ID				addZoneGroupShare
+//	@Router			/v1/zones/{zone}/groups [post]
+func addZoneGroupShare(app *AppData) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := c.MustGet(UserDataKey).(*UserClaims)
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
+		var req AddGroupShareRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			abortErr(c, http.StatusBadRequest, msg.T("Ungültige Anfrage.", "Invalid request."))
+			return
+		}
+		status, resp, _ := app.ZoneAddGroupShare(c.Request.Context(), user, zone, req.Group)
+		writeResult(c, status, resp)
+	}
+}
+
+// removeZoneGroupShare ends the share of a zone with a group.
+//
+//	@Summary		Stop sharing a zone with a group
+//	@Description	Removes the share; the group's members lose the zone (and the zones below it) unless they own it in their own right or through another group. Any owner of the zone (or a super admin) may do it.
+//	@Tags			zones
+//	@Produce		json
+//	@Security		Bearer
+//	@Param			zone	path		string			true	"The zone name."
+//	@Param			group	path		string			true	"The group token, URL-encoded (group:<id> or group:<id>%23<relation>)."
+//	@Success		200		{object}	map[string]any	"The updated owners and groups."
+//	@ID				removeZoneGroupShare
+//	@Router			/v1/zones/{zone}/groups/{group} [delete]
+func removeZoneGroupShare(app *AppData) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := c.MustGet(UserDataKey).(*UserClaims)
+		zone, ok := zoneParam(c, "zone")
+		if !ok {
+			return
+		}
+		status, resp, _ := app.ZoneRemoveGroupShare(c.Request.Context(), user, zone, c.Param("group"))
+		writeResult(c, status, resp)
+	}
 }
 
 // joinZone lets a policy-entitled user become a co-owner of a shareable zone.
@@ -123,7 +186,7 @@ func addZoneOwner(app *AppData) gin.HandlerFunc {
 // removeZoneOwner removes a co-owner from a zone.
 //
 //	@Summary		Remove a zone owner
-//	@Description	Removes an owner (row + their TSIG key). Removing someone else is for the zone's creator (or a super admin); any other owner may only remove themself, i.e. leave. The creator cannot leave, and the last owner cannot be removed.
+//	@Description	Removes an owner (row + their TSIG key). Removing someone else is for the zone's creator (or a super admin); any other owner may only remove themself, i.e. leave. An owner through a group share cannot be removed this way (409; remove the group share). The creator cannot leave, and the last owner cannot be removed.
 //	@Tags			zones
 //	@Produce		json
 //	@Security		Bearer
@@ -192,6 +255,10 @@ type ZoneStatus struct {
 	Owners []string `json:"owners,omitempty"`
 	// Creator: which of the owners created the zone — the only one (besides a super admin) who may delete it, remove other owners or rotate their keys. Like Owners, only shown to an owner.
 	Creator string `json:"creator,omitempty"`
+	// Groups: the groups (group:<id> or group:<id>#<relation>) the zone is shared with. Only shown to an owner.
+	Groups []string `json:"groups,omitempty"`
+	// Via: the group through which the caller holds the zone; empty when it is theirs in their own right.
+	Via string `json:"via,omitempty"`
 	// SharingAllowed: whether this zone may be shared (governing rule opt-in).
 	SharingAllowed bool `json:"sharing_allowed"`
 	// Deprecated: the zone comes from a deprecated rule — it keeps working, but the rule offers no new zones (a newer rule usually grants a shorter name). Only listed when the user owns the zone.
@@ -320,7 +387,7 @@ func getZone(app *AppData) gin.HandlerFunc {
 // postZone creates a new DNS zone.
 //
 //	@Summary		Create a DNS zone
-//	@Description	Creates a new DNS zone with the given name. Refused with 403 when the caller already created as many zones as DNS_MAX_ZONES_PER_USER allows (super admins are exempt). A personal name (pattern with %u or %l) that is already somebody else's zone is not offered; the caller is offered the name with a short hash of their address appended instead (see GET /v1/zones/).
+//	@Description	Creates a new DNS zone with the given name. Refused with 403 when the caller already created (or holds through a group share) as many zones as DNS_MAX_ZONES_PER_USER allows (super admins are exempt). A personal name (pattern with %u or %l) that is already somebody else's zone is not offered; the caller is offered the name with a short hash of their address appended instead (see GET /v1/zones/).
 //	@Tags			zones
 //	@Accept			json
 //	@Produce		json
@@ -361,7 +428,7 @@ func postZone(app *AppData) gin.HandlerFunc {
 // deleteZone deletes a DNS zone.
 //
 //	@Summary		Delete a DNS zone
-//	@Description	Deletes a DNS zone by its name, for all owners. Only the zone's creator (or a super admin) may; a co-owner leaves via DELETE /v1/zones/{zone}/owners/{owner} with their own address.
+//	@Description	Deletes a DNS zone by its name, for all owners. Only the zone's creator, an owner through a group share (or a super admin) may; a co-owner added by address or joined leaves via DELETE /v1/zones/{zone}/owners/{owner} with their own address.
 //	@Tags			zones
 //	@Security		Bearer
 //	@Param		zone	path	string	true	"The name of the zone to delete."
