@@ -141,9 +141,9 @@ func RunApplication() {
 		log.Infof("Successfully executed initial data script: %s", appConfig.InitialDataScriptPath)
 	}
 
-	// Create and run the web server server forever
+	// Run the web server until SIGTERM, then drain it (ginweb.Serve): an http.Server with timeouts, and a rollout of the one replica answers what is in flight instead of refusing connections (25.11.2026).
 	router := setupGinWebserver(&appData)
-	err = router.Run(appConfig.WebServer.GinBindString)
+	err = ginweb.Serve(ginweb.NewServer(appConfig.WebServer.GinBindString, router))
 	if err != nil {
 		log.Fatalf("app.RunApp: Failed to start server: %v", err)
 	}
