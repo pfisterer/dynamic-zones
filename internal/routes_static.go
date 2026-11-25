@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/pfisterer/dynamic-zones/internal/generated_docs"
@@ -9,9 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// appVersion is the embedded VERSION file, which ends in a newline — trim it
-// once here so no consumer has to (it used to reach the UI as "0.7.2\n").
-var appVersion = strings.TrimSpace(generated_docs.Version)
+// appVersion is the version this process reports (index page, config.json): APP_VERSION, which the Helm chart sets from the chart's appVersion — the tag the image is deployed under —, else the embedded VERSION file. The embedded file alone is not enough: a stable release retags the image of the pre-release before it without rebuilding, so the binary carries the pre-release's number.
+var appVersion = runningVersion(os.Getenv("APP_VERSION"), generated_docs.Version)
+
+// runningVersion is env when set, else the embedded version; both trimmed (the VERSION file ends in a newline).
+func runningVersion(env, embedded string) string {
+	if v := strings.TrimSpace(env); v != "" {
+		return v
+	}
+	return strings.TrimSpace(embedded)
+}
 
 func CreateHomeRoutes(group *gin.RouterGroup, app *AppData) *gin.RouterGroup {
 
